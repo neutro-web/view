@@ -1,12 +1,13 @@
 name: Release Please
 
 on:
-  # Manual trigger only — switch to the push trigger below when ready for automated releases
+  # Manual trigger only — uncomment the push trigger below when ready for automated releases
   workflow_dispatch:
 
-  # Uncomment when ready to automate release PRs on every merge to main:
+  # Uncomment when ready: merging a PR into `release` triggers the release PR + GitHub release.
+  # No code changes land on `release` directly — only PRs from `main`.
   # push:
-  #   branches: [main]
+  #   branches: [release]
 
 jobs:
   release-please:
@@ -21,3 +22,4 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
+          target-branch: release
