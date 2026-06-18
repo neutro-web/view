@@ -1,5 +1,5 @@
 # nv — Decision Log
- 
+
 > **How to read this file.** Two surfaces:
 > 1. **Current State** (below) — the *resolved* picture: what is locked, open, or
 >    superseded **right now**. This is the only section that gets *edited*. Read
@@ -24,13 +24,13 @@
 > for reactive-core *semantics*. This log records decisions, including ones that
 > change the contract (note the contract version bump in the entry). If this log
 > and the contract conflict, the conflict must be flagged, not silently resolved.
- 
+
 ---
- 
+
 ## Current State
- 
-_Last updated: 2026-06-18 (Contract v0.4 — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; **PoC coherence gate closed [sandbox portion]**)_
- 
+
+_Last updated: 2026-06-18 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**)_
+
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state (Clean/Check/Dirty)
   graph-coloring, synchronous push-down marking + lazy pull-up resolution
@@ -59,7 +59,12 @@ _Last updated: 2026-06-18 (Contract v0.4 — runtime correctness verified; compi
 - **Flush ordering:** within a flush, inter-node dependencies self-order via the
   up-walk; syncs drain before purely-terminal effects so effects reading a
   sync-written signal see final values (glitch-free). Sequential same-target syncs
-  observe prior in-flush writes (Contract §8.7).
+  observe prior in-flush writes (Contract §8.7). **Cascade cap is two budgets
+  (§8.5.4, v0.4.1):** a reactive-cascade budget (cycle/runaway guard, reactive sync
+  nodes only) and a separate larger external-event safety budget — external bursts
+  must not be bounded by the reactive budget (conflating them drops legitimate
+  events). The separation is the contract guarantee; the multiplier is an
+  implementation constant.
 - **Runtime correctness baseline:** §12 conformance suite passes **36/36** against
   contract v0.4 (23 checklist items + §12.17a/b error-path cases + property fuzzer +
   §B2–B8 invariant/coverage tests). Three implementation bugs surfaced and fixed
@@ -67,7 +72,11 @@ _Last updated: 2026-06-18 (Contract v0.4 — runtime correctness verified; compi
   observer loop, causing early exit on deep chains); `drainSyncPhase` inner-while
   infinite loop on cyclic syncs (fix: one entry per outer iteration); §12.20 test
   over-counted handler calls across two flushes. `core.ts` + `conformance.ts` are the
-  locked correctness baseline for perf tuning.
+  locked correctness baseline for perf tuning. **v0.4.1 (2026-06-18):** two further
+  `drainSyncPhase` defects fixed during repo migration — cap off-by-one (exactly-
+  MAX_CASCADE now settles cleanly) and the reactive/external counter split (external
+  bursts no longer capped by the reactive budget; see §8.5.4 and the dated entry).
+  36/36 still green against the patched core.
   **Architect review closed (2026-06-15):** two correctness hardenings (sync-target
   Signal guard in `nodeSet`; `resolveTarget` untracking invariant documented) and the
   full set of coverage gaps were landed and verified. The run-once invariant (§1.3) is
@@ -159,12 +168,14 @@ _Last updated: 2026-06-18 (Contract v0.4 — runtime correctness verified; compi
   (`class="${x}"`); unquoted/partial-value interpolation unsupported (documented).
   Harness note: the interpreter is async-scheduled — tests/probes must `flushSync()`
   after a signal write before asserting DOM state.
+
 ### Open design decisions (chosen later; not blocking)
 - Compile-time vs. runtime split — the boundary of what is compiled away vs.
   shipped. (Be deliberate; does not self-resolve.)
 - Effect-flush timing primitive (microtask vs. custom scheduler).
 - Compile-time *full* encapsulation (DOM + style), beyond Svelte-style style
   scoping — genuinely open research.
+
 ### Known issues / pending cross-stream fixes
 - **`core.ts` DOM-lib strict defect — RESOLVED (2026-06-17).** The nv-local
   `interface Node` was renamed to `ReactiveNode` throughout `core.ts`, eliminating
@@ -188,6 +199,12 @@ _Last updated: 2026-06-18 (Contract v0.4 — runtime correctness verified; compi
   tsconfig to bridge them. No defect (both styles work, code is correct), but the
   Claude Code convergence (one shared build) should settle on one import style
   repo-wide. Surfaced by the PoC integration; resolved poc-locally, not at source.
+- **Test-hygiene follow-up (non-blocking, from the 2026-06-18 migration review).**
+  The integration PoC's Gate-4 `expect(true).toBe(true)` is a structural-intent
+  placeholder, not a real assertion — give it a clarifying comment so it is not
+  mistaken for a passing check. Compiler tests have some `expect(!expr).toBe(true)`
+  double-negations worth tidying. No correctness impact.
+
 ### PoC coherence gate (Phase 0 ROADMAP)
 - **Sandbox portion CLOSED (2026-06-18).** Stream 5 (integration) built and
   architect-verified `poc_integration.ts` — 15/15, strict-clean — proving the four
@@ -213,6 +230,7 @@ _Last updated: 2026-06-18 (Contract v0.4 — runtime correctness verified; compi
 - **No composition bug surfaced** — all three streams composed cleanly at first
   integration. (The only adjustment was the import-style bridge above, a
   poc-tsconfig matter, not a stream defect.)
+
 ### Genuine research problems (unknown answers, can fail)
 - The propagation algorithm *correctness* is settled. The open research is beating an
   alien-signals-class performance baseline — correctness-phase implementation uses O(k)
@@ -220,17 +238,20 @@ _Last updated: 2026-06-18 (Contract v0.4 — runtime correctness verified; compi
   Trigger to move to Claude Code: any answer that depends on a real hardware number.
 - Compiler specializations as optimization hypotheses, each of which must beat the
   unspecialized baseline on the benchmark before shipping.
+
 ### Superseded (kept for rationale; see Log for detail)
 - _none yet._
+
 ### Naming
 - `neutro/view` / `nv` is a working name; may change. The package will sit under
   `@neutro` if the ecosystem promise is "no framework lock-in" (the view engine is
   *portable*, not strong-agnostic like the pure-logic packages — describe it as
   *portable/interoperable*, not *agnostic*).
+
 ---
- 
+
 ## Log (append-only, oldest → newest)
- 
+
 ### 2026-06-15 — Reactive model and primitive foundation locked
 **Decision.** Adopt fine-grained signals with three-state graph-coloring push-pull
 as the core; components run once; no VDOM. Derive semantics from the
@@ -242,7 +263,7 @@ dependency cases that static topological sort handles poorly. Run-once execution
 eliminates the entire React re-render tax (dep arrays, memo hints, hook rules,
 stale closures).
 **Status.** Locked.
- 
+
 ### 2026-06-15 — Best-parts synthesis fixed as the design thesis
 **Decision.** Take Solid's reactive core + run-once execution, Svelte's compiler
 ergonomics (mutation syntax over signals), React's `UI = f(state)` as the *mental
@@ -255,7 +276,7 @@ signal-granular tracking genuinely conflict at the performance layer (proxies co
 per-access); resolved by defaulting to signals and making the proxy `store` an
 explicit escape hatch, not a co-equal.
 **Status.** Locked.
- 
+
 ### 2026-06-15 — Agnosticism scoped: core agnostic, renderer portable-via-WC
 **Decision.** The reactive core is strong-agnostic (zero DOM, usable in Node). The
 renderer is a consumer of the core. Web Components are a compile *target* for
@@ -269,7 +290,7 @@ the *model* would force the class model and string boundary into authoring — t
 exact DX we beat. Lit chose to *be* WC and accepts middling DX/perf; nv beats it
 by treating WC as a target.
 **Status.** Locked.
- 
+
 ### 2026-06-15 — "Reimplement WC functionally" reframed
 **Decision.** Do not try to extract performance from Web Components (there is none
 to extract — signals are already faster; Shadow DOM is a *cost*). Instead take
@@ -282,7 +303,7 @@ grained, not DOM-attachment-bound). Net-new research that remains: compile-time
 *full* encapsulation.
 **Status.** Locked (the reframing); compile-time full encapsulation remains open
 research.
- 
+
 ### 2026-06-15 — Research scope clarified (4 items → 2 research + 1 decision + 1 seam)
 **Decision.** The genuine research problems are (a) the propagation algorithm
 (diamond is its *test*, not a separate item) and (b) compile-time full
@@ -293,7 +314,7 @@ self-resolve).
 solve the diamond). Syntax space is well-mapped (JSX vs. single-file); the choice
 sets compiler complexity, not success.
 **Status.** Locked framing.
- 
+
 ### 2026-06-15 — Baseline source clarified: learn from Reactively, benchmark vs. alien-signals
 **Decision.** Derive the algorithm's *semantics* from Reactively's coloring (the
 clearest explanation) and the *implementation discipline* from alien-signals
@@ -305,7 +326,7 @@ data structures. Same family — take coloring concept + performance discipline.
 The data-structure constraints belong in the contract, not bolted on later,
 because they shape the node model and how the compiler references edges.
 **Status.** Locked.
- 
+
 ### 2026-06-15 — Reactive Core Runtime Contract authored (v0.1 → v0.2 → v0.3)
 **Decision.** Wrote the contract as the fixed design target. Key calls pinned:
 effects are the only nodes scheduled in the down phase (values never eagerly
@@ -317,7 +338,7 @@ decoupled from dependency graph and from DOM lifecycle; compiler hooks may only
 **Rationale.** These are the non-obvious decisions where implementation bugs hide.
 Pinning them in the contract makes them invariants, not rediscoverable edge cases.
 **Status.** Locked. Contract at v0.3.
- 
+
 ### 2026-06-15 — Reactive→signal writes: from runtime cap to declarative construct
 **Decision.** Rather than rely on a runtime cascade cap alone (Solid/Vue/Svelte's
 approach), introduce a declarative construct so the loop hazard is caught at build
@@ -339,7 +360,7 @@ alone).
 **Supersedes.** The `bridge`/`ingress` two-construct design from earlier the same
 day (never shipped beyond contract v0.2).
 **Status.** Locked. Contract §8.5–8.6 at v0.3.
- 
+
 ### 2026-06-15 — `pubsub` as general event utility (bounded)
 **Decision.** Generalize the external-source adapter into a named `pubsub()`
 utility (`{ subscribe, publish, clear }`, Set-backed), usable by `sync`'s external
@@ -354,7 +375,7 @@ events, `signal` for state; no memory, no replay, no operators — anything hold
 a value is a `signal`, anything transforming streams belongs in userland or
 `@neutro/sync`. This prevents drift into a stream library.
 **Status.** Locked. Contract §8.6.
- 
+
 ### 2026-06-15 — Error/throw semantics specified (closed a silent gap)
 **Decision.** Added Contract §5.4: a throw in any `compute` completes edge
 reconciliation in a `finally` (structural integrity preserved); `Error` is a flag
@@ -370,7 +391,7 @@ before implementation prevents a whole class of bugs. Noted: specified for the
 *synchronous* model; concurrency (if ever added) must revisit error-vs-
 interruption.
 **Status.** Locked. Contract §5.4, v0.3.
- 
+
 ### 2026-06-15 — `sync`-target classification promoted to a first-class compiler hook
 **Decision.** The compiler classifies every `sync` target: provably enumerable →
 accept (+ cycle check); provably non-enumerable → **reject with a diagnostic
@@ -382,7 +403,7 @@ answers "can the compiler tell me this write belongs in `effect`?" with yes. Saf
 because misclassification costs performance, never correctness (soundness
 fallback).
 **Status.** Locked. Contract §8.5.3, §10, v0.3.
- 
+
 ### 2026-06-15 — Tooling workflow established
 **Decision.** Prototype in claude.ai (Sonnet) for correctness/logic/analysis;
 escalate to Opus for architectural questions; move to Claude Code when the work
@@ -397,7 +418,7 @@ answer depends on a real-hardware number or real-browser behavior," not
 **not** automatic — it works only via project-knowledge files (this log + the
 contract), so decisions must be written here to persist.
 **Status.** Locked (workflow).
- 
+
 ### 2026-06-15 — Flush ordering specified: syncs before terminal effects (Contract §8.7, v0.4)
 **Decision.** Added Contract §8.7 pinning intra-flush ordering when syncs and
 effects are queued together: (1) inter-node dependencies self-order via the
@@ -429,11 +450,11 @@ streams: anything that affects what a computation observes, or that touches a
 locked invariant (§1), is contract-level and escalates — even if it feels like a
 scheduler detail.
 **Status.** Locked. Contract §8.7, §12.22, v0.4.
- 
+
 ### 2026-06-15 — §12 conformance suite passing (27/27); runtime implementation complete
 **Decision.** The v0.4 contract §12 conformance suite passes in full. Three bugs
 surfaced and fixed during implementation:
- 
+
 1. **BFS tail-mutation (propagate Phase 2).** `next = cur._markNext` was captured
    *before* processing observers. When `cur` was the queue tail, `enqBFS` during
    processing wrote into `cur._markNext`, but `next` had already captured `null`,
@@ -443,11 +464,13 @@ surfaced and fixed during implementation:
    does NOT touch a §1 invariant independently — it caused wrong transitive marking,
    which manifests as stale values, which is a glitch-freedom failure (§1.2). Could
    be classified contract-level by that reading; noted for calibration.
+
 2. **drainSyncPhase inner-while infinite loop.** The inner `while (syncQHead !== null)`
    loop ran unbounded because processing a sync re-queued another sync (cyclic pair).
    The cascade cap counter incremented only in the outer loop. Fix: process *one entry
    per outer iteration* — both reactive syncs and external entries. Cap now fires
    correctly on cyclic and cascade scenarios (§8.5.4, §12.12).
+
 3. **§12.20 test design.** `A.set(1)` + second flush caused the effect to re-run,
    calling the inner handler a second time via normal mechanics (not re-entry). The
    no-re-entry property is demonstrable in one flush. Removed the second trigger.
@@ -460,6 +483,7 @@ rather than a semantic ambiguity — reasonable to handle in-stream. Bug 2 was a
 pure implementation error with no spec interaction. Bug 3 was a test design
 mistake, not a runtime bug.
 **Status.** Stream 1 correctness phase complete. Contract v0.4.
+
 ### 2026-06-15 — Architect review of runtime + conformance (hardenings + coverage gaps)
 **Decision.** Reviewed `core.ts` and `conformance.ts` against contract v0.4. Verdict:
 implementation is sound and contract-faithful — iterative up-walk, BFS propagate,
@@ -490,6 +514,7 @@ states a guarantee (§8.5 target-is-signal) that the implementation did not enfo
 so a future session does not over-trust the green checkmark.
 **Status.** Resolved 2026-06-15 — all hardenings and gaps landed and verified; see
 closing entry below.
+
 ### 2026-06-15 — Architect review CLOSED: hardenings + coverage landed, fuzzer tightened
 **Decision.** The review opened in the prior entry is closed. Everything flagged was
 implemented by the runtime session and independently verified by the architect by
@@ -531,6 +556,7 @@ invariant is pinned at the granularity that protects the upcoming perf-tuning ph
 where run-once / stale-edge / leak regressions are most likely to be introduced.
 **Status.** Closed. Stream 1 correctness phase complete and verified; ready for perf
 tuning (Claude Code — real-hardware benchmarking) when chosen.
+
 ### 2026-06-15 — Compiler steps 1–2 CLOSED: sync-correctness layer built and verified
 **Decision.** The compiler stream's foundation — the `sync`-correctness layer — is
 complete and architect-verified. This is distinct from the §10 specialization layer
@@ -578,6 +604,7 @@ Also: any harness combining the classifier and cycle checker must use the **same
 **Status.** Closed. Compiler steps 1–2 complete and verified, strict-clean. Clear to
 proceed to step 3 (equality-policy inference, §7.1 / §10 row 2) — the first
 *specialization* hook.
+
 ### 2026-06-15 — Compiler step 3 CLOSED: equality-policy inference (first specialization hook)
 **Decision.** Equality-policy inference (§7.1 / §10 row 2) is built and verified —
 the compiler stream's first *specialization* hook (steps 1–2 were the `sync`-
@@ -636,6 +663,7 @@ type-for-non-literals design. Same pattern as the runtime fuzzer and the
 **Status.** Closed. Step 3 complete and verified. Next: branch-variant dependency
 sets (§10 row 4) — the hardest hook, where the dynamic-correctness invariant (§1.4)
 is most at risk; architect check required before it is called done.
+
 ### 2026-06-17 — Compiler step 4 CLOSED (compiler side): branch-variant dependency sets
 **Decision.** Branch-variant dependency-set analysis (§10 row 4) is built and
 verified on the compiler side. This was the highest-risk hook — the only one whose
@@ -693,6 +721,7 @@ model tests are not mistaken for real-core integration.
 verified. Remaining §10 hooks: eager/lazy bias (row 3) and wide-fanout grouping
 (row 5) — performance-defined, scaffold-in-sandbox / decide-in-Claude-Code; disposal
 scope (row 6). Plus the deferred real-core variant integration above.
+
 ### 2026-06-17 — Renderer/templating stream opened; Template IR v0.2 approved
 **Decision.** The renderer/templating workstream (stream 3) is opened. The Template
 IR design (`nv-template-ir.md`) is approved at **v0.2** after architect review (gated-
@@ -752,6 +781,7 @@ interpreter back-end → jsdom DOM + live bindings; (3) differential conformance
 interpreter proof + seam agreement with stream 2. Both gates as always
 (`tsc --noEmit --strict` + tests, separate).
 **Status.** Closed (IR design, v0.2). Implementation open.
+
 ### 2026-06-17 — Renderer interpreter slice (Text + Attr) landed; core strict-typecheck defect surfaced
 **Decision.** The renderer's minimal-slice interpreter implementation is complete and
 architect-verified. Scope: the whole pipeline (tagged-template front-end → IR →
@@ -795,6 +825,7 @@ strict-checked *without* the DOM lib in scope — strict-with-DOM-lib is now a r
 runtime gate, since renderers import core alongside DOM types.
 **Status.** Slice closed and verified. Renderer proceeds to `prop`/`event`/`child`-
 primitive/`conditional` on the proven shape. Runtime stream owns the core `Node`-rename.
+
 ### 2026-06-17 — core.ts DOM-lib strict defect resolved (Node → ReactiveNode rename)
 **Decision.** The cross-stream defect from the renderer-slice entry is resolved at the
 source. The runtime stream renamed the nv-local `interface Node` to `ReactiveNode`
@@ -817,7 +848,7 @@ real `core.ts` and deletes the patched copy. Tracked under Known Issues until co
 **Supersedes** the "routed/pending" status in the 2026-06-17 renderer-slice entry.
 **Status.** Resolved. Core strict-clean with DOM lib; conformance green; gate
 configuration checked in.
- 
+
 ### 2026-06-17 — Renderer interpreter complete: all six PoC bindings (prop/event/child/conditional added)
 **Decision.** The remaining four PoC bindings are implemented onto the proven
 Text+Attr pipeline shape, completing the renderer interpreter back-end for the PoC.
@@ -863,6 +894,7 @@ binding kinds work end-to-end against the real core. Next: the PoC coherence gat
 (counter + derived label + conditional, proving runtime + renderer compose; build-time
 cycle rejection via compiler; no-leak disposal) is now mostly sandbox-reachable — only
 real-browser confirmation needs Claude Code.
+
 ### 2026-06-18 — PoC coherence gate CLOSED (sandbox portion); Stream 5 integration verified
 **Decision.** The PoC integration stream (stream 5) built `poc_integration.ts` and
 proved the four PoC gate criteria that are sandbox-reachable. 15/15, strict-clean
@@ -920,3 +952,71 @@ final gate (real-browser interaction). These converge against one shared runtime
 Claude Code.
 **Status.** Sandbox PoC closed and verified. No contract change; no version bump.
 ROADMAP Phase 0 sandbox-completable work is exhausted.
+
+### 2026-06-18 — Three pre-existing defects fixed during repo migration; contract → v0.4.1
+**Context.** During the Claude Code repo assembly, a fresh reviewer surfaced defects in
+the original source that the migration had carried through unchanged. The architect
+verified all of them **empirically** (re-ran the exact probes that characterize each
+boundary against the fixed code), not by reading. The migration "no logic changes" rule
+was correctly overridden: that rule prevents *introducing* drift, not *preserving*
+pre-existing bugs. Two are contract-level (decision-log + contract entry); one is
+in-stream; one is a public-surface correction.
+
+**C1 (contract-level) — classifier could emit a partial ACCEPT. RESOLVED.**
+`sync-target-classifier.ts resolveFunctionBody`: a block-body conditional thunk
+`() => { if (c) return sigA; return sigB }` returned only the *first* return expression
+found (`sigB`), silently dropping `sigA` from the ACCEPT target set. An incomplete
+target set means the write-graph misses the edge to `sigA`, so a cycle through `sigA`
+goes undetected at build time — violating the conservative-on-incompleteness invariant
+(§8.5.3 / the `TargetVerdict.ACCEPT` contract: the classifier must never assert a
+target set it has not fully proven). Fix: bail to `null` (→ UNDECIDABLE → effect) on
+any non-`ReturnStatement` in a block body, on both the arrow and function-expression
+paths. **Verified:** the `if/return` block now yields UNDECIDABLE; the concise ternary
+`c ? sigA : sigB` control case still correctly yields `ACCEPT {sigA, sigB}` (fix is
+precise, does not over-decline).
+*Architect correction:* the original step-1 review mischaracterized this as "fails safe
+to UNDECIDABLE." It did not — it returned a partial ACCEPT, the one unsafe outcome. The
+review reasoned about the block-body path instead of running it. The fresh-reviewer
+catch is exactly why a second pass on migrated code was worth it; recorded as an
+escalation-calibration lesson (reason-vs-run).
+
+**I2 (contract-level) — cascade cap conflated reactive depth with external-event count.
+RESOLVED; contract §8.5.4 clarified, → v0.4.1.**
+`core.ts drainSyncPhase` counted reactive sync nodes and external `pubsub` entries in a
+single counter capped at MAX_CASCADE. A burst of ≥100 synchronous `publish()` calls (no
+cycle) exhausted the cap: only 100 landed, the rest were silently dropped with a
+spurious cap error. A burst of external events is a normal workload (rapid input, a
+socket flushing) — this was silent data loss. Fix: **two separate budgets** — a
+reactive-cascade budget (MAX_CASCADE, reactive sync nodes only, the cycle/runaway guard)
+and a larger external-event safety budget (runaway external feedback only). **Verified:**
+150 external events all land; a pathological external A↔B republish feedback loop still
+terminates via the safety budget (does not hang). **Contract change:** §8.5.4 rewritten
+to specify the two-budget *property* (external draining must not be bounded by the
+reactive-cascade budget; both runaway modes must terminate). The specific multiplier
+(implementation uses 10×) is explicitly an implementation tuning constant, **not** a
+contract-committed value — the contract pins the separation (the correctness-relevant
+guarantee, since conflation drops events = wrong result), not the magnitude. Contract
+bumped v0.4 → **v0.4.1**.
+
+**I1 (in-stream) — cascade cap off-by-one. RESOLVED.**
+A cascade of exactly MAX_CASCADE rounds completed its work but spuriously fired the cap
+error and nulled the queues (`iterations >= MAX_CASCADE` / `cycles >= MAX_CASCADE` after
+the boundary round). Fix: `> MAX_CASCADE` (and `cycles <= MAX_CASCADE` loop bound) so
+exactly-MAX_CASCADE settles cleanly and only >MAX_CASCADE is flagged. **Verified:** N=100
+chain completes with no cap; N=101+ caps. Pure off-by-one, no contract impact.
+
+**EnumResult barrel over-export (public-surface) — RESOLVED.** `EnumResult` (an internal
+enumeration result type) was exported from `src/compiler/index.ts`'s public API. Removed
+before first publish (adding it back later would be a breaking change; removing an
+internal type from the public surface now is free). `ReadEnumResult` correctly remains —
+a distinct, legitimately-public type.
+
+**Regression check.** 36/36 conformance passes against the patched core — the I1/I2 core
+changes are behavior-neutral except at the boundaries they corrected.
+
+**Minors tracked as follow-up (non-blocking):** the integration PoC's Gate-4
+`expect(true).toBe(true)` structural-intent placeholder (should get a clarifying comment
+so it is not mistaken for a real assertion) and the `expect(!expr).toBe(true)`
+double-negations in compiler tests. Test-hygiene only; no correctness impact.
+
+**Status.** All four resolved and architect-verified by execution. Contract v0.4.1.
