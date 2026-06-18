@@ -171,7 +171,12 @@ _Last updated: 2026-06-18 (Contract **v0.4.1** — runtime correctness verified;
 
 ### Open design decisions (chosen later; not blocking)
 - Compile-time vs. runtime split — the boundary of what is compiled away vs.
-  shipped. (Be deliberate; does not self-resolve.)
+  shipped. (Be deliberate; does not self-resolve.) **Narrowed 2026-06-18:** the
+  read/write *syntax* transform is now pinned — authoring surface gets bare-read +
+  mutation-write via compiler erasure; the runtime core stays explicit
+  call-to-read/`.set()`-write; the boundary is "is there a compile step over this
+  code." The rest of the split (scheduling, encapsulation, what else compiles away)
+  stays open. See dated entry.
 - Effect-flush timing primitive (microtask vs. custom scheduler).
 - Compile-time *full* encapsulation (DOM + style), beyond Svelte-style style
   scoping — genuinely open research.
@@ -1020,3 +1025,57 @@ so it is not mistaken for a real assertion) and the `expect(!expr).toBe(true)`
 double-negations in compiler tests. Test-hygiene only; no correctness impact.
 
 **Status.** All four resolved and architect-verified by execution. Contract v0.4.1.
+
+### 2026-06-18 — Authoring-surface read/write ergonomics pinned (bare-read + mutation-write via compiler erasure); runtime core stays explicit call-to-read
+
+**Decision.** Pin the read/write *syntax* answer to the compile-vs-runtime split, for
+the read/write transform specifically (the general split remains open for other
+concerns — see Status):
+
+- **Runtime core (`core.ts`, the DOM-free agnostic layer): explicit call-to-read,
+  explicit `.set()`-write, permanently.** Signals are getter functions; reading is
+  `count()`, writing is `count.set(v)` / the `nodeSet` path. This is not an ergonomic
+  compromise — the read *call* is the mechanism by which `trackRead` attaches a
+  dependency edge to `currentObserver` (§5.1). A bare variable read has no hook point
+  and cannot register a dependency. Every fine-grained system makes the read site do
+  something for this reason (Solid `s()`, alien-signals, Preact `.value`, Angular
+  signals). The core layer keeps it and does not change.
+- **Authoring surface (the `.nv` / tagged-template front-end → Template IR → compiler
+  back-end): bare-read and mutation-write ergonomics, produced by compiler erasure.**
+  Source authors write `count` (read) and `count = count + 1` (write); the compiler,
+  which sees every read/write site statically in the surface it controls, emits the
+  `count()` read and the `nodeSet`/`.set()` write into generated code. This realizes
+  the locked design thesis ("Svelte's compiler ergonomics — mutation syntax over
+  signals … disagree only about syntax, which a compiler erases", 2026-06-15) for the
+  read/write transform concretely, rather than as general intent.
+- **The boundary is "is there a compile step over this code."** Bare ergonomics exist
+  exactly where the compiler is authoritative (templates, `.nv` components, and any
+  compiled `.nv.ts`-class surface if one is later defined). Hand-written `.ts` against
+  the raw runtime stays call-to-read/`.set()`-write — the same boundary Svelte draws
+  (runes in `.svelte`/`.svelte.js`, not arbitrary `.ts`).
+
+**Rationale.** The "do I have to call a function" ergonomic was raised as a preference;
+it turns out to be already-decided in spirit (the compiler-erasure thesis) but never
+pinned to the read/write transform. Pinning it now matters because the **compiler
+back-end for the IR is the next renderer-stream piece** (Current State: "Compiler
+back-end still deferred"), and that back-end is exactly what implements the erasure —
+it needs this as a target, not a vibe. Reading-bare is the cheap half (static read-site
+rewrite). Writing-bare is the harder half: the compiler must detect assignment to a
+reactive binding and rewrite to the write path, which is more machinery and is where the
+broader compile-vs-runtime split still has to be worked out.
+
+**Scope / what stays open.** This pins *only* the read/write syntax transform and its
+boundary. The general "Compile-time vs. runtime split" item (what else is compiled away
+vs. shipped — scheduling, encapsulation, etc.) remains open; this entry narrows it, does
+not close it. Per-binding write-rewrite semantics, and how mutation-write composes with
+`signal`/`sync` write paths, are authoring/compiler-stream design, deferred to that
+back-end's design doc.
+
+**Contract impact.** None. The contract governs reactive-core semantics; read/write
+*syntax* is an authoring-layer concern above the contract. Verified: v0.4.1 contains no
+authoring-syntax language. No version bump. If the write-rewrite later forces a
+core-visible change (it should not — it compiles to the existing `nodeSet` path), that
+would be a separate escalation.
+
+**Status.** Locked (the read/write syntax boundary). The general compile-vs-runtime split
+remains open. The compiler back-end for the IR is the consumer of this decision.
