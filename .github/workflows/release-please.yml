@@ -1,0 +1,23 @@
+name: Release Please
+
+on:
+  # Manual trigger only — switch to the push trigger below when ready for automated releases
+  workflow_dispatch:
+
+  # Uncomment when ready to automate release PRs on every merge to main:
+  # push:
+  #   branches: [main]
+
+jobs:
+  release-please:
+    name: Open release PR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
