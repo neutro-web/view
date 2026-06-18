@@ -67,7 +67,7 @@ export class SyncTargetClassifier {
   classifyCall(call: ts.CallExpression, checker: ts.TypeChecker): TargetVerdict | null {
     if (!this.isSyncCall(call, checker)) return null
     if (call.arguments.length < 2) return null
-    return this.classifyTarget(call.arguments[1], call, checker)
+    return this.classifyTarget(call.arguments[1]!, call, checker)
   }
 
   // ── AST walk ─────────────────────────────────────────────────────────────────

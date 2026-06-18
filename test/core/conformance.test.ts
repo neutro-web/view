@@ -124,15 +124,15 @@ test('§12.4  Deep chain (100k) — iterative walk, no stack overflow', () => {
   // Store ALL nodes so we can pre-compute top-down.
   const all: Array<() => number> = [derived(() => root())]
   for (let i = 1; i < N; i++) {
-    const prev = all[i - 1]
+    const prev = all[i - 1]!
     all.push(derived(() => prev() + 0))
   }
-  const leaf = all[N - 1]
+  const leaf = all[N - 1]!
 
   // Pre-compute TOP-DOWN: each read is O(1) stack depth because the previous
   // node is already CLEAN — updateIfNecessary returns at the CLEAN check
   // immediately. Total stack depth stays constant regardless of N.
-  for (let i = 0; i < N; i++) all[i]()
+  for (let i = 0; i < N; i++) all[i]!()
   expect(leaf()).toBe(0)
 
   // NOW test the iterative update path: root.set() marks all nodes DIRTY/CHECK.
@@ -154,9 +154,9 @@ test('§12.5  Wide fanout (10k) — all observers update', () => {
   }
   src.set(1)
   // Check a sample
-  expect(obs[0](), 'obs[0] wrong').toBe(1)
-  expect(obs[N - 1](), 'obs[N-1] wrong').toBe(N)
-  expect(obs[500](), 'obs[500] wrong').toBe(501)
+  expect(obs[0]!(), 'obs[0] wrong').toBe(1)
+  expect(obs[N - 1]!(), 'obs[N-1] wrong').toBe(N)
+  expect(obs[500]!(), 'obs[500] wrong').toBe(501)
 })
 
 // ── §12.6: Disposal totality ─────────────────────────────────────────────────
@@ -281,13 +281,13 @@ test('§12.10 sync map — run-once per propagation, conditional target', () => 
 
   // sync with conditional target: writes T1 or T2 depending on cond
   const dispose = createRoot((d) => {
-    sync(
+    sync<number, number>(
       () => {
         syncRuns++
         return A()
       },
       () => (cond() ? T1 : T2),
-      (v) => v,
+      (v: number) => v,
     )
     return d
   })
@@ -360,13 +360,13 @@ test('§12.12 sync cycle runtime — cascade cap fires (no infinite loop)', () =
       sync(
         () => A(),
         B,
-        (v) => v + 1,
+        (v: number) => v + 1,
       )
       // sync2: B changes → write A (creates cycle)
       sync(
         () => B(),
         A,
-        (v) => v + 1,
+        (v: number) => v + 1,
       )
       return d
     })
@@ -396,7 +396,7 @@ test('§12.13 sync soundness fallback — dynamic reconciliation always runs', (
     sync(
       () => (useA() ? A() : B()),
       T,
-      (v) => v,
+      (v: number) => v,
     )
     return d
   })
@@ -433,10 +433,10 @@ test('§12.14 sync target — conditional function resolves correctly at runtime
 
   const dispose = createRoot((d) => {
     // Conditional target via function: runtime selects which signal to write
-    sync(
+    sync<number, number>(
       () => src(),
-      () => targets[pick()], // conditional — both T1, T2 are enumerable statically
-      (v) => v,
+      () => targets[pick()]!, // conditional — both T1, T2 are enumerable statically
+      (v: number) => v,
     )
     return d
   })
@@ -801,12 +801,12 @@ test('§12.22 Flush ordering — sync before terminal effect, self-ordering', ()
     sync(
       () => A(),
       T,
-      (v) => v,
+      (v: number) => v,
     )
     sync(
       () => T(),
       T2,
-      (v) => v * 2,
+      (v: number) => v * 2,
     )
     return d
   })
@@ -893,7 +893,7 @@ test('§fuzz  run-once + no-leak across 200 seeded random graphs', () => {
 
       for (let i = 0; i < NUM_DERIVED; i++) {
         const k = 1 + ((rng() * 3) | 0)
-        const picks = Array.from({ length: k }, () => trialNodes[(rng() * trialNodes.length) | 0])
+        const picks = Array.from({ length: k }, () => trialNodes[(rng() * trialNodes.length) | 0]!)
         trialNodes.push(derived(() => picks.reduce((a, f) => a + f(), 0)))
       }
 
@@ -908,14 +908,14 @@ test('§fuzz  run-once + no-leak across 200 seeded random graphs', () => {
     batch(() => {
       const numWrites = 1 + ((rng() * NUM_SIGS) | 0)
       for (let w = 0; w < numWrites; w++) {
-        trialSigs[(rng() * NUM_SIGS) | 0].set((rng() * 100) | 0)
+        trialSigs[(rng() * NUM_SIGS) | 0]!.set((rng() * 100) | 0)
       }
     })
 
     // Pull DEEPEST-FIRST: forces interior nodes through CHECK up-walks (frame
     // loop), not the DIRTY early-return shortcut — where run-once bugs hide.
     const derivedNodes = trialNodes.slice(NUM_SIGS)
-    for (let i = derivedNodes.length - 1; i >= 0; i--) derivedNodes[i]()
+    for (let i = derivedNodes.length - 1; i >= 0; i--) derivedNodes[i]!()
     // Second pull: every node is now Clean — must NOT recompute again.
     for (const f of derivedNodes) f()
 
@@ -1094,7 +1094,7 @@ test('§B6   sync map on reactive source — run-once, correct value', () => {
     sync(
       () => a(),
       target,
-      (v) => {
+      (v: number) => {
         syncRuns++
         return (v as number) * 2
       },

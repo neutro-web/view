@@ -95,7 +95,7 @@ export function getThunkReturnSignalType(
   if (type.getProperty('set')) return null
   const callSigs = type.getCallSignatures()
   if (callSigs.length === 0) return null
-  const ret = checker.getReturnTypeOfSignature(callSigs[0])
+  const ret = checker.getReturnTypeOfSignature(callSigs[0]!)
 
   // Direct: () => SignalAccessor<T>
   if (isNvSignalType(ret, checker, nvCorePath)) return ret

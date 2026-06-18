@@ -526,7 +526,7 @@ function runCleanups(node: ReactiveNode): void {
   // §6: LIFO order
   for (let i = node.cleanups.length - 1; i >= 0; i--) {
     try {
-      node.cleanups[i]()
+      node.cleanups[i]!()
     } catch (_) {
       /* §5.4.5: don't let cleanup abort */
     }

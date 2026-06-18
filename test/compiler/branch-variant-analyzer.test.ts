@@ -83,7 +83,7 @@ test('DECLARED: simple ternary — union of all three reads', () => {
     const d = derived(() => cond() ? a() : b())
   `)
   expect(verdicts.length).toBe(1)
-  assertDeclared(verdicts[0], ['cond', 'a', 'b'])
+  assertDeclared(verdicts[0]!, ['cond', 'a', 'b'])
 })
 
 test('DECLARED: nested ternary — union of all branches', () => {
@@ -94,7 +94,7 @@ test('DECLARED: nested ternary — union of all branches', () => {
     const d = derived(() => c1() ? (c2() ? a() : b()) : c())
   `)
   expect(verdicts.length).toBe(1)
-  assertDeclared(verdicts[0], ['c1', 'c2', 'a', 'b', 'c'])
+  assertDeclared(verdicts[0]!, ['c1', 'c2', 'a', 'b', 'c'])
 })
 
 test('DECLARED: flat sequence — all reads in one expression', () => {
@@ -104,7 +104,7 @@ test('DECLARED: flat sequence — all reads in one expression', () => {
     const d = derived(() => a() + b() + c())
   `)
   expect(verdicts.length).toBe(1)
-  assertDeclared(verdicts[0], ['a', 'b', 'c'])
+  assertDeclared(verdicts[0]!, ['a', 'b', 'c'])
 })
 
 test('DECLARED: single-read body', () => {
@@ -114,7 +114,7 @@ test('DECLARED: single-read body', () => {
     const d = derived(() => x() * 2)
   `)
   expect(verdicts.length).toBe(1)
-  assertDeclared(verdicts[0], ['x'])
+  assertDeclared(verdicts[0]!, ['x'])
 })
 
 test('DECLARED: block body with variable declaration and single return', () => {
@@ -127,7 +127,7 @@ test('DECLARED: block body with variable declaration and single return', () => {
     })
   `)
   expect(verdicts.length).toBe(1)
-  assertDeclared(verdicts[0], ['a', 'b'])
+  assertDeclared(verdicts[0]!, ['a', 'b'])
 })
 
 test('DECLARED: property access signal read (obj.prop())', () => {
@@ -137,7 +137,7 @@ test('DECLARED: property access signal read (obj.prop())', () => {
     const d = derived(() => signals.count() + (signals.active() ? 1 : 0))
   `)
   expect(verdicts.length).toBe(1)
-  assertDeclared(verdicts[0], ['count', 'active'])
+  assertDeclared(verdicts[0]!, ['count', 'active'])
 })
 
 test('DECLARED: untrack exclusion — reads inside untrack not in union', () => {
@@ -148,8 +148,8 @@ test('DECLARED: untrack exclusion — reads inside untrack not in union', () => 
     const d = derived(() => a() + untrack(() => b()))
   `)
   expect(verdicts.length).toBe(1)
-  assertDeclared(verdicts[0], ['a']) // only a, not b
-  const [union] = [verdicts[0]] as [BranchVariantVerdict & { kind: 'DECLARED' }]
+  assertDeclared(verdicts[0]!, ['a']) // only a, not b
+  const [union] = [verdicts[0]!] as [BranchVariantVerdict & { kind: 'DECLARED' }]
   if (union.kind === 'DECLARED') {
     expect(
       ![...union.declaredUnion].some((id) => idContains(id, 'b')),
@@ -168,7 +168,7 @@ test('DECLARED: effect() body analyzed same as derived()', () => {
   // ExpressionStatement → DECLINE (only VariableStatement and ReturnStatement allowed in blocks)
   // So this should DECLINE, not DECLARED
   expect(verdicts.length).toBe(1)
-  assertDecline(verdicts[0])
+  assertDecline(verdicts[0]!)
 })
 
 test('DECLARED: effect() concise-style body (rare but valid)', () => {
@@ -180,7 +180,7 @@ test('DECLARED: effect() concise-style body (rare but valid)', () => {
     const e = effect(() => x() + y())
   `)
   expect(verdicts.length).toBe(1)
-  assertDeclared(verdicts[0], ['x', 'y'])
+  assertDeclared(verdicts[0]!, ['x', 'y'])
 })
 
 test('DECLARED: identifier not called is not a reactive read', () => {
@@ -193,7 +193,7 @@ test('DECLARED: identifier not called is not a reactive read', () => {
     const d = derived(() => a() + localConst)
   `)
   expect(verdicts.length).toBe(1)
-  assertDeclared(verdicts[0], ['a']) // only a, not localConst
+  assertDeclared(verdicts[0]!, ['a']) // only a, not localConst
 })
 
 test('DECLARED: signal ref not called (in ternary false branch) is not a read', () => {
@@ -208,10 +208,11 @@ test('DECLARED: signal ref not called (in ternary false branch) is not a read', 
   // cond() is read (reactive), a() is read, b is referenced but not called
   // b not called → not a reactive read → not in union
   expect(verdicts.length).toBe(1)
-  if (verdicts[0].kind === 'DECLARED') {
-    expect([...verdicts[0].declaredUnion].some((id) => idContains(id, 'cond'))).toBe(true)
-    expect([...verdicts[0].declaredUnion].some((id) => idContains(id, 'a'))).toBe(true)
-    expect(![...verdicts[0].declaredUnion].some((id) => idContains(id, 'b'))).toBe(true)
+  const v0 = verdicts[0]!
+  if (v0.kind === 'DECLARED') {
+    expect([...v0.declaredUnion].some((id) => idContains(id, 'cond'))).toBe(true)
+    expect([...v0.declaredUnion].some((id) => idContains(id, 'a'))).toBe(true)
+    expect(![...v0.declaredUnion].some((id) => idContains(id, 'b'))).toBe(true)
   }
 })
 
@@ -225,7 +226,7 @@ test('DECLINE: non-nv function call (opaque boundary)', () => {
     const d = derived(() => helper(a()))
   `)
   expect(verdicts.length).toBe(1)
-  assertDecline(verdicts[0], 'non-nv call')
+  assertDecline(verdicts[0]!, 'non-nv call')
 })
 
 test('DECLINE: block body with if statement', () => {
@@ -238,7 +239,7 @@ test('DECLINE: block body with if statement', () => {
     })
   `)
   expect(verdicts.length).toBe(1)
-  assertDecline(verdicts[0])
+  assertDecline(verdicts[0]!)
 })
 
 test('DECLINE: block body with multiple returns', () => {
@@ -254,7 +255,7 @@ test('DECLINE: block body with multiple returns', () => {
     })
   `)
   expect(verdicts.length).toBe(1)
-  assertDecline(verdicts[0]) // IfStatement → non-trivial statement → DECLINE
+  assertDecline(verdicts[0]!) // IfStatement → non-trivial statement → DECLINE
 })
 
 test('DECLINE: for loop', () => {
@@ -268,7 +269,7 @@ test('DECLINE: for loop', () => {
     })
   `)
   expect(verdicts.length).toBe(1)
-  assertDecline(verdicts[0])
+  assertDecline(verdicts[0]!)
 })
 
 test('DECLINE: cross-boundary — signal parameter (concrete identity unknown)', () => {
@@ -280,7 +281,7 @@ test('DECLINE: cross-boundary — signal parameter (concrete identity unknown)',
     }
   `)
   expect(verdicts.length).toBe(1)
-  assertDecline(verdicts[0], 'cross-boundary')
+  assertDecline(verdicts[0]!, 'cross-boundary')
 })
 
 test('DECLINE: new expression (constructor may read signals)', () => {
@@ -291,7 +292,7 @@ test('DECLINE: new expression (constructor may read signals)', () => {
     const d = derived(() => new Wrapper(a()))
   `)
   expect(verdicts.length).toBe(1)
-  assertDecline(verdicts[0])
+  assertDecline(verdicts[0]!)
 })
 
 test('NO VERDICT: local function named "derived" is not analyzed', () => {
@@ -311,7 +312,7 @@ test('DECLARED: all-or-nothing — entire body declines if ANY sub-expr is opaqu
     const d = derived(() => cond() ? a() + opaque() : 0)
   `)
   expect(verdicts.length).toBe(1)
-  assertDecline(verdicts[0])
+  assertDecline(verdicts[0]!)
 })
 
 // ── Union consistency ─────────────────────────────────────────────────────────
@@ -324,7 +325,7 @@ test('DECLARED: deeply nested ternary — union covers all leaf reads', () => {
     const D = derived(() => c1() ? a() : c2() ? b() : c3() ? c() : d())
   `)
   expect(verdicts.length).toBe(1)
-  assertDeclared(verdicts[0], ['c1', 'c2', 'c3', 'a', 'b', 'c', 'd'])
+  assertDeclared(verdicts[0]!, ['c1', 'c2', 'c3', 'a', 'b', 'c', 'd'])
 })
 
 test('DECLARED: binary expression mixes signal reads and literals — only reads in union', () => {
@@ -334,5 +335,5 @@ test('DECLARED: binary expression mixes signal reads and literals — only reads
     const d = derived(() => a() * 2 + 100)  // 100 is a literal, not a read
   `)
   expect(verdicts.length).toBe(1)
-  assertDeclared(verdicts[0], ['a'])
+  assertDeclared(verdicts[0]!, ['a'])
 })

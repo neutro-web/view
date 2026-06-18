@@ -277,7 +277,7 @@ test('cycle checker detects the a↔b feedback loop', () => {
 })
 
 test('CycleReport cycle path has length 2 (a and b) and names involved syncs', () => {
-  const report = cycleReports[0]
+  const report = cycleReports[0]!
   expect(report.cycle.length).toBe(2)
   expect(report.involvedSyncs.length).toBeGreaterThanOrEqual(1)
 })

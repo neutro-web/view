@@ -190,7 +190,7 @@ export class EqualityPolicyInferencer {
     const returnType = checker.getTypeAtLocation(call)
     try {
       const typeArgs = checker.getTypeArguments(returnType as ts.TypeReference)
-      if (typeArgs.length > 0) return typeArgs[0]
+      if (typeArgs.length > 0) return typeArgs[0]!
     } catch {
       // Not a TypeReference or no type args — can't extract T
     }

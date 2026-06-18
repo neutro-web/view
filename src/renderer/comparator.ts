@@ -124,7 +124,7 @@ function compareAttributes(a: Element, b: Element, path: string): CompareResult 
   // For each attribute in a, check b has the same name+value.
   // Order-independent: we look up by name.
   for (let i = 0; i < a.attributes.length; i++) {
-    const attr = a.attributes[i]
+    const attr = a.attributes[i]!
     const bVal = b.getAttribute(attr.name)
     if (bVal === null) {
       return {
@@ -158,7 +158,7 @@ function compareChildren(a: Node, b: Node, path: string): CompareResult {
 
   for (let i = 0; i < childrenA.length; i++) {
     const childPath = `${path}[${i}]`
-    const result = compareNodes(childrenA[i], childrenB[i], childPath)
+    const result = compareNodes(childrenA[i]!, childrenB[i]!, childPath)
     if (!result.equal) return result
   }
 
@@ -172,7 +172,7 @@ function ok(): CompareResult {
 function attrNames(el: Element): string {
   const names: string[] = []
   for (let i = 0; i < el.attributes.length; i++) {
-    names.push(el.attributes[i].name)
+    names.push(el.attributes[i]!.name)
   }
   return names.sort().join(', ')
 }

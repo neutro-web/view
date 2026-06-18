@@ -443,7 +443,7 @@ test('TC-09b  ChildBinding with primitive value works correctly (PoC supported p
   // Find the text node in the div
   let textContent = ''
   for (let i = 0; i < div.childNodes.length; i++) {
-    const n = div.childNodes[i]
+    const n = div.childNodes[i]!
     if (n.nodeType === 3 /* TEXT_NODE */) textContent += (n as Text).data
   }
   expect(textContent).toBe('hello')
@@ -453,7 +453,7 @@ test('TC-09b  ChildBinding with primitive value works correctly (PoC supported p
 
   let updated = ''
   for (let i = 0; i < div.childNodes.length; i++) {
-    const n = div.childNodes[i]
+    const n = div.childNodes[i]!
     if (n.nodeType === 3 /* TEXT_NODE */) updated += (n as Text).data
   }
   expect(updated).toBe('world')
@@ -713,8 +713,8 @@ test('TC-05a  primitive value renders as text node before anchor', () => {
   // div should contain: [textNode:'hello', <!--nv-0-->]
   const div = parent.querySelector('div') as Element
   expect(div.childNodes.length, 'textNode + anchor').toBe(2)
-  expect((div.childNodes[0] as Text).data).toBe('hello')
-  expect(div.childNodes[1].nodeType, 'anchor still present').toBe(8 /* COMMENT_NODE */)
+  expect((div.childNodes[0]! as Text).data).toBe('hello')
+  expect(div.childNodes[1]!.nodeType, 'anchor still present').toBe(8 /* COMMENT_NODE */)
 
   dispose()
   rmParent(parent)

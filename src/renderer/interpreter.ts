@@ -62,7 +62,7 @@ import type {
 export function walkPath(root: Node, path: NodePath): Node {
   let current: Node = root
   for (let depth = 0; depth < path.length; depth++) {
-    const idx = path[depth]
+    const idx = path[depth]!
     const child = current.childNodes[idx]
     if (child === undefined) {
       throw new Error(
@@ -313,7 +313,7 @@ function mountFragment(
 
   // 3. Wire each binding (creates effects owned by the enclosing root).
   for (let i = 0; i < ir.bindings.length; i++) {
-    wireBinding(ir.bindings[i], targets[i], doc)
+    wireBinding(ir.bindings[i]!, targets[i]!, doc)
   }
 
   // 4. Insert fragment into the parent.

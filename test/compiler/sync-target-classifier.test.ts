@@ -62,7 +62,7 @@ test('ACCEPT: direct signal identifier (Path A — singleton target)', () => {
     sync(() => x(), T, (v) => v)
   `)
   expect(verdicts.length).toBe(1)
-  const targets = assertAccept(verdicts[0], 1)
+  const targets = assertAccept(verdicts[0]!, 1)
   expect(idContains(targets, 'T'), `target set should contain 'T': ${[...targets]}`).toBe(true)
 })
 
@@ -77,7 +77,7 @@ test('ACCEPT: conditional ternary — both branches known signals (Path B)', () 
     sync(() => x(), () => cond() ? T1 : T2, (v) => v)
   `)
   expect(verdicts.length).toBe(1)
-  const targets = assertAccept(verdicts[0], 2)
+  const targets = assertAccept(verdicts[0]!, 2)
   expect(idContains(targets, 'T1'), `targets should include 'T1': ${[...targets]}`).toBe(true)
   expect(idContains(targets, 'T2'), `targets should include 'T2': ${[...targets]}`).toBe(true)
 })
@@ -92,7 +92,7 @@ test('ACCEPT: nested conditional — union of all branch signals', () => {
     sync(() => x(), () => c1() ? (c2() ? T1 : T2) : T3, (v) => v)
   `)
   expect(verdicts.length).toBe(1)
-  const targets = assertAccept(verdicts[0], 3)
+  const targets = assertAccept(verdicts[0]!, 3)
   expect(idContains(targets, 'T1'), 'targets missing T1').toBe(true)
   expect(idContains(targets, 'T2'), 'targets missing T2').toBe(true)
   expect(idContains(targets, 'T3'), 'targets missing T3').toBe(true)
@@ -107,7 +107,7 @@ test('ACCEPT: property access on typed object (obj.submit)', () => {
     sync(() => x(), () => signals.submit, (v) => v)
   `)
   expect(verdicts.length).toBe(1)
-  const targets = assertAccept(verdicts[0], 1)
+  const targets = assertAccept(verdicts[0]!, 1)
   expect(idContains(targets, 'submit'), `target should be 'submit' property: ${[...targets]}`).toBe(
     true,
   )
@@ -122,7 +122,7 @@ test('ACCEPT: conditional property access — two distinct properties', () => {
     sync(() => x(), () => cond() ? signals.submit : signals.cancel, (v) => v)
   `)
   expect(verdicts.length).toBe(1)
-  const targets = assertAccept(verdicts[0], 2)
+  const targets = assertAccept(verdicts[0]!, 2)
   expect(idContains(targets, 'submit'), `targets missing 'submit'`).toBe(true)
   expect(idContains(targets, 'cancel'), `targets missing 'cancel'`).toBe(true)
 })
@@ -136,7 +136,7 @@ test('ACCEPT: element access with string literal key (signals["submit"])', () =>
     sync(() => x(), () => signals['submit'], (v) => v)
   `)
   expect(verdicts.length).toBe(1)
-  const targets = assertAccept(verdicts[0], 1)
+  const targets = assertAccept(verdicts[0]!, 1)
   expect(idContains(targets, 'submit'), `target should be 'submit': ${[...targets]}`).toBe(true)
 })
 
@@ -155,8 +155,8 @@ test('ACCEPT: obj.prop and obj["prop"] resolve to the same signal ID', () => {
     sync(() => s(), () => obj['a'], (v) => v)
   `)
   // Both must be ACCEPT with 1 target, and both targets named 'a'
-  const t1 = assertAccept(v1[0], 1)
-  const t2 = assertAccept(v2[0], 1)
+  const t1 = assertAccept(v1[0]!, 1)
+  const t2 = assertAccept(v2[0]!, 1)
   expect(idContains(t1, 'a'), `v1 target not 'a': ${[...t1]}`).toBe(true)
   expect(idContains(t2, 'a'), `v2 target not 'a': ${[...t2]}`).toBe(true)
   // The IDs won't be identical across two separate programs (different file paths)
@@ -172,7 +172,7 @@ test('ACCEPT: external source (pubsub) — target still classified correctly', (
     sync(clicks, count, (_, curr: number) => curr + 1)
   `)
   expect(verdicts.length).toBe(1)
-  const targets = assertAccept(verdicts[0], 1)
+  const targets = assertAccept(verdicts[0]!, 1)
   expect(idContains(targets, 'count'), `target should be 'count': ${[...targets]}`).toBe(true)
 })
 
@@ -186,7 +186,7 @@ test('REJECT: runtime array index arr[i()] — provably non-enumerable', () => {
     sync(() => x(), () => arr[i()], (v) => v)
   `)
   expect(verdicts.length).toBe(1)
-  assertReject(verdicts[0], 'non-literal')
+  assertReject(verdicts[0]!, 'non-literal')
 })
 
 // ── Non-literal variable index → NON_ENUMERABLE → REJECT ─────────────────────
@@ -200,7 +200,7 @@ test('REJECT: non-literal variable index arr[idx] — non-enumerable', () => {
     sync(() => x(), () => arr[idx], (v) => v)
   `)
   expect(verdicts.length).toBe(1)
-  assertReject(verdicts[0], 'non-literal')
+  assertReject(verdicts[0]!, 'non-literal')
 })
 
 // ── Dynamic lookup call (map.get(key())) → NON_ENUMERABLE → REJECT ───────────
@@ -214,7 +214,7 @@ test('REJECT: call expression as target (map.get(key())) — runtime call', () =
     sync(() => x(), () => map.get(key()), (v) => v)
   `)
   expect(verdicts.length).toBe(1)
-  assertReject(verdicts[0], 'runtime call')
+  assertReject(verdicts[0]!, 'runtime call')
 })
 
 // ── §8.5.3 case 3: any-typed target → UNDECIDABLE ────────────────────────────
@@ -227,7 +227,7 @@ test('UNDECIDABLE: any-typed target — cannot determine enumerability', () => {
     sync(() => x(), target, (v) => v)
   `)
   expect(verdicts.length).toBe(1)
-  assertUndecidable(verdicts[0], "'any'")
+  assertUndecidable(verdicts[0]!, "'any'")
 })
 
 // ── Cross-boundary: function parameter → UNDECIDABLE ─────────────────────────
@@ -243,12 +243,13 @@ test('UNDECIDABLE: function parameter — concrete identity unknown (cross-bound
     }
   `)
   expect(verdicts.length).toBe(1)
-  assertUndecidable(verdicts[0])
+  assertUndecidable(verdicts[0]!)
   // Reason should mention parameter / cross-boundary
-  if (verdicts[0].kind === 'UNDECIDABLE') {
+  const v0 = verdicts[0]!
+  if (v0.kind === 'UNDECIDABLE') {
     expect(
-      verdicts[0].reason.includes('parameter') || verdicts[0].reason.includes('cross-boundary'),
-      `Reason should mention parameter: ${verdicts[0].reason}`,
+      v0.reason.includes('parameter') || v0.reason.includes('cross-boundary'),
+      `Reason should mention parameter: ${v0.reason}`,
     ).toBe(true)
   }
 })
@@ -272,7 +273,7 @@ test('UNDECIDABLE: structurally matching non-nv type fails nominal check', () =>
   `)
   expect(verdicts.length).toBe(1)
   // FakeSignal.set is NOT in nv core → isNvSignalType returns false → UNDECIDABLE
-  assertUndecidable(verdicts[0])
+  assertUndecidable(verdicts[0]!)
 })
 
 // ── Local 'sync' function is NOT classified ────────────────────────────────────
@@ -302,9 +303,9 @@ test('Multiple sync calls — one verdict per sync, correct kinds', () => {
     sync(() => x(), () => arr[x()], (v) => v)  // REJECT
   `)
   expect(verdicts.length).toBe(3)
-  assertAccept(verdicts[0], 1)
-  assertAccept(verdicts[1], 2)
-  assertReject(verdicts[2])
+  assertAccept(verdicts[0]!, 1)
+  assertAccept(verdicts[1]!, 2)
+  assertReject(verdicts[2]!)
 })
 
 // ── Target ID stability: same signal referenced twice → same ID ───────────────
@@ -317,8 +318,8 @@ test('ACCEPT: same signal as target in two syncs → identical IDs', () => {
     sync(() => y(), T, (v) => v)
   `)
   expect(verdicts.length).toBe(2)
-  const t1 = assertAccept(verdicts[0], 1)
-  const t2 = assertAccept(verdicts[1], 1)
+  const t1 = assertAccept(verdicts[0]!, 1)
+  const t2 = assertAccept(verdicts[1]!, 1)
   expect([...t1][0], 'Same signal T should produce identical IDs in both verdicts').toBe([...t2][0])
 })
 
@@ -331,7 +332,7 @@ test('ACCEPT: conditional thunk with block body and explicit return', () => {
     sync(() => x(), () => { return cond() ? T1 : T2 }, (v) => v)
   `)
   expect(verdicts.length).toBe(1)
-  const targets = assertAccept(verdicts[0], 2)
+  const targets = assertAccept(verdicts[0]!, 2)
   expect(idContains(targets, 'T1')).toBe(true)
   expect(idContains(targets, 'T2')).toBe(true)
 })
@@ -347,7 +348,7 @@ test('ACCEPT: target thunk assigned to variable, then referenced by identifier',
     sync(() => x(), pickTarget, (v) => v)
   `)
   expect(verdicts.length).toBe(1)
-  const targets = assertAccept(verdicts[0], 2)
+  const targets = assertAccept(verdicts[0]!, 2)
   expect(idContains(targets, 'T1')).toBe(true)
   expect(idContains(targets, 'T2')).toBe(true)
 })
@@ -366,7 +367,7 @@ test('UNDECIDABLE: one branch undecidable — partial enumeration rejected', () 
   `)
   expect(verdicts.length).toBe(1)
   // One branch is 'any' → UNDECIDABLE. mergeEnum(SIGNALS, UNDECIDABLE) → UNDECIDABLE.
-  assertUndecidable(verdicts[0])
+  assertUndecidable(verdicts[0]!)
 })
 
 // ── Soundness note ─────────────────────────────────────────────────────────────
@@ -398,7 +399,7 @@ test('SOUNDNESS NOTE (documented, not executable in compiler stream): ' +
   // A provably non-enumerable case → REJECT (with diagnostic), not ACCEPT
   expect(verdicts.length).toBe(1)
   expect(
-    verdicts[0].kind,
+    verdicts[0]!.kind,
     'Classifier must never ACCEPT a provably non-enumerable target',
   ).not.toBe('ACCEPT')
 })

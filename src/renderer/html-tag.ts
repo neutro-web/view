@@ -57,7 +57,7 @@ type HoleKind = { kind: 'text' } | { kind: 'attr'; name: string }
 function classifyHole(prevString: string, nextString: string): HoleKind {
   const m = prevString.match(/\s([\w:-]+)=["']$/)
   if (m !== null && (nextString.startsWith('"') || nextString.startsWith("'"))) {
-    return { kind: 'attr', name: m[1] }
+    return { kind: 'attr', name: m[1]! }
   }
   return { kind: 'text' }
 }
@@ -117,13 +117,13 @@ function buildHtmlStrings(
     // inside the hole range or past it.  The prior version only consumed in the
     // `else` (i >= holes.length) branch, which produced a stray `"` when the
     // string after an attr hole is itself still within the holes range.
-    let raw = strings[i]
+    let raw = strings[i]!
     if (quoteConsumedAt.has(i)) {
       raw = raw.replace(/^["']/, '')
     }
 
     if (i < holes.length) {
-      const hole = holes[i]
+      const hole = holes[i]!
       if (hole.kind === 'text') {
         sentinelHtml += `${raw}<!--nv-${i}-->`
       } else {
@@ -134,7 +134,7 @@ function buildHtmlStrings(
             `[nv/html] Internal: attr hole ${i} but no attr pattern at end of string "${raw}"`,
           )
         }
-        const stripped = raw.slice(0, raw.length - m[0].length)
+        const stripped = raw.slice(0, raw.length - m[0]!.length)
         sentinelHtml += `${stripped} data-nv-attr-${i}="${hole.name}"`
         // Mark the NEXT string to have its leading closing-quote consumed.
         quoteConsumedAt.add(i + 1)
@@ -176,7 +176,7 @@ export function createHtmlTag(document: Document) {
     // Classify holes
     const holes: HoleKind[] = []
     for (let i = 0; i < exprs.length; i++) {
-      holes.push(classifyHole(strings[i], strings[i + 1] ?? ''))
+      holes.push(classifyHole(strings[i]!, strings[i + 1] ?? ''))
     }
 
     // Build HTML strings
@@ -195,7 +195,7 @@ export function createHtmlTag(document: Document) {
         const comment = node as Comment
         const m = comment.data.match(/^nv-(\d+)$/)
         if (m !== null) {
-          const idx = Number.parseInt(m[1], 10)
+          const idx = Number.parseInt(m[1]!, 10)
           bindingPaths[idx] = computePath(node, frag)
         }
       } else if (node.nodeType === 1 /* ELEMENT_NODE */) {
@@ -229,7 +229,7 @@ export function createHtmlTag(document: Document) {
     // Build bindings
     const bindings: Binding[] = []
     for (let i = 0; i < exprs.length; i++) {
-      const hole = holes[i]
+      const hole = holes[i]!
       // The tagged-template front-end can only validate that exprs[i] is a function
       // (checked above). The generic type parameter is asserted here — the runtime
       // effect will produce wrong output (non-string in a DOM text position) if the
