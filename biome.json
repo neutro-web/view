@@ -34,8 +34,7 @@
       },
       "style": {
         "useImportType": "error",
-        "useNodejsImportProtocol": "error",
-        "noNonNullAssertion": "off"
+        "useNodejsImportProtocol": "error"
       }
     }
   }

@@ -198,8 +198,11 @@ test('CYCLE: simple 2-node cycle (A→B, B→A)', () => {
     sync(() => B(), A, v => v)   // reads B, writes A → edge B→A
   `)
   expect(cycles.length, `Expected 1 cycle, got ${cycles.length}`).toBe(1)
+  // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
   expect(cycles[0]!.cycle.length).toBe(2)
+  // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
   expect(cycleContains(cycles[0]!.cycle, 'A')).toBe(true)
+  // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
   expect(cycleContains(cycles[0]!.cycle, 'B')).toBe(true)
 })
 
@@ -210,7 +213,9 @@ test('CYCLE: self-write (sync reads and writes the same signal)', () => {
     sync(() => T(), T, v => v + 1)  // reads T, writes T → edge T→T (self-loop)
   `)
   expect(cycles.length).toBe(1)
+  // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
   expect(cycles[0]!.cycle.length).toBe(1)
+  // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
   expect(cycleContains(cycles[0]!.cycle, 'T')).toBe(true)
 })
 
@@ -223,9 +228,13 @@ test('CYCLE: three-way cycle (A→B→C→A)', () => {
     sync(() => C(), A, v => v)  // edge C→A
   `)
   expect(cycles.length).toBe(1)
+  // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
   expect(cycles[0]!.cycle.length).toBe(3)
+  // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
   expect(cycleContains(cycles[0]!.cycle, 'A')).toBe(true)
+  // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
   expect(cycleContains(cycles[0]!.cycle, 'B')).toBe(true)
+  // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
   expect(cycleContains(cycles[0]!.cycle, 'C')).toBe(true)
 })
 
@@ -272,7 +281,9 @@ test('CYCLE: multi-read source (reads A and B, both can feed cycle back)', () =>
     // B→C exists but no back-edge to B, so no B-cycle
   `)
   expect(cycles.length).toBe(1)
+  // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
   expect(cycleContains(cycles[0]!.cycle, 'A')).toBe(true)
+  // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
   expect(cycleContains(cycles[0]!.cycle, 'C')).toBe(true)
 })
 
@@ -322,9 +333,11 @@ test('CYCLE: involvedSyncs correctly attributed to cycle edges', () => {
 
   expect(cycles.length).toBe(1)
   // Both syncs should be in involvedSyncs (one creates A→B, the other B→A)
+  // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
   expect(cycles[0]!.involvedSyncs.length, 'both syncs should be attributed to the cycle').toBe(2)
   // Each involved sync should be one of the two ACCEPT verdict call nodes
   const verdictNodes = verdicts.map((v) => v.callNode)
+  // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
   for (const s of cycles[0]!.involvedSyncs) {
     expect(
       verdictNodes.includes(s),
@@ -409,18 +422,25 @@ test('SIGNAL ID CONSISTENCY: step 1 target ID === step 2 source read ID for same
   })(sf)
 
   expect(verdicts.length).toBe(2)
+  // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
+  const verdict0 = verdicts[0]!
+  // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
+  const verdict1 = verdicts[1]!
   const accept0 =
-    verdicts[0]!.kind === 'ACCEPT'
-      ? (verdicts[0]! as Extract<(typeof verdicts)[0], { kind: 'ACCEPT' }>)
+    verdict0.kind === 'ACCEPT'
+      ? (verdict0 as Extract<(typeof verdicts)[0], { kind: 'ACCEPT' }>)
       : null
   const accept1 =
-    verdicts[1]!.kind === 'ACCEPT'
-      ? (verdicts[1]! as Extract<(typeof verdicts)[1], { kind: 'ACCEPT' }>)
+    verdict1.kind === 'ACCEPT'
+      ? (verdict1 as Extract<(typeof verdicts)[1], { kind: 'ACCEPT' }>)
       : null
   expect(accept0 && accept1, 'Both verdicts should be ACCEPT').toBeTruthy()
   if (!accept0 || !accept1) return
 
+  expect(sourceArgs.length).toBe(2)
+  // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
   const reads0 = cycleChecker.analyzeSourceReads(sourceArgs[0]!, checker)
+  // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
   const reads1 = cycleChecker.analyzeSourceReads(sourceArgs[1]!, checker)
   expect(reads0.kind).toBe('SIGNALS')
   expect(reads1.kind).toBe('SIGNALS')
@@ -432,7 +452,9 @@ test('SIGNAL ID CONSISTENCY: step 1 target ID === step 2 source read ID for same
   expect(sync0TargetIds.length).toBe(1)
   expect(sync1ReadIds.length).toBe(1)
   expect(
+    // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
     sync0TargetIds[0]!,
     'Step 1 target ID for B must equal step 2 source read ID for B — same signalSymbolId derivation',
+    // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
   ).toBe(sync1ReadIds[0]!)
 })
