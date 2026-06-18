@@ -714,7 +714,7 @@ test('TC-05a  primitive value renders as text node before anchor', () => {
   const div = parent.querySelector('div') as Element
   expect(div.childNodes.length, 'textNode + anchor').toBe(2)
   expect((div.childNodes[0]! as Text).data).toBe('hello')
-  expect(div.childNodes[1]!.nodeType, 'anchor still present').toBe(8 /* COMMENT_NODE */)
+  expect(div.childNodes[1]?.nodeType, 'anchor still present').toBe(8 /* COMMENT_NODE */)
 
   dispose()
   rmParent(parent)

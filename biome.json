@@ -38,5 +38,17 @@
         "useShorthandFunctionType": "off"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "include": ["test/**", "integration/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noNonNullAssertion": "off"
+          }
+        }
+      }
+    }
+  ]
 }

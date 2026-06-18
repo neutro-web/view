@@ -317,7 +317,7 @@ test('ADVERSARIAL: ReadonlyArray<T> explicit — must be DECLINE not OBJECT_IS',
   )
   // Double-check: it must specifically NOT be OBJECT_IS (that would be the correctness bug)
   expect(
-    verdicts[0]!.policy,
+    verdicts[0]?.policy,
     'ReadonlyArray<T> must never be OBJECT_IS — TypeScript readonly does not guarantee runtime immutability',
   ).not.toBe('OBJECT_IS')
 })
@@ -468,7 +468,7 @@ test('NO VERDICT: local function named "derived" is not classified', () => {
   `)
   // Only signal(0) gets a verdict; local derived() does not
   expect(verdicts.length).toBe(1)
-  expect(verdicts[0]!.policy).toBe('OBJECT_IS') // signal(0) = number
+  expect(verdicts[0]?.policy).toBe('OBJECT_IS') // signal(0) = number
 })
 
 // ── Return-type extraction wins over argument type ────────────────────────────
@@ -489,7 +489,7 @@ test('Explicit T annotation wins over argument type (return-type extraction)', (
     import { signal } from '@nv/core'
     const s = signal<number[]>([])
   `)
-  expect(verdicts[0]!.valueTypeString, 'Type string should reflect explicit annotation').toBe(
+  expect(verdicts[0]?.valueTypeString, 'Type string should reflect explicit annotation').toBe(
     'number[]',
   )
 })

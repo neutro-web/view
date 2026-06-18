@@ -399,7 +399,7 @@ test('SOUNDNESS NOTE (documented, not executable in compiler stream): ' +
   // A provably non-enumerable case → REJECT (with diagnostic), not ACCEPT
   expect(verdicts.length).toBe(1)
   expect(
-    verdicts[0]!.kind,
+    verdicts[0]?.kind,
     'Classifier must never ACCEPT a provably non-enumerable target',
   ).not.toBe('ACCEPT')
 })

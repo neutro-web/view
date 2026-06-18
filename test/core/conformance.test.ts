@@ -132,7 +132,7 @@ test('§12.4  Deep chain (100k) — iterative walk, no stack overflow', () => {
   // Pre-compute TOP-DOWN: each read is O(1) stack depth because the previous
   // node is already CLEAN — updateIfNecessary returns at the CLEAN check
   // immediately. Total stack depth stays constant regardless of N.
-  for (let i = 0; i < N; i++) all[i]!()
+  for (let i = 0; i < N; i++) all[i]?.()
   expect(leaf()).toBe(0)
 
   // NOW test the iterative update path: root.set() marks all nodes DIRTY/CHECK.
@@ -154,9 +154,9 @@ test('§12.5  Wide fanout (10k) — all observers update', () => {
   }
   src.set(1)
   // Check a sample
-  expect(obs[0]!(), 'obs[0] wrong').toBe(1)
-  expect(obs[N - 1]!(), 'obs[N-1] wrong').toBe(N)
-  expect(obs[500]!(), 'obs[500] wrong').toBe(501)
+  expect(obs[0]?.(), 'obs[0] wrong').toBe(1)
+  expect(obs[N - 1]?.(), 'obs[N-1] wrong').toBe(N)
+  expect(obs[500]?.(), 'obs[500] wrong').toBe(501)
 })
 
 // ── §12.6: Disposal totality ─────────────────────────────────────────────────
@@ -908,14 +908,14 @@ test('§fuzz  run-once + no-leak across 200 seeded random graphs', () => {
     batch(() => {
       const numWrites = 1 + ((rng() * NUM_SIGS) | 0)
       for (let w = 0; w < numWrites; w++) {
-        trialSigs[(rng() * NUM_SIGS) | 0]!.set((rng() * 100) | 0)
+        trialSigs[(rng() * NUM_SIGS) | 0]?.set((rng() * 100) | 0)
       }
     })
 
     // Pull DEEPEST-FIRST: forces interior nodes through CHECK up-walks (frame
     // loop), not the DIRTY early-return shortcut — where run-once bugs hide.
     const derivedNodes = trialNodes.slice(NUM_SIGS)
-    for (let i = derivedNodes.length - 1; i >= 0; i--) derivedNodes[i]!()
+    for (let i = derivedNodes.length - 1; i >= 0; i--) derivedNodes[i]?.()
     // Second pull: every node is now Clean — must NOT recompute again.
     for (const f of derivedNodes) f()
 
