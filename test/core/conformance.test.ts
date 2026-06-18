@@ -1180,3 +1180,123 @@ test('§B8   batch + in-effect signal write + flushSync — no double-flush', ()
   flushSync() // everything is Clean at this point
   expect(log.length, 'Spurious re-run after flushSync — double-flush bug').toBe(0)
 })
+
+// ── §cascade-cap: Cascade cap boundary tests ─────────────────────────────────
+// Fix B: cap fires at > MAX_CASCADE, not >= MAX_CASCADE. An acyclic chain of
+// exactly 100 sync nodes must settle cleanly without hitting the cap.
+
+test('§cascade-cap N=100 acyclic chain settles cleanly — cap must not fire', () => {
+  // Build a 100-deep signal chain where each signal is written by a sync
+  // that reads the previous one. Trigger the root; all 100 must settle.
+  const N = 100
+  const signals: ReturnType<typeof signal<number>>[] = []
+  for (let i = 0; i < N; i++) signals.push(signal(0))
+
+  let capLogged = false
+  const origError = console.error
+  console.error = (...args: unknown[]) => {
+    if (String(args[0]).includes('cascade')) capLogged = true
+  }
+
+  try {
+    const dispose = createRoot((d) => {
+      for (let i = 1; i < N; i++) {
+        const src = signals[i - 1]!
+        const tgt = signals[i]!
+        sync(
+          () => src(),
+          tgt,
+          (v: number) => v,
+        )
+      }
+      return d
+    })
+    flushSync() // initial settle
+
+    signals[0]!.set(42)
+    flushSync()
+
+    expect(capLogged, 'Cascade cap fired for a 100-deep acyclic chain (off-by-one)').toBe(false)
+    expect(signals[N - 1]!(), `Last signal in chain should be 42, got ${signals[N - 1]!()}`).toBe(
+      42,
+    )
+
+    dispose()
+  } finally {
+    console.error = origError
+  }
+})
+
+test('§cascade-cap N=101 real cycle triggers cascade cap', () => {
+  // A real cycle: sync A→B and sync B→A, with a writeback that always
+  // increments so it never settles. The cap must fire.
+  const A = signal(0)
+  const B = signal(0)
+
+  let capLogged = false
+  const origError = console.error
+  console.error = (...args: unknown[]) => {
+    if (String(args[0]).includes('cascade')) capLogged = true
+  }
+
+  try {
+    const dispose = createRoot((d) => {
+      sync(
+        () => A(),
+        B,
+        (v: number) => v + 1,
+      )
+      sync(
+        () => B(),
+        A,
+        (v: number) => v + 1,
+      )
+      return d
+    })
+    flushSync()
+    A.set(1)
+    flushSync()
+    expect(capLogged, 'Cascade cap did not fire for a real sync cycle').toBe(true)
+    dispose()
+  } finally {
+    console.error = origError
+  }
+})
+
+// ── §cascade-cap-ext: External pubsub burst — not capped by cascade guard ────
+// Fix C: pubsub entries (ExtEntry) must not consume the reactive-cascade budget.
+// A burst of 150 publishes must all deliver, even though 150 > MAX_CASCADE (100).
+
+test('§cascade-cap-ext pubsub burst of 150 delivers all — not capped by cascade guard', () => {
+  const count = signal(0)
+  const ps = pubsub<void>()
+
+  let capLogged = false
+  const origError = console.error
+  console.error = (...args: unknown[]) => {
+    if (String(args[0]).includes('cascade')) capLogged = true
+  }
+
+  try {
+    const dispose = createRoot((d) => {
+      sync(ps, count, (_, current: number) => current + 1)
+      return d
+    })
+    flushSync()
+
+    // Queue 150 publishes inside a batch so they all enter extQHead before draining
+    batch(() => {
+      for (let i = 0; i < 150; i++) ps.publish()
+    })
+
+    expect(
+      capLogged,
+      'Cascade cap fired for a 150-publish burst (ext entries should not consume cap)',
+    ).toBe(false)
+    expect(count(), `Expected count=150, got ${count()}`).toBe(150)
+
+    dispose()
+  } finally {
+    console.error = origError
+  }
+})

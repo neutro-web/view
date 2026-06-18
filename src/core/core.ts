@@ -676,7 +676,7 @@ function scheduleFlush(): void {
 // spinning the former inner while(syncQHead) loop indefinitely. (§8.5.4)
 function drainSyncPhase(): void {
   let iterations = 0
-  while ((syncQHead !== null || extQHead !== null) && iterations < MAX_CASCADE) {
+  while ((syncQHead !== null || extQHead !== null) && iterations <= MAX_CASCADE) {
     if (syncQHead !== null) {
       // Reactive sync: resolve via up-walk (may trigger more syncs/effects via §4 write)
       const n = syncQHead
@@ -693,6 +693,9 @@ function drainSyncPhase(): void {
       }
     } else if (extQHead !== null) {
       // External entry: untracked compute + write (may trigger reactive syncs → outer loop catches)
+      // External entries cannot form a reactive cycle on their own — do NOT consume the
+      // reactive-cascade budget (iterations). They drain without bound here; any reactive
+      // syncs they enqueue will be processed in subsequent outer-loop iterations.
       const entry = extQHead
       extQHead = entry.next
       if (extQHead === null) extQTail = null
@@ -703,10 +706,12 @@ function drainSyncPhase(): void {
           routeErrorFrom(entry.node.owner, e)
         }
       }
+      // NOTE: iterations is NOT incremented for external entries (see Fix C comment above)
+      continue
     }
     iterations++
   }
-  if (iterations >= MAX_CASCADE) {
+  if (iterations > MAX_CASCADE) {
     console.error(`[nv] Sync cascade cap (${MAX_CASCADE}) reached.`)
     syncQHead = null
     syncQTail = null
@@ -722,7 +727,7 @@ function flushAll(): void {
 
   try {
     let cycles = 0
-    while (cycles < MAX_CASCADE) {
+    while (cycles <= MAX_CASCADE) {
       // §8.7: drain syncs first
       drainSyncPhase()
       if (effQHead === null) break
@@ -751,7 +756,7 @@ function flushAll(): void {
       cycles++
       if (syncQHead === null && extQHead === null && effQHead === null) break
     }
-    if (cycles >= MAX_CASCADE) {
+    if (cycles > MAX_CASCADE) {
       console.error(`[nv] Effect cascade cap (${MAX_CASCADE}) reached.`)
       syncQHead = null
       syncQTail = null

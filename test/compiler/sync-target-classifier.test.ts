@@ -370,6 +370,28 @@ test('UNDECIDABLE: one branch undecidable — partial enumeration rejected', () 
   assertUndecidable(verdicts[0]!)
 })
 
+// ── Fix A: Block body with non-return statement before return → UNDECIDABLE ────
+// A block body like `{ if (cond) return sigA; return sigB }` has an IfStatement
+// before the return. resolveFunctionBody must bail immediately → UNDECIDABLE.
+// (Fix C1: bail on first non-ReturnStatement in block body)
+test('UNDECIDABLE: block body with if-branch before return — not a partial ACCEPT', () => {
+  const verdicts = getVerdicts(`
+    import { signal, sync } from '@nv/core'
+    const source = signal(0)
+    const target = signal(0)
+    const flag = signal(false)
+    sync(source, () => {
+      if (flag()) return source
+      return target
+    }, target)
+  `)
+  expect(verdicts.length).toBe(1)
+  expect(
+    verdicts[0]!.kind,
+    `Expected UNDECIDABLE for block body with if-branch before return, got ${verdicts[0]!.kind}`,
+  ).toBe('UNDECIDABLE')
+})
+
 // ── Soundness note ─────────────────────────────────────────────────────────────
 // Property: any ACCEPT verdict imprecision (incomplete target set, or wrong ACCEPT
 // when UNDECIDABLE would be more precise) degrades to the runtime cascade cap via

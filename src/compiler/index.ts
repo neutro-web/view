@@ -9,7 +9,6 @@ export { BranchVariantAnalyzer } from './branch-variant-analyzer'
 export type {
   ClassifierConfig,
   TargetVerdict,
-  EnumResult,
   EqualityPolicy,
   EqualityPolicyVerdict,
   BranchVariantVerdict,

@@ -254,7 +254,11 @@ export class SyncTargetClassifier {
       const body = resolved.body
       if (!ts.isBlock(body)) return body as ts.Expression
       for (const stmt of body.statements) {
-        if (ts.isReturnStatement(stmt) && stmt.expression) return stmt.expression
+        if (ts.isReturnStatement(stmt)) {
+          return stmt.expression ?? null
+        }
+        // Non-return statement before the return → block is too complex → UNDECIDABLE
+        return null
       }
       return null
     }
@@ -262,7 +266,11 @@ export class SyncTargetClassifier {
     // function() { return expr }
     if (ts.isFunctionExpression(resolved)) {
       for (const stmt of resolved.body.statements) {
-        if (ts.isReturnStatement(stmt) && stmt.expression) return stmt.expression
+        if (ts.isReturnStatement(stmt)) {
+          return stmt.expression ?? null
+        }
+        // Non-return statement before the return → block is too complex → UNDECIDABLE
+        return null
       }
       return null
     }
