@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "packages": {
+    ".": {
+      "release-type": "node",
+      "package-name": "@neutro/view",
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true,
+      "draft": false,
+      "prerelease": false
+    }
+  },
+  "$comment": "Single-package release. nv is published as one package (@neutro/view) with subpath exports (./core, ./compiler, ./renderer), so there is one version and one changelog — mirrors @neutro/form."
+}

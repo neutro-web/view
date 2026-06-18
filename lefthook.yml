@@ -1,0 +1,21 @@
+# Git hooks for @neutro/view (https://lefthook.dev)
+# Install once with: pnpm lefthook install  (runs automatically via the `prepare` script)
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: biome
+      glob: "*.{ts,tsx,js,jsx,json,jsonc}"
+      run: pnpm biome check --write --no-errors-on-unmatched {staged_files}
+      stage_fixed: true
+
+pre-push:
+  parallel: false
+  jobs:
+    # These mirror the project's two standing gates. They are SEPARATE on purpose:
+    # the test runner strips types, so a green suite does NOT imply a clean compile.
+    # Both must pass before a push (the lesson institutionalized across all streams).
+    - name: typecheck
+      run: pnpm typecheck
+    - name: test
+      run: pnpm test

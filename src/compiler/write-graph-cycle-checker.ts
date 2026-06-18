@@ -393,6 +393,7 @@ export class WriteGraphCycleChecker {
  */
 function normalizeCycle(cycle: SignalId[]): string {
   if (cycle.length === 0) return ''
+  // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
   const minIdx = cycle.reduce((best, _, i) => (cycle[i]! < cycle[best]! ? i : best), 0)
   return [...cycle.slice(minIdx), ...cycle.slice(0, minIdx)].join('|')
 }
@@ -407,7 +408,9 @@ function findInvolvedSyncs(
 ): ts.CallExpression[] {
   const syncs = new Set<ts.CallExpression>()
   for (let i = 0; i < cycle.length; i++) {
+    // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
     const from = cycle[i]!
+    // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
     const to = cycle[(i + 1) % cycle.length]!
     const callSet = attribution.get(from)?.get(to)
     if (callSet !== undefined) {

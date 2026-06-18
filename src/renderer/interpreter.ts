@@ -62,6 +62,7 @@ import type {
 export function walkPath(root: Node, path: NodePath): Node {
   let current: Node = root
   for (let depth = 0; depth < path.length; depth++) {
+    // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
     const idx = path[depth]!
     const child = current.childNodes[idx]
     if (child === undefined) {
@@ -313,6 +314,8 @@ function mountFragment(
 
   // 3. Wire each binding (creates effects owned by the enclosing root).
   for (let i = 0; i < ir.bindings.length; i++) {
+    // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
+    // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
     wireBinding(ir.bindings[i]!, targets[i]!, doc)
   }
 
