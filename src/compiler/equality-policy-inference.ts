@@ -181,13 +181,22 @@ export class EqualityPolicyInferencer {
   /**
    * Extract the value type T from a signal<T>() or derived<T>() call.
    *
-   * Both signal and derived return SignalAccessor<T>. Extracting T from the
-   * return type (via getTypeArguments) is correct for both — it handles the
-   * case where T is explicitly annotated differently from the argument type
-   * (e.g. `signal<number[]>([])` where the argument `[]` would give `never[]`).
+   * Two-path extraction:
+   *
+   *   Path A — TypeReference (generic interface): signal() returns SignalAccessor<T>
+   *     which is a generic interface, so getTypeArguments() yields [T] directly.
+   *     This also handles the explicit-annotation case: `signal<number[]>([])`.
+   *
+   *   Path B — Function type alias: derived() returns DerivedAccessor<T> which is
+   *     defined as `type DerivedAccessor<T> = () => T`. TypeScript resolves this to
+   *     a plain function type, not a TypeReference, so getTypeArguments() returns [].
+   *     Fall back to the call signature's return type: the single call signature of
+   *     `() => T` has return type T, which is what we need.
    */
   private extractValueType(call: ts.CallExpression, checker: ts.TypeChecker): ts.Type | null {
     const returnType = checker.getTypeAtLocation(call)
+
+    // Path A: generic interface (SignalAccessor<T>) — type arguments available directly
     try {
       const typeArgs = checker.getTypeArguments(returnType as ts.TypeReference)
       if (typeArgs.length > 0) {
@@ -195,8 +204,16 @@ export class EqualityPolicyInferencer {
         return typeArgs[0]!
       }
     } catch {
-      // Not a TypeReference or no type args — can't extract T
+      // Not a TypeReference — fall through to Path B
     }
+
+    // Path B: function type alias (DerivedAccessor<T> = () => T) — extract via call signature
+    const callSigs = returnType.getCallSignatures()
+    if (callSigs.length > 0) {
+      // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
+      return checker.getReturnTypeOfSignature(callSigs[0]!)
+    }
+
     return null
   }
 
