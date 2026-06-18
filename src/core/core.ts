@@ -674,9 +674,21 @@ function scheduleFlush(): void {
 // CASCADE CAP NOTE: process ONE entry per outer iteration so that a cyclic pair
 // (sync A→B, sync B→A) increments the cap counter on every step rather than
 // spinning the former inner while(syncQHead) loop indefinitely. (§8.5.4)
+//
+// TWO-COUNTER DESIGN (§8.5.4):
+//   reactiveIterations — increments only for reactive sync-node processing;
+//     capped at MAX_CASCADE to catch sync A→B→A reactive cycles.
+//   totalIterations — increments for every iteration (reactive + ext entries);
+//     capped at MAX_EXT_SAFETY to catch runaway ext-only feedback loops
+//     (e.g. sync A's compute calls psB.publish(), sync B's compute calls psA.publish()).
+//   This ensures legitimate burst traffic (many ext publishes) is not capped
+//   while still providing a hard upper bound against infinite ext cycles.
 function drainSyncPhase(): void {
-  let iterations = 0
-  while ((syncQHead !== null || extQHead !== null) && iterations <= MAX_CASCADE) {
+  let reactiveIterations = 0
+  const MAX_EXT_SAFETY = 10 * MAX_CASCADE
+  let totalIterations = 0
+  while (syncQHead !== null || extQHead !== null) {
+    totalIterations++
     if (syncQHead !== null) {
       // Reactive sync: resolve via up-walk (may trigger more syncs/effects via §4 write)
       const n = syncQHead
@@ -691,11 +703,11 @@ function drainSyncPhase(): void {
           routeErrorFrom(n.owner, e)
         }
       }
+      reactiveIterations++
     } else if (extQHead !== null) {
       // External entry: untracked compute + write (may trigger reactive syncs → outer loop catches)
-      // External entries cannot form a reactive cycle on their own — do NOT consume the
-      // reactive-cascade budget (iterations). They drain without bound here; any reactive
-      // syncs they enqueue will be processed in subsequent outer-loop iterations.
+      // Does NOT increment reactiveIterations — ext entries are not part of the reactive cycle.
+      // totalIterations still increments (above) to catch runaway ext feedback loops.
       const entry = extQHead
       extQHead = entry.next
       if (extQHead === null) extQTail = null
@@ -706,17 +718,19 @@ function drainSyncPhase(): void {
           routeErrorFrom(entry.node.owner, e)
         }
       }
-      // NOTE: iterations is NOT incremented for external entries (see Fix C comment above)
-      continue
     }
-    iterations++
-  }
-  if (iterations > MAX_CASCADE) {
-    console.error(`[nv] Sync cascade cap (${MAX_CASCADE}) reached.`)
-    syncQHead = null
-    syncQTail = null
-    extQHead = null
-    extQTail = null
+    if (reactiveIterations > MAX_CASCADE || totalIterations > MAX_EXT_SAFETY) {
+      const reason =
+        reactiveIterations > MAX_CASCADE
+          ? `reactive cascade cap (${MAX_CASCADE})`
+          : `total iteration safety cap (${MAX_EXT_SAFETY})`
+      console.error(`[nv] Sync ${reason} reached.`)
+      syncQHead = null
+      syncQTail = null
+      extQHead = null
+      extQTail = null
+      return
+    }
   }
 }
 
