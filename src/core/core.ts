@@ -894,8 +894,12 @@ export function signal<T>(
 
 // ── derived ──────────────────────────────────────────────────────────────────
 
-// biome-ignore lint/style/useShorthandFunctionType: interface form required — TypeScript resolves type aliases to plain function types, losing TypeReference identity and breaking getTypeArguments() in the compiler
-export type DerivedAccessor<T> = () => T
+// interface form required — TypeScript resolves type aliases to plain function types,
+// losing TypeReference identity and breaking getTypeArguments() in the compiler.
+// useShorthandFunctionType is disabled in biome.json to prevent auto-revert.
+export interface DerivedAccessor<T> {
+  (): T
+}
 
 export function derived<T>(
   compute: () => T,
