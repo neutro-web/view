@@ -894,6 +894,7 @@ export function signal<T>(
 
 // ── derived ──────────────────────────────────────────────────────────────────
 
+// biome-ignore lint/style/useShorthandFunctionType: interface form required — TypeScript resolves type aliases to plain function types, losing TypeReference identity and breaking getTypeArguments() in the compiler
 export type DerivedAccessor<T> = () => T
 
 export function derived<T>(
