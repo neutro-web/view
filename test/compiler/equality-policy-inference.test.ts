@@ -317,7 +317,7 @@ test('ADVERSARIAL: ReadonlyArray<T> explicit — must be DECLINE not OBJECT_IS',
   )
   // Double-check: it must specifically NOT be OBJECT_IS (that would be the correctness bug)
   expect(
-    verdicts[0]?.policy,
+    verdicts[0]!.policy,
     'ReadonlyArray<T> must never be OBJECT_IS — TypeScript readonly does not guarantee runtime immutability',
   ).not.toBe('OBJECT_IS')
 })
