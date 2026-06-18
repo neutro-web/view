@@ -1079,3 +1079,80 @@ would be a separate escalation.
 
 **Status.** Locked (the read/write syntax boundary). The general compile-vs-runtime split
 remains open. The compiler back-end for the IR is the consumer of this decision.
+
+### 2026-06-18 — Benchmark baseline pinned (alien-signals@3.1.2, js-reactivity-benchmark SHA 56eb45e)
+
+**Baseline.** Machine: Apple M2 Max arm64 / Node v20.19.0 / V8 11.3.244.8-node.26.
+Benchmark fork: `milomg/js-reactivity-benchmark` commit `56eb45e84b3f6fcfa867840725e66b59a9b7467a`.
+Primary reference frame: alien-signals@3.1.2 (pinned in benchmark lockfile).
+
+Selected pre-optimization nv times (ms, lower is better) vs alien-signals:
+
+| Case | nv (baseline) | alien | ratio |
+|---|---|---|---|
+| createSignals | 49.9 | 8.9 | 5.6x |
+| createComputations | 240 | 120 | 2.0x |
+| updateSignals | 878 | 450 | 1.95x |
+| 4-1000x12 - dyn5% | 6772 | 410 | 16.5x |
+| 25-1000x5 | 4032 | 499 | 8.1x |
+| molBench | 16.8 | 16.7 | 1.0x |
+
+Root cause of wide-graph outliers: nv was creating new Link objects on every recompute
+(~336M allocations for `4-1000x12` over 7000 iterations), while alien-signals reuses
+links via version stamps. Secondary: O(k) source-list dedup walk in `trackRead` (minor
+for narrow graphs; masked by GC churn in wide ones).
+
+**Status.** Baseline locked as the reference for Spec #1 optimizations.
+
+### 2026-06-18 — Spec #1 Opt-A: Link free-list pool + O(1) epoch-stamp dedup in trackRead
+
+**Approach.**
+
+1. **Link free-list pool (§9 in core.ts):** Added `linkPoolHead: Link | null` and a
+   `poolLink(link)` helper. `makeLink` pulls from the pool if available; `reconcileEdges`
+   and `disposeNodeFull` return links to the pool instead of letting them GC. Eliminates
+   per-recompute heap allocation for wide graphs.
+
+2. **O(1) epoch-stamp dedup in `trackRead` (§5.1):** Replaced the O(k) source-list walk
+   (`while cur !== null { if cur.source === source return; cur = cur.nextSource }`) with a
+   two-field compound stamp on the source node: `_seenBy: ReactiveNode | null` and
+   `_seenRunId: number`. Each `runRecompute` assigns a fresh `_runId` to the observer via a
+   global `_nextRunId` counter (incremented at entry). `trackRead` checks
+   `source._seenBy === observer && source._seenRunId === observer._runId` and returns early
+   on a match, otherwise stamps and proceeds. Compound key is nesting-safe: a nested
+   `runRecompute` (inner source recomputed via `updateIfNecessary` during the outer run)
+   overwrites the source's `_seenBy` with the inner observer's identity, so the outer
+   observer's subsequent check sees `_seenBy !== observer` and does not falsely dedup.
+   Rare edge case: outer observer reads the same source _after_ a nested recompute of that
+   source — a benign duplicate link results (correct graph, minor overhead, no missed
+   edges).
+
+3. **Deferral #2 (makeNode class):** Tested a class-based `ReactiveNodeImpl` to get a
+   monomorphic V8 hidden class for node allocation. Result: universally worse
+   (`createComputations` 122ms → 275ms, `updateSignals` 394ms → 527ms). Root cause:
+   TypeScript `useDefineForClassFields` compiles class field initialisers to
+   `Object.defineProperty`, which is slower than the object-literal fast path V8 uses for
+   same-shape literals. Reverted. The plain object literal stays.
+
+**Results** (Apple M2 Max / Node v20.19.0, post-optimization):
+
+| Case | before | after | improvement | vs alien |
+|---|---|---|---|---|
+| 4-1000x12 - dyn5% | 6772ms | 596ms | **11.3x** | 1.45x (was 16.5x) |
+| 25-1000x5 | 4032ms | 861ms | **4.7x** | 1.72x (was 8.1x) |
+| updateSignals | 878ms | 394ms | **2.2x** | **beats alien** (450ms) |
+| createComputations | 240ms | 123ms | **2.0x** | **tied** (120ms) |
+| molBench | 16.8ms | 16.7ms | — | **tied** |
+| repeatedObservers | 28ms | 25ms | — | **beats alien** (34ms) |
+| unstable | 30ms | 26ms | — | **beats alien** (34ms) |
+| createSignals | 49.9ms | 49.4ms | 0% | 5.5x behind (structural) |
+
+**createSignals gap (5.5x) is structural.** nv's single `ReactiveNode` struct carries
+27 fields spanning all node kinds (ownership tree, sync, error, perf stamps). Alien-signals
+signals are thinner objects. Splitting into per-kind structs would close this gap but
+requires escalation; marked as a genuine constraint-vs-benchmark tension rather than a
+tuning opportunity at this scope.
+
+**Conformance.** 203/203 green (vitest, both before and after each change).
+
+**Status.** Shipped. Pool + epoch stamp are in `src/core/core.ts` v0.4.1+.

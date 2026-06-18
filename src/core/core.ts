@@ -48,7 +48,23 @@ interface Link {
   nextObserver: Link | null
 }
 
+// §9: Link free-list pool. Reusing Link objects eliminates per-recompute GC
+// churn on wide graphs (e.g. 1000-node-wide layers × thousands of iterations).
+// nextSource doubles as the free-list pointer when the link is in the pool.
+let linkPoolHead: Link | null = null
+
 function makeLink(source: ReactiveNode, observer: ReactiveNode): Link {
+  if (linkPoolHead !== null) {
+    const l = linkPoolHead
+    linkPoolHead = l.nextSource
+    l.source = source
+    l.observer = observer
+    l.prevSource = null
+    l.nextSource = null
+    l.prevObserver = null
+    l.nextObserver = null
+    return l
+  }
   return {
     source,
     observer,
@@ -57,6 +73,17 @@ function makeLink(source: ReactiveNode, observer: ReactiveNode): Link {
     prevObserver: null,
     nextObserver: null,
   }
+}
+
+function poolLink(link: Link): void {
+  // Null out node refs so GC can collect nodes even if the pool holds the link.
+  link.source = null as unknown as ReactiveNode
+  link.observer = null as unknown as ReactiveNode
+  link.prevSource = null
+  link.prevObserver = null
+  link.nextObserver = null
+  link.nextSource = linkPoolHead
+  linkPoolHead = link
 }
 
 // ============================================================================
@@ -113,6 +140,21 @@ interface ReactiveNode {
   // §10: compiler hook stubs — inert in this phase
   _compilerEquals?: ((a: unknown, b: unknown) => boolean) | false
   _compilerEager?: boolean
+
+  // §5.1: O(1) dedup for trackRead — epoch stamp (perf tuning, v0.4.1+).
+  // _runId: bumped at the start of each runRecompute; identifies the current run
+  //   of this node as an observer. Stored on the observer.
+  // _seenBy / _seenRunId: compound stamp on the source — which observer read this
+  //   source, and in which run. Compound key avoids false dedup under nesting:
+  //   if a nested runRecompute (inner source being up-walked) reads the same source,
+  //   it writes its own _runId, changing _seenBy; the outer observer's check then
+  //   sees _seenBy !== currentObserver and does not falsely dedup. In the rare case
+  //   where a nested source recompute overwrites the stamp AND the outer observer
+  //   reads the source again later in the same run, a benign duplicate link results
+  //   (correct graph, minor overhead, no missed edges). See decision log §2026-06-18.
+  _runId: number // observer-side
+  _seenBy: ReactiveNode | null // source-side
+  _seenRunId: number // source-side
 }
 
 function makeNode(kind: 0 | 1 | 2 | 3): ReactiveNode {
@@ -143,6 +185,9 @@ function makeNode(kind: 0 | 1 | 2 | 3): ReactiveNode {
     _markNext: null,
     _walkParent: null,
     _walkCursor: null,
+    _runId: 0,
+    _seenBy: null,
+    _seenRunId: 0,
   }
 }
 
@@ -172,6 +217,10 @@ let extQTail: ExtEntry | null = null
 let batchDepth = 0
 let flushScheduled = false
 let flushRunning = false
+
+// §5.1: Monotonic epoch counter. Incremented once per runRecompute entry so
+// each observer run gets a globally unique ID for O(1) trackRead dedup.
+let _nextRunId = 1
 
 const MAX_CASCADE = 100 // §8.5.4
 
@@ -239,13 +288,18 @@ function trackRead(source: ReactiveNode): void {
   if (currentObserver === null || currentObserver.isDisposed) return
   const observer = currentObserver
 
-  // Dedup: same source read twice in one run → one edge only.
-  // O(k) scan; acceptable for correctness phase.
-  let cur = observer.firstSource
-  while (cur !== null) {
-    if (cur.source === source) return
-    cur = cur.nextSource
-  }
+  // O(1) dedup via epoch stamp. Each runRecompute assigns a unique _runId to
+  // the observer; trackRead stamps the source with (_seenBy=observer,
+  // _seenRunId=observer._runId). A matching stamp means already tracked this run.
+  // Compound key (_seenBy + _seenRunId) is nesting-safe: a nested runRecompute
+  // of a source S (via updateIfNecessary during the outer run) overwrites S's
+  // stamp with the inner observer's identity, so the outer observer's subsequent
+  // check sees _seenBy !== observer and does not falsely dedup.
+  // §10 hook attachment point: Spec #4's _compilerSources oracle attaches here,
+  // after the dedup check, before link creation.
+  if (source._seenBy === observer && source._seenRunId === observer._runId) return
+  source._seenBy = observer
+  source._seenRunId = observer._runId
 
   const link = makeLink(source, observer)
   appendToSourceList(link, observer)
@@ -404,6 +458,8 @@ function runRecompute(node: ReactiveNode): void {
     node.state = CLEAN
     return
   }
+  // Assign a new run identity for O(1) trackRead dedup (§5.1 epoch stamp).
+  node._runId = _nextRunId++
   _recomputeCount++ // §B1: test-only instrumentation (tree-shaken in prod)
   if (_perNodeOn) {
     // JIT-removable when false
@@ -483,6 +539,7 @@ function reconcileEdges(oldFirst: Link | null): void {
   while (link !== null) {
     const next = link.nextSource
     removeFromObserverList(link, link.source)
+    poolLink(link) // return to free-list; eliminates per-recompute GC churn
     link = next
   }
 }
@@ -570,6 +627,7 @@ function disposeNodeFull(node: ReactiveNode): void {
   while (link !== null) {
     const next = link.nextSource
     removeFromObserverList(link, link.source)
+    poolLink(link)
     link = next
   }
   node.firstSource = null
@@ -580,6 +638,7 @@ function disposeNodeFull(node: ReactiveNode): void {
   while (link !== null) {
     const next = link.nextObserver
     removeFromSourceList(link, link.observer)
+    poolLink(link)
     link = next
   }
   node.firstObserver = null
