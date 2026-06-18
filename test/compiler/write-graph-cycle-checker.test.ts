@@ -20,7 +20,7 @@ import { expect, test } from 'vitest'
 import { SyncTargetClassifier } from '../../src/compiler/sync-target-classifier'
 import type { CycleReport, ReadEnumResult, TargetVerdict } from '../../src/compiler/types'
 import { WriteGraphCycleChecker } from '../../src/compiler/write-graph-cycle-checker'
-import { getVerdicts, makeTestProgram, nvCoreInTmp } from './test-helpers'
+import { getVerdicts, makeTestProgram } from './test-helpers'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

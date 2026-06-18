@@ -422,8 +422,8 @@ test('derived: primitive return type → OBJECT_IS', () => {
     const d = derived(() => x() + 1)
   `)
   const derivedVerdict = verdicts.find((v) => v.valueTypeString === 'number')
-  expect(derivedVerdict, 'derived returning number should have a verdict').toBeTruthy()
-  if (derivedVerdict) expect(derivedVerdict.policy).toBe('OBJECT_IS')
+  if (!derivedVerdict) throw new Error('no verdict for derived() call')
+  expect(derivedVerdict.policy).toBe('OBJECT_IS')
 })
 
 test('derived: array return type → FALSE', () => {
