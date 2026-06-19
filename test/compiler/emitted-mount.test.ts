@@ -23,6 +23,11 @@
 import { JSDOM } from 'jsdom'
 import { expect, test } from 'vitest'
 import { emitMount } from '../../src/compiler/emitted-mount.js'
+import {
+  type EqualityPolicy,
+  emitEqualityHook,
+  emitEqualityHooks,
+} from '../../src/compiler/equality-hook-emitter.js'
 import type { BindingErasureVerdict } from '../../src/compiler/types.js'
 import { __test, flushSync, signal, sync } from '../../src/core/core.js'
 import { structurallyEqual } from '../../src/renderer/comparator.js'
@@ -942,4 +947,182 @@ test('§6: Perf characterization — Child + Conditional, emitted vs. interprete
   console.log(
     `     Cond flip:     interpreter ${interpreterFlipMs.toFixed(1)}ms  emitter ${emitterFlipMs.toFixed(1)}ms  (${(interpreterFlipMs / emitterFlipMs).toFixed(2)}x)`,
   )
+})
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Phase 2: Equality Hook Emission (step-3 only, setCompilerSources shelved)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── Gate 4a: Emission fidelity ────────────────────────────────────────────────
+
+test('P2 GATE 4a: FALSE policy → setCompilerEquals(fn, false) called, equals = false', () => {
+  const arr = signal<string[]>([])
+  expect(__test.getEquals(arr)).toBe(Object.is)
+
+  emitEqualityHook(arr, 'FALSE', __test.setCompilerEquals)
+
+  expect(__test.getEquals(arr)).toBe(false)
+})
+
+test('P2 GATE 4a: OBJECT_IS policy → NO emission, equals stays Object.is', () => {
+  const count = signal(0)
+  emitEqualityHook(count, 'OBJECT_IS', __test.setCompilerEquals)
+  expect(__test.getEquals(count)).toBe(Object.is)
+})
+
+test('P2 GATE 4a: DECLINE policy → NO emission, equals stays Object.is', () => {
+  const obj = signal({ x: 1 })
+  emitEqualityHook(obj, 'DECLINE', __test.setCompilerEquals)
+  expect(__test.getEquals(obj)).toBe(Object.is)
+})
+
+test('P2 GATE 4a: explicit-user-equals site → FALSE emission blocked by runtime guard', () => {
+  const customEq = (a: number[], b: number[]) => a.length === b.length
+  const arr = signal<number[]>([], { equals: customEq as never })
+
+  emitEqualityHook(arr, 'DECLINE', __test.setCompilerEquals)
+  expect(__test.getEquals(arr)).toBe(customEq)
+
+  // Belt-and-suspenders: even if FALSE were emitted, runtime guard should protect
+  emitEqualityHook(arr, 'FALSE', __test.setCompilerEquals)
+  expect(__test.getEquals(arr)).toBe(customEq)
+})
+
+test('P2 GATE 4a: batch emitEqualityHooks applies only FALSE sites', () => {
+  const count = signal(0)
+  const items = signal<string[]>([])
+  const obj = signal({ name: 'x' })
+
+  const sites = new Map<object, EqualityPolicy>([
+    [count, 'OBJECT_IS'],
+    [items, 'FALSE'],
+    [obj, 'DECLINE'],
+  ])
+
+  emitEqualityHooks(sites, __test.setCompilerEquals)
+
+  expect(__test.getEquals(count)).toBe(Object.is)
+  expect(__test.getEquals(items)).toBe(false)
+  expect(__test.getEquals(obj)).toBe(Object.is)
+})
+
+// ── Gate 4b: Behavioral differential — THE PAYOFF CASE ───────────────────────
+
+test('P2 GATE 4b: mutable-container WITHOUT Phase 2 → arr.push + set(arr) suppressed by Object.is', () => {
+  const { document, html } = makeDom()
+  const items = signal<string[]>([])
+
+  const ir = html`<span>${() => String(items().length)}</span>`
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const dispose = mount(ir, container, document)
+  flushSync()
+
+  expect(container.querySelector('span')!.textContent).toBe('0')
+
+  items().push('x')
+  items.set(items())
+  flushSync()
+
+  expect(container.querySelector('span')!.textContent).toBe('0')
+
+  dispose()
+})
+
+test('P2 GATE 4b: mutable-container WITH Phase 2 → arr.push + set(arr) propagates correctly', () => {
+  const { document, html } = makeDom()
+  const items = signal<string[]>([])
+
+  emitEqualityHook(items, 'FALSE', __test.setCompilerEquals)
+  expect(__test.getEquals(items)).toBe(false)
+
+  const ir = html`<span>${() => String(items().length)}</span>`
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const dispose = mount(ir, container, document)
+  flushSync()
+
+  expect(container.querySelector('span')!.textContent).toBe('0')
+
+  items().push('x')
+  items.set(items())
+  flushSync()
+
+  expect(container.querySelector('span')!.textContent).toBe('1')
+
+  items().push('y')
+  items.set(items())
+  flushSync()
+  expect(container.querySelector('span')!.textContent).toBe('2')
+
+  dispose()
+})
+
+test('P2 GATE 4b: emitted back-end + Phase 2 → same behavioral fix', () => {
+  const { document, html } = makeDom()
+  const items = signal<string[]>([])
+  emitEqualityHook(items, 'FALSE', __test.setCompilerEquals)
+
+  const ir = html`<span>${() => String(items().length)}</span>`
+  const { mountFn } = emitMount(ir)
+
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const dispose = mountFn(container, document)
+  flushSync()
+
+  items().push('a')
+  items.set(items())
+  flushSync()
+  expect(container.querySelector('span')!.textContent).toBe('1')
+
+  dispose()
+})
+
+test('P2 GATE 4b: primitive signal with Phase 2 SKIPPED → identical behavior (OBJECT_IS is a no-op)', () => {
+  const { document, html } = makeDom()
+  const count = signal(0)
+  emitEqualityHook(count, 'OBJECT_IS', __test.setCompilerEquals)
+  expect(__test.getEquals(count)).toBe(Object.is)
+
+  const ir = html`<span>${() => String(count())}</span>`
+  const { mountFn } = emitMount(ir)
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const dispose = mountFn(container, document)
+  flushSync()
+
+  count.set(42)
+  flushSync()
+  expect(container.querySelector('span')!.textContent).toBe('42')
+
+  dispose()
+})
+
+// ── HC-perturbation characterization ─────────────────────────────────────────
+
+test('P2 §5: Hidden-class characterization — emission overhead (logged, not a gate)', () => {
+  const N = 10_000
+
+  const t0 = performance.now()
+  for (let i = 0; i < N; i++) {
+    signal<string[]>([])
+  }
+  const withoutMs = performance.now() - t0
+
+  const t1 = performance.now()
+  for (let i = 0; i < N; i++) {
+    const s = signal<string[]>([])
+    emitEqualityHook(s, 'FALSE', __test.setCompilerEquals)
+  }
+  const withMs = performance.now() - t1
+
+  const overheadPct = (((withMs - withoutMs) / withoutMs) * 100).toFixed(1)
+  console.log(`\n  P2 §5 HC perturbation characterization (${N} signals):`)
+  console.log(`     Without emission:  ${withoutMs.toFixed(2)}ms`)
+  console.log(`     With emission:     ${withMs.toFixed(2)}ms`)
+  console.log(
+    `     Overhead:          ${overheadPct}%  (expected: minimal; only FALSE sites are written)`,
+  )
+  // No hard assertion — characterization only (test environment timing is noisy).
 })
