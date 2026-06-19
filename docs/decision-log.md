@@ -237,10 +237,14 @@ _Last updated: 2026-06-18 (Contract **v0.4.1** — runtime correctness verified;
   poc-tsconfig matter, not a stream defect.)
 
 ### Genuine research problems (unknown answers, can fail)
-- The propagation algorithm *correctness* is settled. The open research is beating an
-  alien-signals-class performance baseline — correctness-phase implementation uses O(k)
-  dedup scan in trackRead and plain-object node allocation; both are known deferrals.
-  Trigger to move to Claude Code: any answer that depends on a real hardware number.
+- Beating an alien-signals-class performance baseline. **Opt-A (2026-06-18) closed the two
+  named deferrals** (Link free-list pool + O(1) epoch-stamp dedup): wide-graph cases
+  improved 4.7–11.3x, `updateSignals`/`repeatedObservers` now beat alien, `createComputations`
+  tied. **One structural gap remains: `createSignals` 5.5x** (wide 27-field struct).
+  Ruling 2026-06-18: field-reduction authorized in-stream; **thin-signal allocation-shape
+  spike commissioned** (signals-are-never-observers premise; must not make hot paths
+  polymorphic or regress won cases — can fail); full per-kind struct split declined pending
+  spike evidence. Spike precedes Spec #4/#2.
 - Compiler specializations as optimization hypotheses, each of which must beat the
   unspecialized baseline on the benchmark before shipping.
 
@@ -1156,3 +1160,80 @@ tuning opportunity at this scope.
 **Conformance.** 203/203 green (vitest, both before and after each change).
 
 **Status.** Shipped. Pool + epoch stamp are in `src/core/core.ts` v0.4.1+.
+
+### 2026-06-18 — Ruling on the `createSignals` struct-shape escalation: field-reduction authorized in-stream; thin-signal spike commissioned; full kind-split declined pending evidence
+
+**Context.** Opt-A (same date) closed the two named perf deferrals and left one
+structural gap: `createSignals` stays 5.5x behind alien-signals because the single
+`ReactiveNode` struct carries 27 fields spanning all node kinds, while alien signals are
+thin. Claude Code correctly **escalated** rather than splitting the struct unilaterally
+(the single kind-distinguished struct is a locked decision; data-structure discipline,
+§9 / "Data-structure discipline"). This entry rules on that escalation.
+
+**Why the gap is taken seriously (not deferred as cosmetic).** Initial architect lean was
+"construction is a microbenchmark, signals are created once and updated many times." That
+assumption was challenged and does **not** hold for nv's own idiom: nv is fine-grained,
+run-once, no-VDOM, with ListBinding on the roadmap — its apps create many signals and
+churn them under row/list lifecycle. A framework that is 5.5x slow at constructing the
+thing it constructs most, under list churn, has a real exposure. The gap is worth closing.
+
+**But the motivation does not make the mechanism safe.** Closing the gap by splitting the
+struct into per-kind types risks turning the propagation hot paths (`propagate`,
+`updateIfNecessary`, `trackRead`) **polymorphic** — they currently see one hidden class at
+every `obs.state`/`link.observer` access. A second node shape could regress the wide-graph
+propagation cases Opt-A just won 11x (`4-1000x12`, `25-1000x5`). The class-allocation
+experiment in Opt-A already demonstrated that shape changes can regress net-negative. So
+the §10 / Spec-#1 rule applies: a change that helps one case and regresses others
+net-negative does not ship.
+
+**Ruling — three tiers:**
+
+1. **Field-reduction within the single struct — AUTHORIZED in-stream, no escalation.**
+   27 fields is wide for every node, not just signals. Folding/sharing fields that no node
+   needs simultaneously (candidates: the up-walk temps `_walkParent`/`_walkCursor` vs. the
+   BFS temp `_markNext` — a node is plausibly never in an up-walk and a mark-walk at the
+   same instant; test-only perf stamps) shrinks **every** allocation including the won
+   cases, with zero polymorphism risk because the shape stays singular. This is ordinary
+   data-structure tuning, in-stream, do it and measure.
+
+2. **Thin-signal allocation shape — COMMISSIONED as a time-boxed spike (this escalation's
+   substance).** Keyed on a verified structural fact: **signals are never observers.** In
+   the real core a `KIND_SIGNAL` node has `compute: null`, is never recomputed
+   (`runRecompute` early-returns), is never enqueued, and therefore never becomes a
+   `currentObserver` — so it never accumulates a source list and never uses the
+   observer-role fields (`compute`, the walk temps, source-list head/tail). It is a pure
+   *source*: it still needs `value`, `equals`, `state`, and the **observer-list** fields
+   (`firstObserver`/`lastObserver`) because it is read. The spike investigates whether a
+   signal can be allocated in a thinner shape **without** making the hot paths polymorphic
+   — the hard gate being that `propagate`/`updateIfNecessary`/`trackRead` must never branch
+   on node shape and must not regress the won propagation cases. The spike may come back
+   "no" (the thin shape can't be introduced without polymorphism, or doesn't move
+   `createSignals` enough to justify the complexity); a negative result is a complete,
+   valid outcome and gets logged as a closed finding, not a failure.
+
+3. **Full per-kind struct split (4 distinct node types) — DECLINED pending spike evidence.**
+   This is the locked-decision reversal. It is not approved now; it is only reconsidered if
+   the spike shows (a) `createSignals` genuinely needs it and (b) the polymorphism tax can
+   be avoided. Until then the single kind-distinguished struct holds. Do not split to win a
+   microbenchmark.
+
+**Sequencing.** The spike runs **before** Spec #4 (`_compilerSources` wiring) and Spec #2
+(compiler beats-baseline). Rationale: the spike may restructure the signal allocation
+shape, and #4 adds a field to that struct — wiring #4 first would mean adding to a struct
+about to be restructured. Resolve the shape first; then #4 wires into the settled struct.
+The spike is field-subtractive, #4 is field-additive, so they are unlikely to fight, but
+shape-first is the clean order.
+
+**Escalation boundary for the spike.** Tier-1 field-reduction is in-stream. The thin-signal
+shape (tier 2) touches the node model the contract's §9 discipline rests on — if the spike
+finds a shape that works, **introducing it is contract-adjacent and comes back to
+architecture before it ships**, with the measurement showing no propagation regression. The
+spike *investigates and measures*; it does not unilaterally land a second node shape. A
+negative spike result ships nothing and just gets logged.
+
+**Contract impact.** None from this ruling. If the thin-signal shape is later adopted, the
+§9 "single kind-distinguished struct" wording would need a versioned edit — but that is a
+future decision gated on the spike, not this entry.
+
+**Status.** Tier 1 authorized in-stream. Tier 2 commissioned (spike, time-boxed, result to
+be logged). Tier 3 declined pending tier-2 evidence. Spike precedes Spec #4 and #2.
