@@ -1810,3 +1810,14 @@ All compiler/classifier tests that consume these fixtures still pass — fixture
 4. biome clean. ✓
 5. Fixture integrity: all three `'./core'` string literals unchanged; all compiler/classifier tests green. ✓
 6. No `core_ts6_patched` references. ✓
+
+**Stale artifact removed.** `MIGRATION.md` (the one-time repo-scaffold ruleset)
+declared `moduleResolution: "bundler"` + extensionless as the settled import style —
+the opposite of this entry's `.js`-explicit/nodenext decision, and wrong on the
+hard constraint (extensionless relative imports do not resolve in published
+native-ESM JS, and there is no bundler to rewrite them). Its reasoning predated the
+build mode being pinned to plain `tsc`. The migration it described is complete, so
+the file was deleted rather than corrected — the decision log is the authority for
+the import style. Recorded here so a future session does not mistake a remembered
+`MIGRATION.md` reference for an unsettled question. (`git grep MIGRATION` after
+deletion shows only historical prose references in `docs/` — no live pointers.)
