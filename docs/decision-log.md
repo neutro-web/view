@@ -55,6 +55,12 @@ _Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified;
   Components are a compile *target*, not the programming model.
 - **Data-structure discipline:** intrusive doubly-linked-list edges; no
   Array/Set/Map in the hot path; no data-dependent recursion in the core walks.
+  Sanctioned exception (Spec #4, 2026-06-19): a Set/Map may live on the node as
+  a `_compiler*` field iff every access is gated behind a `!= null` check on that
+  field, so non-annotated nodes never touch it and it stays off the hot path for
+  the common case (`_compilerSources: ReadonlySet` is the reference pattern). The
+  discipline is "no such structure on the hot path," not "no such structure as a
+  field"; the guard is what keeps the promise.
 - **Error semantics:** specified for the synchronous model (Contract §5.4).
 - **Flush ordering:** within a flush, inter-node dependencies self-order via the
   up-walk; syncs drain before purely-terminal effects so effects reading a
