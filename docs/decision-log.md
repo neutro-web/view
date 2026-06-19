@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**)_
+_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**)_
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state (Clean/Check/Dirty)
@@ -1821,3 +1821,71 @@ the file was deleted rather than corrected — the decision log is the authority
 the import style. Recorded here so a future session does not mistake a remembered
 `MIGRATION.md` reference for an unsettled question. (`git grep MIGRATION` after
 deletion shows only historical prose references in `docs/` — no live pointers.)
+
+---
+
+### 2026-06-19 — Step-3 `_compilerEquals` integration CLOSED; both gates green
+
+**What was wired.** `_compilerEquals?` (§10 row 2) moved from inert stub to a live
+slot-resolution step. Option 1 (fill-the-slot) was chosen and confirmed by architecture:
+the inferred value populates the node's existing `equals` slot as a default at
+construction time. No new runtime evaluation path; the hot path (`runRecompute` lines
+~543–545, `nodeSet` lines ~947–949) is completely unchanged.
+
+**Precedence (§2.1) — the one rule that makes this sound.**
+1. Explicit user `opts.equals` (highest; never displaced).
+2. Inferred `_compilerEquals` (fills the slot only when (1) is absent).
+3. `Object.is` default (when neither is present).
+
+**Mechanism.** `nodesWithUserEquals: WeakSet<ReactiveNode>` tracks nodes where the
+user passed explicit `opts.equals` at construction. `signal()` and `derived()` mark the
+node in this set when `opts.equals !== undefined`. The `__test.setCompilerEquals(fn, eq)`
+setter sets `node._compilerEquals` and re-resolves `node.equals` under the precedence —
+it checks `nodesWithUserEquals` and refuses to displace a user-provided predicate. This
+is a construction-time operation; zero cost on the hot path.
+
+**Emit channel: (b) post-construction setter**, matching Spec #4's `setCompilerSources`
+pattern. `false` is a legal inferred value (mutable-container always-propagate case);
+the presence check uses `=== undefined` (not falsy) so `false` is treated as present.
+`setCompilerEquals(fn, undefined)` clears back to `Object.is`.
+
+**`__test` additions.**
+- `setCompilerEquals(fn, eq | false | undefined)` — plants inferred value, re-resolves slot.
+- `getEquals(fn)` — returns resolved slot for assertion.
+
+**Gate A — regression.**
+- Full vitest suite: **235/235** (220 prior + 15 Gate B tests). ✓
+- `tsc --strict` clean with DOM lib. ✓
+- `biome` clean. ✓
+- Hot path confirmed untouched: `_compilerEquals` / `nodesWithUserEquals` appear only at
+  lines 141 (struct field), 243 (WeakSet def), 991 + 1022 (construction marking in
+  `signal`/`derived`), and the `__test` setter. Grep confirms zero occurrences in
+  `runRecompute` or `nodeSet`.
+
+**Gate B — soundness (15 tests in `test/core/compiler-equals-real-core.test.ts`).**
+- B-1: Explicit user `opts.equals` wins over inferred (signal + derived). Verified with
+  observably-different predicates: slot is user's, observer count follows user's policy.
+- B-2: Inferred fills slot only when explicit is absent. No-inference case stays `Object.is`.
+- B-3: `false` inferred — in-place mutation (`arr.push(); s.set(arr)`) propagates where
+  `Object.is` would wrongly suppress. Confirms the mutable-container correctness win.
+- B-4: Wrong-narrow (`() => true`) — damage confined to annotated node only. Non-annotated
+  sibling node retains `Object.is` behavior byte-for-byte. Documents the dependency:
+  soundness is inherited from the compiler's conservatism (DECLINE for unprovable types),
+  not enforced at runtime. No runtime path found that applies an inferred equals the
+  compiler would not emit — escalation tripwire not triggered.
+- B-5: Wrong-wide (`() => false`) — extra recomputes, values always correct. Safe direction.
+- B-6: `wasError` path propagates regardless of inferred equals (error-recovery unaffected).
+- B-7: `false` presence uses `=== undefined` check; `undefined` clears back to `Object.is`.
+
+**No escalation tripwire triggered.** The runtime has no path that applies an inferred
+`equals` the compiler would not emit. All runtime code that touches the `equals` slot is
+unchanged from before this spec; only the one-time construction block and the `__test`
+setter are new.
+
+**Next.** The "step-3 beats-baseline" spec (Spec #2 shape) is now unblocked. Measurement
+baseline: the prior stated expectation is that `equals:false` on mutable-container nodes
+is a correctness/ergonomics win (not a speed win); `OBJECT_IS` on primitive nodes is
+identical to the `Object.is` default (no delta). A net-neutral result confirming the
+`false` case is a complete, honest outcome.
+
+**Status: CLOSED.**
