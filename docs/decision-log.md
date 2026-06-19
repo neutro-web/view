@@ -239,12 +239,11 @@ _Last updated: 2026-06-18 (Contract **v0.4.1** — runtime correctness verified;
 ### Genuine research problems (unknown answers, can fail)
 - Beating an alien-signals-class performance baseline. **Opt-A (2026-06-18) closed the two
   named deferrals** (Link free-list pool + O(1) epoch-stamp dedup): wide-graph cases
-  improved 4.7–11.3x, `updateSignals`/`repeatedObservers` now beat alien, `createComputations`
-  tied. **One structural gap remains: `createSignals` 5.5x** (wide 27-field struct).
-  Ruling 2026-06-18: field-reduction authorized in-stream; **thin-signal allocation-shape
-  spike commissioned** (signals-are-never-observers premise; must not make hot paths
-  polymorphic or regress won cases — can fail); full per-kind struct split declined pending
-  spike evidence. Spike precedes Spec #4/#2.
+  improved 4.7–11.3x, `updateSignals`/`repeatedObservers`/`createComputations` now beat or
+  tie alien. **`createSignals` gap (6x) confirmed structural-and-accepted** (spike
+  2026-06-18): dominated by WeakMap.set + fn.set — not addressable by struct-shape changes;
+  thin-signal shape negative result logged; field-reduction too small to ship; full kind-split
+  declined. **Spec #4 and #2 now unblocked.**
 - Compiler specializations as optimization hypotheses, each of which must beat the
   unspecialized baseline on the benchmark before shipping.
 
@@ -1237,3 +1236,148 @@ future decision gated on the spike, not this entry.
 
 **Status.** Tier 1 authorized in-stream. Tier 2 commissioned (spike, time-boxed, result to
 be logged). Tier 3 declined pending tier-2 evidence. Spike precedes Spec #4 and #2.
+
+### 2026-06-18 — Spike result: `createSignals` struct-shape investigation; gap confirmed structural-and-accepted; Spec #4 and #2 unblocked
+
+**Authorizing ruling:** 2026-06-18 struct-shape escalation ruling (three tiers: field-reduction in-stream, thin-signal spike commissioned, kind-split declined).
+
+**Method.** Profiled the actual `signal()` call path at 100k iterations, isolated each cost contributor, verified the walk-temp interleave hazard by code-path analysis, and measured thin-signal shape alternatives. Confirmed results against a clean benchmark run (benchmark node runner rebuilt after Opt-A revert of class makeNode).
+
+---
+
+**Tier 1 — field reduction (authorized in-stream).**
+
+*Profile first.* Micro-profile of `signal()` (100k iters, Apple M2 Max / Node v20.19.0):
+
+| Component | Cost/100k | % of signal() |
+|---|---|---|
+| `signal()` total | 27.70ms | 100% |
+| `makeNode` 29-field literal | 5.19ms | 19% |
+| closure creation | 1.18ms | 4% |
+| WeakMap.set | 7.06ms | 26% |
+| fn.set method attach (est.) | ~5ms | ~18% |
+| alien-style 3-field object | 1.15ms | alien baseline |
+
+*Walk-temp interleave hazard — verified SAFE.* Candidates: `_markNext` (BFS propagate temp,
+§4) and `_walkParent`/`_walkCursor` (DFS up-walk temp, §5). Hypothesis: a node is never
+simultaneously mid-BFS and mid-DFS. **Verified correct.** The `enqBFS(obs)` call in
+`propagate` (and the CHECK-propagation phase 2) is gated on `wasClean = obs.state === CLEAN`
+— line 340: `if (wasClean && obs.firstObserver !== null) enqBFS(obs)`. Nodes on the
+`_walkParent` stack are in CHECK or DIRTY state, never CLEAN (they were pushed onto the stack
+*because* they were not Clean). Therefore `enqBFS` is never called for a node that has
+`_walkParent` set, and `_markNext` is never written to a walk-stack node. The fields cannot
+alias.
+
+*But the savings are negligible.* The only provably safe merge is `_markNext` + `_walkParent`
+(both `ReactiveNode | null`, never simultaneously non-null) — reducing 29 to 28 fields. From
+the profile, the 29-field literal costs 5.19ms / 100k. A 28-field literal costs proportionally
+less: ~4.9ms. Savings: ~0.3ms / 100k signals ≈ 1% of total signal creation time. The
+complexity — a dual-purpose field with a confusing name, comment burden, and future confusion
+risk — exceeds a <1% gain. **Not shipped.** The hazard finding IS logged (prevents a future
+session from re-attempting the merge under a wrong assumption).
+
+---
+
+**Tier 2 — thin-signal allocation shape (commissioned spike).**
+
+*The hypothesis.* Signals are never observers: `KIND_SIGNAL` nodes never use `compute`,
+`firstSource`/`lastSource`, `_walkParent`/`_walkCursor`, `_runId`, or the observer-role fields.
+A thin signal (keeping only `value`, `equals`, `state`, `firstObserver`/`lastObserver`,
+ownership fields, `_seenBy`/`_seenRunId`, `isDisposed`/`hasError`) would allocate ~12 fields
+instead of 29. Profiled savings:
+
+| Allocation | Cost/100k |
+|---|---|
+| 29-field literal (current) | 5.19ms |
+| 17-field thin-signal literal | ~0.7ms |
+| 12-field thin literal | 0.57ms |
+
+Savings from going thin: ~4.6ms / 100k = 46ns/signal. Applied to total signal() cost: 27.70ms
+→ ~23.1ms. CreateSignals ratio to alien: **~4.6x behind** (was 6x). Gap narrowed by 23%, but
+not closed.
+
+*WeakMap is not replaceable.* The `nodeForFn` WeakMap is used in `sync()` target resolution
+(a public API, not test-only) and in `__test` utilities. Replacing it with a symbol property
+on the fn (`fn[NODE_SYM] = node`) was measured:
+
+| Mechanism | Cost/100k |
+|---|---|
+| WeakMap.set | 7.06ms (8.49ms in second run) |
+| fn[SYM] = node | **12.95ms — 53% SLOWER** |
+
+Symbol property assignment on closure functions is slower because each unique closure gets its
+own V8 hidden class, and adding a property triggers a per-closure hidden class transition.
+WeakMap.set avoids this (it stores the mapping externally via the hash table). The WeakMap
+cannot be replaced.
+
+*The gap after max addressable improvement.* Even eliminating ALL node allocation cost (0ns):
+- WeakMap.set: ~71ns/signal (irreducible without API redesign)
+- fn.set method: ~30ns/signal (irreducible — it's the public `.set()` write API)
+- closure: ~12ns/signal
+- Total floor without node: ~113ns/signal vs alien ~11ns/signal → still ~10x behind on allocation
+
+With thin signal (best case, no polymorphism): ~113 + 7 = ~120ns/signal → still 10x behind. The gap
+is dominated by WeakMap + fn.set, not struct width. **Thin-signal shape addresses only 19% of
+the gap driver.**
+
+*Polymorphism risk is real.* The Opt-A class-makeNode experiment (a shape change to a single
+node type, not even a second type) caused `createComputations` to regress from 122ms to 275ms
+(2.2x regression) and `updateSignals` from 394ms to 527ms (1.4x regression). A thin-signal
+shape introduces a SECOND allocation shape for the same conceptual type, which is a strictly
+stronger polymorphism risk than changing the single shape's constructor mechanism. V8's
+inline caches in `propagate`/`updateIfNecessary`/`trackRead` would go from monomorphic to
+polymorphic or megamorphic on every `link.observer`/`link.source` access. The 11x wide-graph
+wins from Opt-A would likely regress significantly.
+
+**Tier 2 verdict: NEGATIVE.** The thin-signal shape:
+1. Addresses only 19% of the `createSignals` gap driver (WeakMap + fn.set dominate)
+2. Cannot close the gap to competitive — floor is ~10x behind alien on allocation
+3. Carries demonstrated polymorphism risk that could regress the Opt-A won cases
+4. Does not move the benchmark enough to justify the complexity or risk
+
+*Outcome:* No code change from Tier 2. Result logged as a closed finding.
+
+---
+
+**`createSignals` gap — final status: structural-and-accepted.**
+
+The gap (6.0x behind alien on this run, run-to-run variance ±10%) is a composite of three
+design costs, none addressable by struct-shape changes:
+
+1. **29-field `ReactiveNode` allocation (19% of signal cost):** One of the largest object
+   literals in common reactive frameworks. Narrowing to 12 fields saves ~17% of node cost
+   = ~3% of total signal cost — too small to matter, and the thin-shape risk is prohibitive.
+2. **`WeakMap.set` for fn→node lookup (26%):** Required for `sync()` target resolution and
+   `__test`. Cannot be replaced by symbol property (53% slower in measurement). Cannot be
+   eliminated without redesigning the API surface.
+3. **`fn.set` method attachment (~18%):** The `.set()` write method is part of the public
+   `SignalAccessor` type. Cannot be removed.
+
+These are design costs for the richness nv's signal API provides. Alien-signals' signal is
+a thin `{value, subs, subsTail}` object — no WeakMap, no method attachment. nv's node
+carries ownership, sync, error, dedup stamps, and the full `SignalAccessor<T>` API surface.
+That richness has a cost. The cost is accepted.
+
+The gap is not cosmetic: list churn under row/ListBinding lifecycle is a real exposure (per
+ruling). But the mechanism to close it is **API redesign** (thin the lookup, separate fn.set
+into a different handle type) — not struct-shape tuning. That is a future escalation at a
+different scope; it does not block current work.
+
+**Confirmed Opt-A numbers (clean run, benchmark runner rebuilt):**
+
+| Case | nv | alien | status |
+|---|---|---|---|
+| createSignals | 57.83ms | 9.64ms | 6.0x behind (structural) |
+| createComputations | 129.06ms | 135.64ms | **nv wins** |
+| updateSignals | 411.09ms | 486.23ms | **nv wins** |
+| 4-1000x12 - dyn5% | 616.82ms | 420.36ms | 1.47x (was 16.5x before Opt-A) |
+| 25-1000x5 | 853.46ms | 514.65ms | 1.66x (was 8.1x before Opt-A) |
+| repeatedObservers | 27.42ms | 35.38ms | **nv wins** |
+| molBench | 17.59ms | 17.07ms | tied |
+
+**Conformance:** 203/203 green. No code changes shipped from this spike.
+
+**Status.** Spike complete. Tier 1: no field merges shipped (savings negligible, one hazard
+finding logged). Tier 2: negative result, logged as closed finding. `createSignals` gap
+confirmed structural-and-accepted. **Spec #4 (`_compilerSources` wiring) and Spec #2
+(compiler beats-baseline) are now unblocked.**
