@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**)_
+_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**)_
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state (Clean/Check/Dirty)
@@ -1770,3 +1770,43 @@ No shape showed a reliable, regression-free speedup. The design-target case (wid
 **Contract impact.** None. §10 row 4 is already specified; the oracle remains wired and dormant. No version bump.
 
 **Step 3 status.** `_compilerEquals?` is an inert stub. The equality-policy benefit path (the value-change branch in `runRecompute`) has not been wired. Benchmarking step 3 requires a step-3 integration spec first, authored by architecture. Flagged; not started here.
+
+---
+
+### 2026-06-19 — Spec 3c CLOSED: repo-wide import-extension convergence + nodenext config + test hygiene
+
+**Type.** In-stream cleanup; no contract change, no version bump.
+
+**Item 1 — Import-extension convergence (`.js`-explicit, repo-wide).**
+
+Root cause of the latent breakage: `tsconfig.base.json` had `moduleResolution: "bundler"` with `"type": "module"` and a plain-`tsc` emit build. Node's native ESM resolver requires explicit extensions at runtime; `tsc` copies specifiers verbatim; extensionless or `.ts`-explicit imports are both runtime-broken on published output (and `.ts`-explicit also fails under emit — `allowImportingTsExtensions` requires `noEmit`).
+
+Fix: `tsconfig.base.json` switched to `module: "nodenext"`, `moduleResolution: "nodenext"`. This enforces `.js`-explicit at the type-checker level — a stray extensionless or `.ts` import is now a typecheck error, so the divergence cannot silently reopen.
+
+All relative specifiers converted to `.js`-explicit across:
+- `src/compiler/` — 6 files (all intra-compiler imports: `./signal-type-utils`, `./types`, `./sync-target-classifier`, etc.)
+- `src/core/index.ts` — barrel re-exports
+- `src/renderer/` — 3 files (`./interpreter`, `./html-tag`, `./comparator`, `./ir`, `../core/core`)
+- `test/**/*.ts` — all relative `../../src/...` and `./` imports
+- `integration/poc-integration.test.ts` — all `../src/...` imports
+
+Three fixture string literals confirmed intentionally untouched (they are test *inputs*, not real imports):
+- `integration/poc-integration.test.ts` line 217 (`cycleFixtureSrc`)
+- `integration/poc-integration.test.ts` line 229 (`cleanFixtureSrc`)
+- `test/compiler/test-helpers.ts` line 82 (template-literal `from './core'` replacement)
+
+All compiler/classifier tests that consume these fixtures still pass — fixture integrity confirmed.
+
+**Item 2 — `core_ts6_patched.ts`.** Already absent. Retired with the `Node → ReactiveNode` rename (2026-06-17). No references found, no action required. Renderer re-point to real core exposed nothing new — the rename fully resolved the `TS7022` DOM-collision as confirmed at the time.
+
+**Item 3 — Test hygiene.**
+- `test/compiler/branch-variant-analyzer.test.ts`: `expect(![...].some(...)).toBe(true)` → `expect([...].some(...)).toBe(false)`.
+- `integration/poc-integration.test.ts` Gate-4: added `// structural-intent marker` comment to the `expect(true).toBe(true)` placeholder so it is not misread as a real assertion.
+
+**Gates (all passed).**
+1. `tsc -p tsconfig.build.json` emits clean. `dist/` produced; spot-checked emitted imports: `./signal-type-utils.js` in `dist/compiler/branch-variant-analyzer.js`, `../core/core.js` in `dist/renderer/interpreter.js`. ✓
+2. Full vitest suite: **220/220**. ✓
+3. `tsc --strict` clean with DOM lib. ✓
+4. biome clean. ✓
+5. Fixture integrity: all three `'./core'` string literals unchanged; all compiler/classifier tests green. ✓
+6. No `core_ts6_patched` references. ✓
