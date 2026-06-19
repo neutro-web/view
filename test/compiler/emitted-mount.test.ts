@@ -1,5 +1,5 @@
 /**
- * nv Compiler Back-End — Phase 1b-1 Differential Gate Tests
+ * nv Compiler Back-End — Phase 1b Differential Gate Tests
  * Spec: Phase 1b spec 2026-06-19 §5 (gate cases) + §7 (perf characterization)
  *
  * Each test runs the same TemplateIR through two back-ends:
@@ -9,13 +9,14 @@
  * Comparison via structurallyEqual() (attribute-order-independent, NOT outerHTML).
  * flushSync() required after every signal write before DOM assertion.
  *
- * Required gate cases (§5 of the spec):
+ * Gate cases (§5 of the spec):
  *   GATE 1 — Tracked read parity (ACCEPT): write source → DOM updates identically.
  *   GATE 2 — PLAIN binding parity: non-reactive expr → same behavior as interpreter.
  *   GATE 3 — Event-write DECLINE: diagnostic produced + binding not broken (DOM matches).
  *   GATE 4 — No-leak parity: mount + dispose → identical zero-observer state.
  *   GATE 5 — Corpus parity: all in-slice binding kinds (Text/Attr/Prop/Event) match.
  *
+ * Phase 1b-2 additions: ChildBinding + ConditionalBinding gate cases.
  * Performance characterization (§7): logged, not a gate assertion.
  */
 
@@ -27,7 +28,14 @@ import { __test, flushSync, signal, sync } from '../../src/core/core.js'
 import { structurallyEqual } from '../../src/renderer/comparator.js'
 import { createHtmlTag } from '../../src/renderer/html-tag.js'
 import { mount } from '../../src/renderer/interpreter.js'
-import type { ChildBinding, EventBinding, PropBinding, TemplateIR } from '../../src/renderer/ir.js'
+import type {
+  ChildBinding,
+  ConditionalBinding,
+  EventBinding,
+  PropBinding,
+  TemplateIR,
+  TextBinding,
+} from '../../src/renderer/ir.js'
 
 // ── DOM helpers ────────────────────────────────────────────────────────────────
 
@@ -115,11 +123,9 @@ test('GATE 1: AttrBinding — null removes attribute (boolean-attr semantics)', 
   const ir = html`<button hidden="${() => hidden()}">x</button>`
 
   const { disposeI, disposeE } = differential(ir, document, (cI, cE) => {
-    // Set to null → removeAttribute
     hidden.set(null)
     flushSync()
     assertEqual(cI, cE, 'post-null')
-    // Set back to true → setAttribute('hidden', '')
     hidden.set(true)
     flushSync()
     assertEqual(cI, cE, 'post-true')
@@ -136,7 +142,6 @@ test('GATE 2: PLAIN verdict — non-reactive constant still wired, DOM matches i
   const localConst = 'hello'
   const ir = html`<span>${() => localConst}</span>`
 
-  // PLAIN verdict for hole 0 (no reactive read)
   const verdicts: Map<number, BindingErasureVerdict> = new Map([
     [0, { kind: 'PLAIN', expressionIndex: 0, reason: 'no reactive reads' }],
   ])
@@ -167,12 +172,11 @@ test('GATE 3: EventBinding DECLINE — diagnostic produced, binding still wired 
     (v: number) => v,
   )
 
-  // Manually construct a TemplateIR with an EventBinding (not produced by html-tag.ts)
   const ir: TemplateIR = {
     id: 'test:decline-event',
     shape: {
       html: '<button>click</button>',
-      bindingPaths: [[0]], // frag.childNodes[0] = button
+      bindingPaths: [[0]],
     },
     bindings: [
       {
@@ -185,7 +189,6 @@ test('GATE 3: EventBinding DECLINE — diagnostic produced, binding still wired 
     ],
   }
 
-  // DECLINE verdict for this event binding (sync-target write)
   const verdicts: Map<number, BindingErasureVerdict> = new Map([
     [
       0,
@@ -206,14 +209,11 @@ test('GATE 3: EventBinding DECLINE — diagnostic produced, binding still wired 
 
   flushSync()
 
-  // (a) Diagnostic must be produced
   expect(diagnostics.length, 'DECLINE produces exactly one diagnostic').toBe(1)
   expect(diagnostics[0]!.includes('sync-target'), 'diagnostic mentions sync-target').toBe(true)
 
-  // (b) Binding is not broken — DOM matches interpreter at mount
   assertEqual(containerI, containerE, 'DECLINE: DOM matches interpreter at mount')
 
-  // (c) Event handler still wires — click updates count through the binding
   const buttonE = containerE.querySelector('button') as HTMLElement
   buttonE.click()
   flushSync()
@@ -222,9 +222,6 @@ test('GATE 3: EventBinding DECLINE — diagnostic produced, binding still wired 
   buttonI.click()
   flushSync()
 
-  // Both back-ends have the handler wired (DOM effects of the click would be
-  // identical if both templates had a text binding observing count — here we
-  // just verify the bindings didn't throw and the handlers ran)
   expect(count()).toBe(99)
 
   disposeI()
@@ -246,15 +243,12 @@ test('GATE 4: No-leak — dispose severs all edges, identical observer count to 
 
   flushSync()
 
-  // Both effects observe count: 2 observers
   expect(__test.observerCount(count), 'two observers before dispose').toBe(2)
 
-  // Dispose interpreter: drops to 1
   disposeI()
   expect(__test.observerCount(count), 'one observer after interpreter dispose').toBe(1)
   expect(containerI.querySelector('span'), 'interpreter DOM removed').toBeNull()
 
-  // Dispose emitter: drops to 0
   disposeE()
   expect(__test.observerCount(count), 'zero observers after emitter dispose').toBe(0)
   expect(containerE.querySelector('span'), 'emitter DOM removed').toBeNull()
@@ -277,7 +271,6 @@ test('GATE 4: No-leak — signals stay clean after dispose, writes no longer upd
   disposeI()
   disposeE()
 
-  // Post-dispose write: DOM should not change (both bindings dead)
   value.set('b')
   flushSync()
 
@@ -292,7 +285,6 @@ test('GATE 5: PropBinding — property set identically to interpreter', () => {
   const { document } = makeDom()
   const disabled = signal(false)
 
-  // Manually constructed TemplateIR — html-tag.ts doesn't produce PropBinding
   const ir: TemplateIR = {
     id: 'test:prop',
     shape: {
@@ -390,10 +382,18 @@ test('GATE 5: Multi-binding template — Text + Attr on same element, both back-
 test('GATE 5: Out-of-slice binding throws at EMIT time, not mount time', () => {
   const ir: TemplateIR = {
     id: 'test:oob',
-    shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0, 0]] },
-    bindings: [{ kind: 'child', pathIndex: 0, expr: () => 'x' } as unknown as ChildBinding],
+    shape: { html: '<div></div>', bindingPaths: [[0]] },
+    bindings: [
+      {
+        kind: 'list',
+        pathIndex: 0,
+        items: () => [],
+        key: () => '',
+        itemTemplate: { id: 'x', shape: { html: '<span></span>', bindingPaths: [] }, bindings: [] },
+      } as unknown as ChildBinding,
+    ],
   }
-  expect(() => emitMount(ir)).toThrow(/1b-1 scope/)
+  expect(() => emitMount(ir)).toThrow(/Phase 1b scope/)
 })
 
 // ── §7: Performance characterization ─────────────────────────────────────────
@@ -407,14 +407,12 @@ test('§7: Performance characterization (emitted vs. interpreter, logged, not a 
 
   const ITERATIONS = 1000
 
-  // Warm up
   for (let i = 0; i < 10; i++) {
     const d = mount(ir, document.createElement('div'), document)
     flushSync()
     d()
   }
 
-  // Interpreter mount time
   const t0 = performance.now()
   for (let i = 0; i < ITERATIONS; i++) {
     const parent = document.createElement('div')
@@ -424,7 +422,6 @@ test('§7: Performance characterization (emitted vs. interpreter, logged, not a 
   }
   const interpreterMountMs = performance.now() - t0
 
-  // Emitter: emit once, mount ITERATIONS times
   const emitT0 = performance.now()
   const { mountFn } = emitMount(ir)
   const emitTimeMs = performance.now() - emitT0
@@ -438,7 +435,6 @@ test('§7: Performance characterization (emitted vs. interpreter, logged, not a 
   }
   const emitterMountMs = performance.now() - t1
 
-  // Update characterization: write signal N times with both back-ends mounted
   const cI = document.createElement('div')
   const cE = document.createElement('div')
   const dI = mount(ir, cI, document)
@@ -487,9 +483,463 @@ test('§7: Performance characterization (emitted vs. interpreter, logged, not a 
     `     Update ratio:              ${(emitterUpdateMs / interpreterUpdateMs).toFixed(2)}x`,
   )
 
-  // Soft assertion: emitter should not be dramatically slower at mount (2x ceiling)
   expect(
     emitterMountMs < interpreterMountMs * 2,
     `emitter mount is >2x slower than interpreter (${(emitterMountMs / interpreterMountMs).toFixed(2)}x) — unexpected`,
   ).toBe(true)
+})
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Phase 1b-2: ChildBinding + ConditionalBinding Gate Tests
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function makeChildIR(expr: () => string | number | null | undefined): TemplateIR {
+  return {
+    id: 'test:child',
+    shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0, 0]] },
+    bindings: [{ kind: 'child', pathIndex: 0, expr } as ChildBinding],
+  }
+}
+
+function makeConditionalIR(
+  condition: () => boolean,
+  consequentHtml: string,
+  alternateHtml: string | null,
+): TemplateIR {
+  const consequent: TemplateIR = {
+    id: 'test:branch-true',
+    shape: { html: consequentHtml, bindingPaths: [] },
+    bindings: [],
+  }
+  const alternate: TemplateIR | null = alternateHtml
+    ? { id: 'test:branch-false', shape: { html: alternateHtml, bindingPaths: [] }, bindings: [] }
+    : null
+  return {
+    id: 'test:conditional',
+    shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'conditional',
+        pathIndex: 0,
+        condition,
+        consequent,
+        alternate,
+      } as ConditionalBinding,
+    ],
+  }
+}
+
+// ── GATE 1 (Child): tracked-read parity ───────────────────────────────────────
+
+test('GATE 1 (Child): reactive value updates textNode.data identically — both back-ends', () => {
+  const { document } = makeDom()
+  const value = signal<string | number>('hello')
+  const ir = makeChildIR(() => value())
+
+  const { containerI, containerE } = makeContainers(document)
+  const disposeI = mount(ir, containerI, document)
+  const { mountFn, diagnostics } = emitMount(ir)
+  const disposeE = mountFn(containerE, document)
+  flushSync()
+
+  expect(diagnostics.length).toBe(0)
+  assertEqual(containerI, containerE, 'initial')
+  expect(containerI.querySelector('div')!.textContent).toBe('hello')
+
+  value.set('world')
+  flushSync()
+  assertEqual(containerI, containerE, 'post-string-write')
+  expect(containerE.querySelector('div')!.textContent).toBe('world')
+
+  value.set(42)
+  flushSync()
+  assertEqual(containerI, containerE, 'post-number-write')
+  expect(containerE.querySelector('div')!.textContent).toBe('42')
+
+  // Verify update = .data mutation, not node replacement.
+  // Both should have [textNode, anchorComment] inside div (2 children).
+  const divI = containerI.querySelector('div')!
+  const divE = containerE.querySelector('div')!
+  expect(divI.childNodes.length, 'interpreter: text + anchor (2 children)').toBe(2)
+  expect(divE.childNodes.length, 'emitter: text + anchor (2 children)').toBe(2)
+  expect(divI.childNodes[0]!.nodeType, 'interpreter: first child is Text').toBe(3)
+  expect(divE.childNodes[0]!.nodeType, 'emitter: first child is Text').toBe(3)
+
+  disposeI()
+  disposeE()
+})
+
+test('GATE 1 (Child): null/undefined → empty string — both back-ends', () => {
+  const { document } = makeDom()
+  const value = signal<string | null | undefined>('x')
+  const ir = makeChildIR(() => value())
+
+  const { containerI, containerE } = makeContainers(document)
+  const disposeI = mount(ir, containerI, document)
+  const { mountFn } = emitMount(ir)
+  const disposeE = mountFn(containerE, document)
+  flushSync()
+
+  value.set(null)
+  flushSync()
+  assertEqual(containerI, containerE, 'post-null')
+  expect(containerI.querySelector('div')!.textContent).toBe('')
+
+  value.set(undefined)
+  flushSync()
+  assertEqual(containerI, containerE, 'post-undefined')
+
+  disposeI()
+  disposeE()
+})
+
+// ── GATE 2 (Child): non-primitive rejection parity (TC-09) ───────────────────
+
+test('GATE 2 (Child): non-primitive value routes error identically — both back-ends', () => {
+  const { document } = makeDom()
+  const errors: string[] = []
+  const origError = console.error
+  console.error = (...args: unknown[]) => {
+    errors.push(String(args[0]))
+    origError(...args)
+  }
+
+  const ir = makeChildIR(() => ({ notPrimitive: true }) as unknown as string)
+
+  const { containerI, containerE } = makeContainers(document)
+  const disposeI = mount(ir, containerI, document)
+  const { mountFn } = emitMount(ir)
+  const disposeE = mountFn(containerE, document)
+  flushSync()
+
+  console.error = origError
+
+  expect(errors.length, `expected ≥2 errors, got ${errors.length}`).toBeGreaterThanOrEqual(2)
+  expect(
+    errors.every((e) => e.includes('[nv]')),
+    'all errors are nv-formatted',
+  ).toBe(true)
+
+  assertEqual(containerI, containerE, 'non-primitive: DOM parity after error')
+
+  disposeI()
+  disposeE()
+})
+
+// ── GATE 3 (Conditional): flip parity ────────────────────────────────────────
+
+test('GATE 3 (Conditional): flip condition — correct branch mounted, old removed', () => {
+  const { document } = makeDom()
+  const show = signal(true)
+  const ir = makeConditionalIR(() => show(), '<span>yes</span>', '<span>no</span>')
+
+  const { containerI, containerE } = makeContainers(document)
+  const disposeI = mount(ir, containerI, document)
+  const { mountFn } = emitMount(ir)
+  const disposeE = mountFn(containerE, document)
+  flushSync()
+
+  assertEqual(containerI, containerE, 'initial (true)')
+  expect(containerI.querySelector('span')!.textContent).toBe('yes')
+
+  show.set(false)
+  flushSync()
+  assertEqual(containerI, containerE, 'post-flip-false')
+  expect(containerI.querySelector('span')!.textContent).toBe('no')
+
+  show.set(true)
+  flushSync()
+  assertEqual(containerI, containerE, 'post-flip-true')
+  expect(containerI.querySelector('span')!.textContent).toBe('yes')
+
+  disposeI()
+  disposeE()
+})
+
+test('GATE 3 (Conditional): null alternate — mounting nothing when false (pure if)', () => {
+  const { document } = makeDom()
+  const show = signal(true)
+  const ir = makeConditionalIR(() => show(), '<span>present</span>', null)
+
+  const { containerI, containerE } = makeContainers(document)
+  const disposeI = mount(ir, containerI, document)
+  const { mountFn } = emitMount(ir)
+  const disposeE = mountFn(containerE, document)
+  flushSync()
+
+  assertEqual(containerI, containerE, 'initial (true)')
+  expect(containerI.querySelector('span')).not.toBeNull()
+
+  show.set(false)
+  flushSync()
+  assertEqual(containerI, containerE, 'post-flip-false: nothing mounted')
+  expect(containerI.querySelector('span')).toBeNull()
+
+  show.set(true)
+  flushSync()
+  assertEqual(containerI, containerE, 'post-flip-true: span back')
+
+  disposeI()
+  disposeE()
+})
+
+// ── GATE 4 (Conditional): flip-no-leak parity (THE load-bearing case) ─────────
+
+test('GATE 4 (Conditional): 1000 flips — no DOM accumulation, observer count stays 1', () => {
+  const { document } = makeDom()
+  const show = signal(true)
+  const ir = makeConditionalIR(() => show(), '<span>yes</span>', '<span>no</span>')
+
+  const { containerI, containerE } = makeContainers(document)
+  const disposeI = mount(ir, containerI, document)
+  const { mountFn } = emitMount(ir)
+  const disposeE = mountFn(containerE, document)
+  flushSync()
+
+  for (let i = 0; i < 1000; i++) {
+    show.set(i % 2 === 0)
+    flushSync()
+  }
+
+  const divI = containerI.querySelector('div')!
+  const divE = containerE.querySelector('div')!
+
+  expect(
+    divI.childNodes.length,
+    `interpreter: expected 2 children after 1000 flips, got ${divI.childNodes.length}`,
+  ).toBe(2)
+  expect(
+    divE.childNodes.length,
+    `emitter: expected 2 children after 1000 flips, got ${divE.childNodes.length}`,
+  ).toBe(2)
+
+  assertEqual(containerI, containerE, 'post-1000-flips DOM parity')
+
+  expect(
+    __test.observerCount(show),
+    `expected 2 condition observers (1 per back-end), got ${__test.observerCount(show)}`,
+  ).toBe(2)
+
+  disposeI()
+  expect(__test.observerCount(show), 'post-interpreter-dispose: 1 observer').toBe(1)
+  disposeE()
+  expect(__test.observerCount(show), 'post-all-dispose: 0 observers (no leak)').toBe(0)
+
+  expect(containerI.querySelector('div'), 'interpreter div removed after dispose').toBeNull()
+  expect(containerE.querySelector('div'), 'emitter div removed after dispose').toBeNull()
+})
+
+// ── GATE 5 (Conditional): adversarial severance parity ───────────────────────
+
+test('GATE 5 (Conditional): post-flip write to OLD branch has no effect on DOM', () => {
+  const { document } = makeDom()
+  const show = signal(true)
+  const branchValue = signal('A')
+
+  const consequent: TemplateIR = {
+    id: 'test:branch-reactive',
+    shape: { html: '<span><!--nv-0--></span>', bindingPaths: [[0, 0]] },
+    bindings: [{ kind: 'text', pathIndex: 0, expr: () => branchValue() } as TextBinding],
+  }
+
+  const alternate: TemplateIR = {
+    id: 'test:branch-alt',
+    shape: { html: '<em>else</em>', bindingPaths: [] },
+    bindings: [],
+  }
+
+  const ir: TemplateIR = {
+    id: 'test:conditional-reactive-branch',
+    shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'conditional',
+        pathIndex: 0,
+        condition: () => show(),
+        consequent,
+        alternate,
+      } as ConditionalBinding,
+    ],
+  }
+
+  const { containerI, containerE } = makeContainers(document)
+  const disposeI = mount(ir, containerI, document)
+  const { mountFn } = emitMount(ir)
+  const disposeE = mountFn(containerE, document)
+  flushSync()
+
+  expect(containerI.querySelector('span')!.textContent).toBe('A')
+
+  show.set(false)
+  flushSync()
+  assertEqual(containerI, containerE, 'after flip to alternate')
+  expect(containerI.querySelector('em')!.textContent).toBe('else')
+
+  branchValue.set('STALE')
+  flushSync()
+  assertEqual(containerI, containerE, 'after stale write to old branch')
+  expect(containerI.querySelector('em')!.textContent, 'em still says else').toBe('else')
+  expect(containerI.querySelector('span'), 'span (old branch) is gone').toBeNull()
+
+  show.set(true)
+  flushSync()
+  assertEqual(containerI, containerE, 'after flip back')
+  expect(containerI.querySelector('span')!.textContent, 'new branch reads current value').toBe(
+    'STALE',
+  )
+
+  disposeI()
+  disposeE()
+})
+
+test('GATE 5 (Conditional): parent dispose while branch mounted — full cleanup', () => {
+  const { document } = makeDom()
+  const show = signal(true)
+  const ir = makeConditionalIR(() => show(), '<span>yes</span>', null)
+
+  const { containerI, containerE } = makeContainers(document)
+  const disposeI = mount(ir, containerI, document)
+  const { mountFn } = emitMount(ir)
+  const disposeE = mountFn(containerE, document)
+  flushSync()
+
+  expect(containerI.querySelector('span')!.textContent).toBe('yes')
+  expect(__test.observerCount(show), 'two observers before dispose').toBe(2)
+
+  disposeI()
+  disposeE()
+
+  expect(__test.observerCount(show), 'zero observers after dispose-while-mounted').toBe(0)
+  expect(containerI.querySelector('div'), 'interpreter div removed').toBeNull()
+  expect(containerE.querySelector('div'), 'emitter div removed').toBeNull()
+})
+
+// ── GATE 6 (Conditional): corpus — mixed bindings in branch templates ─────────
+
+test('GATE 6 (Conditional + Text): reactive text inside branch updates correctly', () => {
+  const { document } = makeDom()
+  const show = signal(true)
+  const label = signal('hello')
+
+  const consequent: TemplateIR = {
+    id: 'test:branch-with-text',
+    shape: { html: '<p><!--nv-0--></p>', bindingPaths: [[0, 0]] },
+    bindings: [{ kind: 'text', pathIndex: 0, expr: () => label() } as TextBinding],
+  }
+
+  const ir: TemplateIR = {
+    id: 'test:cond-text',
+    shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'conditional',
+        pathIndex: 0,
+        condition: () => show(),
+        consequent,
+        alternate: null,
+      } as ConditionalBinding,
+    ],
+  }
+
+  const { containerI, containerE } = makeContainers(document)
+  const disposeI = mount(ir, containerI, document)
+  const { mountFn } = emitMount(ir)
+  const disposeE = mountFn(containerE, document)
+  flushSync()
+
+  assertEqual(containerI, containerE, 'initial')
+  expect(containerI.querySelector('p')!.textContent).toBe('hello')
+
+  label.set('world')
+  flushSync()
+  assertEqual(containerI, containerE, 'branch text updated')
+  expect(containerE.querySelector('p')!.textContent).toBe('world')
+
+  disposeI()
+  disposeE()
+})
+
+// ── §6: Performance characterization (Child + Conditional) ───────────────────
+
+test('§6: Perf characterization — Child + Conditional, emitted vs. interpreter', () => {
+  const { document } = makeDom()
+  const show = signal(true)
+  const value = signal('hello')
+
+  const childIR = makeChildIR(() => value())
+  const condIR = makeConditionalIR(() => show(), '<span>yes</span>', '<span>no</span>')
+
+  const ITERS = 2000
+
+  const t0 = performance.now()
+  for (let i = 0; i < ITERS; i++) {
+    const d = mount(childIR, document.createElement('div'), document)
+    flushSync()
+    d()
+  }
+  const interpreterChildMs = performance.now() - t0
+
+  const { mountFn: childMountFn } = emitMount(childIR)
+  const t1 = performance.now()
+  for (let i = 0; i < ITERS; i++) {
+    const d = childMountFn(document.createElement('div'), document)
+    flushSync()
+    d()
+  }
+  const emitterChildMs = performance.now() - t1
+
+  const t2 = performance.now()
+  for (let i = 0; i < ITERS; i++) {
+    const d = mount(condIR, document.createElement('div'), document)
+    flushSync()
+    d()
+  }
+  const interpreterCondMs = performance.now() - t2
+
+  const { mountFn: condMountFn } = emitMount(condIR)
+  const t3 = performance.now()
+  for (let i = 0; i < ITERS; i++) {
+    const d = condMountFn(document.createElement('div'), document)
+    flushSync()
+    d()
+  }
+  const emitterCondMs = performance.now() - t3
+
+  const cI = document.createElement('div')
+  const cE = document.createElement('div')
+  const dI = mount(condIR, cI, document)
+  const { mountFn: mF } = emitMount(condIR)
+  const dE = mF(cE, document)
+  flushSync()
+
+  const FLIPS = 200
+  const f0 = performance.now()
+  for (let i = 0; i < FLIPS; i++) {
+    show.set(i % 2 === 0)
+    flushSync()
+  }
+  const interpreterFlipMs = performance.now() - f0
+
+  const f1 = performance.now()
+  for (let i = 0; i < FLIPS; i++) {
+    show.set(i % 2 === 0)
+    flushSync()
+  }
+  const emitterFlipMs = performance.now() - f1
+
+  dI()
+  dE()
+
+  console.log(`\n  §6 Child/Conditional perf (${ITERS} mount iterations, ${FLIPS} flips):`)
+  console.log(
+    `     Child mount:   interpreter ${interpreterChildMs.toFixed(1)}ms  emitter ${emitterChildMs.toFixed(1)}ms  (${(interpreterChildMs / emitterChildMs).toFixed(2)}x)`,
+  )
+  console.log(
+    `     Cond mount:    interpreter ${interpreterCondMs.toFixed(1)}ms  emitter ${emitterCondMs.toFixed(1)}ms  (${(interpreterCondMs / emitterCondMs).toFixed(2)}x)`,
+  )
+  console.log(
+    `     Cond flip:     interpreter ${interpreterFlipMs.toFixed(1)}ms  emitter ${emitterFlipMs.toFixed(1)}ms  (${(interpreterFlipMs / emitterFlipMs).toFixed(2)}x)`,
+  )
 })
