@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-18 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**)_
+_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**)_
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state (Clean/Check/Dirty)
@@ -121,12 +121,14 @@ _Last updated: 2026-06-18 (Contract **v0.4.1** — runtime correctness verified;
     correct, with the mechanism in place"; the *perf win* is a hypothesis for
     Claude Code benchmarking (§10 hard rule). No hook is "proven faster" from a
     sandbox number.
-  **Integration boundary (deferred, runtime stream / Claude Code):** the step-4
-  runtime side is proven against a faithful *model* (`variantRuntimeHarness.ts`),
-  not the real `core.ts`. Wiring the `_compilerSources` §10 hook into the actual
-  core and re-running the property + soundness tests against it is a **runtime-
-  stream integration task**, not done yet — the convergence point where compiler
-  output meets the real runtime.
+  **Integration boundary CLOSED (2026-06-19, Spec #4):** `_compilerSources` /
+  `_diverged` wired into the real `core.ts`; Gate A (220/220, tsc clean, perf
+  regression gate passed — no regression on createSignals/createComputations/
+  4-1000x12/25-1000x5) and Gate B (17 soundness tests across null/correct/
+  wrong-narrow/wrong-wide/empty variants, all green) passed against the real
+  intrusive linked-list edge machinery. `reconcileEdges`, tracking-context
+  enter/exit, and the epoch-stamp dedup were untouched. **Spec #2
+  (compiler beats-baseline) is now unblocked.**
   **Not started:** eager/lazy bias (§10 row 3) and wide-fanout grouping (§10 row 5)
   — both *performance-defined* hooks (no correctness verdict; the policy IS the
   benchmark question), so scaffold-here / decide-in-Claude-Code; disposal scope
@@ -1631,3 +1633,73 @@ its own versioned entry — gated on the tripwire, not decided here.
 **Status.** Wide-graph spike closed and affirmed. Kind-split noted, not approved, tripwire set.
 Original field layout locked as cache-load-bearing. Spec #4 and Spec #2 proceed. No further perf
 work queued.
+
+---
+
+### 2026-06-19 — Spec #4 CLOSED: `_compilerSources` oracle wired into real `core.ts`; both gates green
+
+**What shipped.** The §10 row-4 branch-variant mechanism, previously proven only against
+`variantRuntimeHarness.ts`, is now integrated into the production `core.ts` and proven
+against the real intrusive linked-list edge machinery, the real free-list pool, and the
+real epoch-stamp dedup.
+
+**Struct changes (placement rule honoured).** Two optional fields appended at the tail of
+`ReactiveNode`, after `_seenRunId`, per the cache-load-bearing placement rule from the
+2026-06-18 wide-graph spike — no existing field shifted, BFS→DFS CL1 adjacency preserved:
+- `_compilerSources?: ReadonlySet<ReactiveNode> | null` — the declared union; absent (undefined)
+  on non-annotated nodes. A node without `_compilerSources` pays exactly zero on every call.
+- `_diverged?: boolean` — reset per recompute (gated: unannotated nodes skip the write).
+
+**Hook wiring.** `trackRead`: oracle check at the pre-existing §10 attachment-point comment,
+after the epoch-stamp early-return, before `makeLink`. Fires only when
+`observer._compilerSources != null && !observer._diverged`. Sets `_diverged = true` on first
+out-of-union read; `_diverged` then acts as the "oracle deactivated" guard for the rest of that
+run. Never touches `firstSource`/`lastSource`/any `Link`/stamp fields.
+`runRecompute`: `if (node._compilerSources != null) node._diverged = false` at the point where
+`_runId` is incremented. **`reconcileEdges`, tracking-context enter/exit, and the
+always-reconcile-in-finally guarantee are untouched.**
+
+**Membership structure choice.** `ReadonlySet<ReactiveNode>` — stored off the hot path (only
+consulted when `_compilerSources != null`), one `Set.has()` call per distinct source read per
+annotated run. Non-annotated nodes: zero cost (`undefined != null → false` short-circuits).
+
+**`__test` additions.** `setCompilerSources(fn, set | null)`, `isDiverged(fn)`,
+`sourceNodes(fn)` — integration API for Gate B tests; converts accessor fns → ReactiveNodes
+via the existing `nodeForFn` WeakMap.
+
+**Gate A — regression (all green).**
+- Full suite: **220/220** (17 new Gate B tests; prior 203 unchanged).
+- `tsc --strict` clean.
+- Perf regression gate vs Opt-A baseline (post–struct-field addition):
+
+  | Case | Opt-A baseline | Spec #4 | Δ |
+  |---|---|---|---|
+  | createSignals | ~48.9ms | 48.52ms | −0.8% (noise) |
+  | createComputations | 129.06ms | 125.53ms | −2.7% (improved) |
+  | 4-1000x12 - dyn5% | 616.82ms | 599.80ms | −2.8% (improved) |
+  | 25-1000x5 | 853.46ms | 860.26ms | +0.8% (noise; alien also moved) |
+
+  No regression on any case. Optional tail fields invisible to non-annotated nodes.
+
+**Gate B — soundness (all green, 17 tests).**
+All 7 model tests ported and green against the real core. 8 additional differential/property
+tests covering null / correct / wrong-narrow / wrong-wide / empty `_compilerSources` variants.
+Key assertions confirmed against the real machinery:
+- Wrong-narrow still establishes the omitted edge (reconcile is ground truth) and produces the
+  correct value; `_diverged = true`.
+- Empty union: all reads diverge; edges and value identical to null run.
+- Wrong-wide (extra in union, never read): `_diverged = false`; only actual reads are tracked.
+- Source count and live/dead propagation behavior identical across all variants.
+- Source read order preserved (intrusive list append order): verified by node identity
+  comparison across null vs annotated deriveds that share the same signal instances.
+- Recompute counts identical across all variants (oracle causes zero extra recomputes).
+- `_diverged` resets per recompute: diverged in run N → `false` at start of run N+1.
+- Epoch-stamp dedup untouched: double-read of same source in one compute still tracks once;
+  oracle never runs on the deduped second read.
+
+**No escalations raised.** Real machinery and model agreed on all cases; no §7 trigger hit.
+
+**Contract impact.** None — §10 row 4 was already specified. No contract version bump.
+
+**Status.** Spec #4 closed. Integration boundary resolved. Spec #2 (compiler beats-baseline)
+is now unblocked and meaningful.
