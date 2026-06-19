@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**; **Compiler back-end Phase 1 erasure design APPROVED, scope locked [2026-06-19]**; **PK = documentation only; GitHub authoritative for code [2026-06-19]**; **Phase 1a LANDED: read/write erasure analyzer placed, 235→250 tests, cross-pass seam confirmed [2026-06-19]**)_
+_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**; **Compiler back-end Phase 1 erasure design APPROVED, scope locked [2026-06-19]**; **PK = documentation only; GitHub authoritative for code [2026-06-19]**; **Phase 1a LANDED: read/write erasure analyzer placed, 235→250 tests, cross-pass seam confirmed [2026-06-19]**; **Phase 1b-1 LANDED: emitted-mount placer placed, 250→262 tests, all 5 §5 differential gate cases green against real interpreter [2026-06-19]**)_
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state (Clean/Check/Dirty)
@@ -2066,3 +2066,40 @@ back-end-equivalence differential gate) is the next step in the compiler session
 placement task does not touch emission.
 
 **Status.** Phase 1a landed. Phase 1b pending (compiler session).
+
+---
+
+### 2026-06-19 — Phase 1b-1 LANDED: emitted-mount placer + differential gate
+
+**What landed.** The compiler-session's emitter pass (Phase 1b-1) and its differential gate
+placed into the live repo under live convention. Commit `24fd3fd`.
+
+**Files placed.**
+- `src/compiler/emitted-mount.ts` — specialized mount function emitter
+- `test/compiler/emitted-mount.test.ts` — differential gate (vitest, 12 tests)
+- `src/compiler/index.ts` — `emitMount` + `EmitResult` barrel-exported
+
+**Convention changes.** Stale imports (`./core`, `./ir`, `../src/*`) rewritten to
+`.js`-explicit, kebab-case. Custom `node:assert`/`test`/`summarize` harness → vitest
+`expect`/`test`. No logic changes.
+
+**Differential gate: all five §5 cases pass against the real interpreter.**
+- GATE 1 — tracked-read parity (ACCEPT): Text + Attr + boolean-attr semantics, DOM identical after signal write
+- GATE 2 — PLAIN binding: wired identically, no diagnostic, DOM matches
+- GATE 3 — DECLINE: diagnostic produced, binding not suppressed, DOM matches interpreter
+- GATE 4 — no-leak lockstep: 2→1→0 observer count, post-dispose writes produce no DOM change
+- GATE 5 — corpus parity: Prop + Event + multi-binding + out-of-slice throw at emit time
+
+No PK–live-interpreter mismatch found. The differential gate ran against the real interpreter
+(not a stale copy) and converged on first placement.
+
+**§7 perf characterization (logged, not a gate):** emitter 1.42x faster at mount,
+0.38x update ratio (update path identical to interpreter — expected zero delta; JSDOM
+scheduling variance explains the spread).
+
+**Emit-shape rule preserved.** Closures capture binding fields directly (`name`, `expr`,
+`eventName`, `handler`, `options`), never the binding object. Confirmed in code review.
+
+**Suite:** 250 → 262 (12 new tests, all pass). `tsc` clean. `biome` clean. `core.ts` untouched.
+
+**Status.** Phase 1b-1 landed. Phase 1b-2 (ChildBinding/ConditionalBinding) is the next slice.
