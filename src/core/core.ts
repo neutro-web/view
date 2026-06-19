@@ -237,6 +237,11 @@ const MAX_CASCADE = 100 // §8.5.4
 // Used by sync() to resolve the target from a function reference.
 const nodeForFn = new WeakMap<object, ReactiveNode>()
 
+// Tracks nodes where the user explicitly passed opts.equals at construction time.
+// Used by setCompilerEquals to refuse to displace a user-provided equality predicate
+// (§2.1 precedence: explicit > inferred > Object.is default).
+const nodesWithUserEquals = new WeakSet<ReactiveNode>()
+
 // Test-only instrumentation counter (§B1 fuzzer). Incremented in runRecompute.
 let _recomputeCount = 0
 
@@ -981,7 +986,10 @@ export function signal<T>(
 ): SignalAccessor<T> {
   const node = makeNode(KIND_SIGNAL)
   node.value = initial
-  if (opts?.equals !== undefined) node.equals = opts.equals as (a: unknown, b: unknown) => boolean
+  if (opts?.equals !== undefined) {
+    node.equals = opts.equals as (a: unknown, b: unknown) => boolean
+    nodesWithUserEquals.add(node)
+  }
 
   const fn = (): T => {
     trackRead(node)
@@ -1009,7 +1017,10 @@ export function derived<T>(
   node.compute = compute as () => unknown
   node.state = DIRTY // lazy: will compute on first read
   node.owner = currentOwner
-  if (opts?.equals !== undefined) node.equals = opts.equals as (a: unknown, b: unknown) => boolean
+  if (opts?.equals !== undefined) {
+    node.equals = opts.equals as (a: unknown, b: unknown) => boolean
+    nodesWithUserEquals.add(node)
+  }
   if (currentOwner !== null) addChild(currentOwner, node)
 
   const fn = (): T => {
@@ -1301,5 +1312,31 @@ export const __test = {
       l = l.nextSource
     }
     return result
+  },
+
+  /**
+   * §10 row 2 integration (Spec step-3): set the compiler-inferred equality predicate.
+   * Pass `false` for mutable-container nodes (always-propagate). Pass `undefined` to clear.
+   * Resolves the node's `equals` slot under §2.1 precedence — refuses to displace a
+   * user-provided opts.equals (priority 1). Used by Gate B tests to plant inferred values.
+   */
+  setCompilerEquals(
+    fn: object,
+    eq: ((a: unknown, b: unknown) => boolean) | false | undefined,
+  ): void {
+    const n = nodeForFn.get(fn)
+    if (!n) throw new Error('[nv/__test] setCompilerEquals: unknown fn')
+    n._compilerEquals = eq
+    // Priority 1 (user explicit) always wins — never displace it.
+    if (nodesWithUserEquals.has(n)) return
+    // Resolve slot: inferred (priority 2) if present, else Object.is (priority 3).
+    n.equals = eq !== undefined ? eq : Object.is
+  },
+
+  /** §10 row 2: return the resolved equals slot (function | false) for the node behind fn. */
+  getEquals(fn: object): ((a: unknown, b: unknown) => boolean) | false | null {
+    const n = nodeForFn.get(fn)
+    if (!n) return null
+    return n.equals
   },
 }
