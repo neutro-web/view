@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-18 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18]**)_
+_Last updated: 2026-06-18 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**)_
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state (Clean/Check/Dirty)
@@ -239,17 +239,21 @@ _Last updated: 2026-06-18 (Contract **v0.4.1** — runtime correctness verified;
 ### Genuine research problems (unknown answers, can fail)
 - Beating an alien-signals-class performance baseline. **Opt-A (2026-06-18) closed the two
   named deferrals** (Link free-list pool + O(1) epoch-stamp dedup): wide-graph cases
-  improved 4.7–11.3x, `updateSignals`/`repeatedObservers`/`createComputations` now beat or
-  tie alien. **`createSignals` gap (6x) confirmed structural-and-accepted** (struct-shape
-  spike 2026-06-18): dominated by WeakMap.set + fn.set, not struct width; only API redesign
-  moves it; thin-signal/field-reduction/kind-split all declined. **List-churn validation
-  deferred (tripwire):** validate signal-construction cost under a realistic ListBinding
-  churn harness before treating the gap as permanently accepted — the microbench likely
-  overstates it (real rows also create deriveds, which nv wins). **Wide-graph cases
-  (~1.5x behind) — profiling spike commissioned** to find whether the remaining constant
-  factor is a safe win or an accepted floor; highest-value hypothesis is stable-edge rebuild
-  vs. alien's persistent links (fixing that is contract-adjacent, not in-stream). **Spec #4
-  and #2 unblocked.**
+  improved 4.7–11.3x; `updateSignals`/`repeatedObservers`/`unstable` beat alien;
+  `createComputations`/`molBench` tie. **Perf phase at a characterized stopping point — no
+  further tuning queued.** Two remaining gaps are both proven **structural** and both trace
+  to the single 29-field `ReactiveNode` width (= 3 cache lines vs alien's 1):
+  - **`createSignals` (6x)** — dominated by WeakMap.set + fn.set, not struct width; only
+    API redesign moves it (struct-shape spike 2026-06-18). List-churn tripwire: validate
+    under a realistic ListBinding churn harness before treating as permanently accepted.
+  - **Wide-graph `4-1000x12`/`25-1000x5` (1.47x/1.66x)** — field-count→cache-line cost in
+    `fn`/`runRecompute`, not algorithmic (wide-graph spike 2026-06-18). The one in-stream
+    candidate (field reorder) regressed +18/+27% by breaking an accidental BFS→DFS cache
+    pre-fetch; **original field order is now locked as cache-load-bearing.**
+  Both gaps share one remedy — **kind-split** (separate Signal/Computed/Effect structs) —
+  which is **noted, not approved**, gated behind a tripwire: opens only on real-app evidence
+  that wide-graph or list-churn perf is user-facing, never on the synthetic gap alone. It is
+  §9-contract-adjacent and cross-stream. **Spec #4 and #2 unblocked; field layout settled.**
 - Compiler specializations as optimization hypotheses, each of which must beat the
   unspecialized baseline on the benchmark before shipping.
 
@@ -1547,3 +1551,83 @@ if wide-graph performance becomes a user-facing priority.
 
 **Status.** Spike closed. No ship. Original field layout locked. Gap characterized. Spec #4
 (compiler `_compilerSources` wiring) and Spec #2 (compiler beats-baseline) are next.
+
+---
+
+### 2026-06-18 — Architect confirmation: wide-graph spike result affirmed; kind-split escalation gated behind real-app evidence (tripwire)
+
+**Reviewing:** the wide-graph profiling spike RESULT entry (same date, directly above).
+Architect reviewed the findings, did not re-run (the spike's method and numbers are
+self-consistent and the regression came from the real benchmark, not the micro-profiler).
+
+**Affirmed.**
+- **H3/H4 (stable-edge-rebuild) correctly refuted.** Edge rebuild is ~0.2% of wide-graph
+  runtime; the Opt-A free-list pool already eliminated the allocation cost. The architect's
+  own pre-spike "highest-value hypothesis" was wrong, and the profile-first discipline is
+  what surfaced that — recorded as a calibration point: a flagged hypothesis is a place to
+  look, never a conclusion to ship toward.
+- **Root cause accepted as structural, not algorithmic.** The 1.47x/1.66x gap is field-count
+  → cache-line count (29-field struct = 3 CL vs alien's 7-field computed = 1 CL), same DFS at
+  the same O(). No in-stream remedy.
+- **The field-reorder regression is the keeper finding.** Moving `_walkParent`/`_walkCursor`
+  out of CL1 regressed both cases (+18%, +27%) by breaking an *accidental* BFS→DFS cache
+  pre-fetch: `propagate` loading CL1 for `_markNext` warms the adjacent walk-stack fields for
+  `updateIfNecessary`'s DFS. **The original field order is therefore cache-load-bearing and is
+  now locked** — a future "tidy the struct layout" edit must treat field order as a measured
+  property, not cosmetics (same class of lesson as deepest-first fuzzer pull order). Revert was
+  correct; 203/203 green on the restored layout.
+
+**Kind-split escalation — affirmed NOTED, NOT APPROVED; gated behind real-app evidence.**
+The spike's proposed remedy (split `ReactiveNode` into `SignalNode`/`ComputedNode`/
+`EffectNode`+`SyncNode`) is the *same* kind-split the createSignals struct-shape ruling
+already declined as Tier 3. Two independent perf investigations — construction cost and
+wide-graph propagation cost — now converge on the identical conclusion: the single 29-field
+struct is the cost, the kind-split is the only lever, and the kind-split risks polymorphism
+across `propagate`/`updateIfNecessary`/`trackRead`. The wide-graph spike *strengthens* the
+case against splitting: it empirically demonstrated that even a within-single-struct field
+*reorder* regressed via an unpredicted cache effect — a full kind-split is a far larger
+perturbation of exactly that cache behavior, across multiple node shapes, with the demonstrated
+pattern being "struct-shape changes regress unpredictably."
+
+Decision: **do not open the kind-split as a spike now.** 1.47x/1.66x on two synthetic
+wide-graph cases, against a 5-of-7 win/tie record, does not justify a large cross-stream
+change with demonstrated regression risk. Set the tripwire instead:
+
+> **Kind-split tripwire (evidence-gated).** The kind-split spike opens only if real-app
+> profiling shows wide-graph reactive propagation (deep/wide graphs under churn) as a
+> top user-facing cost — not on the synthetic benchmark gap alone. When triggered, its
+> evidence base is BOTH this wide-graph spike result AND the createSignals struct-shape
+> spike result (they converge on the same lever). The spike, if ever run, carries its own
+> soundness obligation (kind-discrimination becomes a type guard, not a runtime branch —
+> no semantic change intended, but it must be proven) and coordinates with the renderer and
+> compiler streams (every `ReactiveNode` call-site is touched). It is contract-adjacent
+> (§9 single kind-distinguished struct) and comes back to architecture before it ships.
+> Trigger: real-app wide-graph profiling evidence, or a deliberate decision that wide-graph
+> perf is a launch-blocking priority.
+
+**Perf phase standing (architect summary).** The runtime perf phase is at a characterized,
+defensible stopping point. Opt-A delivered the structural wins (16.5x→1.47x, 8.1x→1.66x, plus
+`updateSignals`/`repeatedObservers`/`unstable` outright wins and `createComputations`/`molBench`
+ties). Two follow-up spikes then *bounded* the two remaining gaps: both `createSignals` (6x) and
+the wide-graph cases (~1.5x) are proven structural, both trace to the single-struct field width,
+both have the same and only remedy (kind-split), and both are correctly deferred behind real-app
+evidence rather than chased into a risky reversal on synthetic numbers. "Stuck" would be an
+uncharacterized gap; this is a characterized one with the single remaining lever identified and
+gated. No further perf tuning is queued; the loop reopens on evidence (the two tripwires) or when
+a compiler specialization (Spec #2) proposes a hook that must beat baseline.
+
+**Carry-forward constraint for Spec #4 (and any struct edit).** The field layout is now known
+to be cache-load-bearing on the wide-graph cases. Spec #4 adds `_compilerSources`/`_diverged` to
+the struct — new fields on the hot struct. Spec #4's existing perf-regression gate is sharpened
+here to a hard requirement: **after the struct edit, re-run `4-1000x12 - dyn5%` and `25-1000x5`
+specifically** and confirm no regression beyond noise; keep the new fields optional/absent on
+non-annotated nodes so signals and plain deriveds do not grow or shift the existing field order.
+Append new fields at the end of the struct (after `_seenRunId`) rather than interleaving them,
+to avoid disturbing the BFS→DFS CL1 adjacency that the reorder regression proved load-bearing.
+
+**Contract impact.** None. The kind-split, if ever pursued, would carry a §9 wording change with
+its own versioned entry — gated on the tripwire, not decided here.
+
+**Status.** Wide-graph spike closed and affirmed. Kind-split noted, not approved, tripwire set.
+Original field layout locked as cache-load-bearing. Spec #4 and Spec #2 proceed. No further perf
+work queued.
