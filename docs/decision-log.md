@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**)_
+_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**)_
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state (Clean/Check/Dirty)
@@ -264,6 +264,15 @@ _Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified;
   §9-contract-adjacent and cross-stream. **Spec #4 and #2 unblocked; field layout settled.**
 - Compiler specializations as optimization hypotheses, each of which must beat the
   unspecialized baseline on the benchmark before shipping.
+  **Step 4 (`_compilerSources` oracle) measured 2026-06-19 (Spec #2): net-negative
+  on all realistic workloads (+40–46% on wide-stable, the design-target case);
+  no wired benefit path in the current core — `_diverged` is computed but nothing
+  acts on it to save reconcile work. SHELVED behind a reconcile-cost consumer
+  (deferred E2 aggressive skip-tracking path). Reopen trigger: real-app profiling
+  shows reconcile cost climbing, OR E2 lands and provides the consumer.
+  Step 3 benchmarking remains blocked — `_compilerEquals?` is an inert stub; a
+  separate step-3 integration spec (wire the value-change-path hook) is required
+  before step 3 can be benchmarked.**
 
 ### Superseded (kept for rationale; see Log for detail)
 - _none yet._
@@ -1709,3 +1718,55 @@ Key assertions confirmed against the real machinery:
 
 **Status.** Spec #4 closed. Integration boundary resolved. Spec #2 (compiler beats-baseline)
 is now unblocked and meaningful.
+
+---
+
+### 2026-06-19 — Spec #2 CLOSED: step-4 `_compilerSources` oracle measured; no wired benefit path → SHELVED
+
+**Environment (pinned per §4).** Apple M2 Max arm64 / macOS Darwin 24.6.0 / Node v20.19.0 / V8 11.3.244.8-node.26. Measured against commit `39d3600` (post-Spec-#4). Suite: 220/220, tsc --strict clean.
+
+**Step 4 only.** This spec covers the `_compilerSources` branch-variant oracle (§10 row 4) only. Step 3 (`_compilerEquals?`) is an **inert stub** in the current `core.ts` — the equality-policy hook is declared but nothing in `runRecompute` or the value-change path consults it. Step 3 benchmarking remains blocked on a separate step-3 integration spec (a `runRecompute`/value-change-path edit with its own Gate A/B), which has not been authored. This entry does not cover step 3.
+
+**§3.1 crux — does a benefit path exist? NO (found by code inspection, confirmed by measurement).**
+
+Code analysis of the post-Spec-#4 `core.ts` (commit `39d3600`):
+- `trackRead` sets `observer._diverged = true` on the first out-of-union read.
+- `runRecompute` resets `node._diverged = false` at the start of each run (gated on `_compilerSources != null`).
+- **`_diverged` has exactly one consumer: itself, as a guard to skip further `Set.has()` calls later in the same run.**
+- `reconcileEdges` runs identically regardless of `_diverged`. The Spec #4 design explicitly left `reconcileEdges` untouched and ground-truth.
+- **No other code in `core.ts` reads `_diverged` or `_compilerSources` to branch on or skip any work.**
+
+Conclusion from code: the oracle computes a flag that is used only to bound its own redundant checks. It has **zero benefit path** in the current core. The cost side (one `Set.has()` per distinct tracked read per annotated node, plus one field write per annotated recompute) is real. The benefit side is structurally zero until a consumer exists that uses `_diverged`/`_compilerSources` to skip reconcile work — the deferred E2 aggressive skip-tracking design, which is out of scope and requires its own soundness proof before it can be considered.
+
+**A/B micro-benchmark (the §3 instrument; the only valid measurement method given the standard harness has no notion of a declared union).**
+
+Method: same graph, same writes, same flush calls per shape. Only variable: `_compilerSources` null (baseline arm) vs. correct declared union (specialized arm). 15 trials per arm, median reported. `--expose-gc` between trials.
+
+| Shape | Baseline (ms) | Specialized (ms) | Δms | Δ% | Verdict |
+|---|---|---|---|---|---|
+| wide-stable (w=200, iters=2000) | 8.61 | 12.12 | +3.51 | **+40.8%** | SLOWER |
+| wide-stable (w=1000, iters=500) | 12.68 | 18.51 | +5.83 | **+46.0%** | SLOWER |
+| branch-flip (iters=5000) | 0.61 | 0.65 | +0.05 | +7.9% | SLOWER |
+| many-narrow (n=500, iters=5000) | 0.61 | 0.53 | −0.08 | −12.7% | FASTER (noise) |
+| deep-chain (d=20, iters=5000) | 6.87 | 8.75 | +1.88 | **+27.4%** | SLOWER |
+| deep-chain (d=100, iters=2000) | 17.03 | 19.22 | +2.19 | **+12.8%** | SLOWER |
+
+**Notes on results:**
+- **Wide-stable** (+40–46%) is the design-target case — large stable read-set, many recomputes. The oracle pays `width × Set.has()` per recompute against zero reconcile savings. The wide-graph spike already placed reconcile at ~0.2% of runtime; the oracle adds ~40% overhead to the case it was designed for. Decisive finding.
+- **Deep-chain** (+12–27%) maximizes the per-annotated-recompute cost (field write + conditional check × depth). Confirms the cost is proportional to recompute frequency × annotated depth.
+- **Many-narrow** (−12.7% apparent): absolute values 0.61 vs. 0.53ms — within measurement noise on a sub-millisecond workload. Treated as no-difference. One-element Sets and trivially-inline membership tests may interact with JIT specialization; this is not a reliable signal.
+- **Branch-flip** (+7.9%): oracle fires `_diverged` on every flip (first read after branch switch is always off-union), then reconcile still runs fully. Pure overhead, no savings.
+
+No shape showed a reliable, regression-free speedup. The design-target case (wide-stable) shows the largest regression.
+
+**Recommendation: SHELVE.** The oracle mechanism is correct and wired (Spec #4). It is harmless to non-annotated nodes (zero cost proven by Spec #4 Gate A). But it is a net-negative on every workload where it can be measured with confidence, and the benefit path is structurally zero in the current core. There is no tuning path: the `Set.has()` cost is irreducible on the cost side, and reconcile is already near-free on the benefit side (Opt-A free-list pool effect).
+
+**Reopen triggers (either suffices):**
+1. The deferred **E2 aggressive skip-tracking path** lands: a consumer of `_diverged`/`_compilerSources` in `reconcileEdges` or `trackRead` that actually skips work when the union is trusted. That path requires its own soundness proof (it reintroduces the missed-edge failure mode) and is contract-level — not in scope here.
+2. **Real-app profiling** shows reconcile cost climbing in a production workload (e.g., dynamically-determined dependency sets with many additions/removals per frame). That would shift the benefit/cost ratio and warrant re-measurement.
+
+**No escalation triggered.** The measurement confirms the prior; nothing unexpected surfaced. `reconcileEdges`, tracking-context enter/exit, and §5.4.1 finally were not modified.
+
+**Contract impact.** None. §10 row 4 is already specified; the oracle remains wired and dormant. No version bump.
+
+**Step 3 status.** `_compilerEquals?` is an inert stub. The equality-policy benefit path (the value-change branch in `runRecompute`) has not been wired. Benchmarking step 3 requires a step-3 integration spec first, authored by architecture. Flagged; not started here.
