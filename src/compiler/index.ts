@@ -5,6 +5,7 @@ export { SyncTargetClassifier } from './sync-target-classifier.js'
 export { WriteGraphCycleChecker } from './write-graph-cycle-checker.js'
 export { EqualityPolicyInferencer } from './equality-policy-inference.js'
 export { BranchVariantAnalyzer } from './branch-variant-analyzer.js'
+export { ReadWriteErasureAnalyzer } from './read-write-erasure-analyzer.js'
 
 export type {
   ClassifierConfig,
@@ -16,4 +17,6 @@ export type {
   SyncEdge,
   ReadEnumResult,
   SignalId,
+  BindingErasureVerdict,
+  TemplateErasureResult,
 } from './types.js'

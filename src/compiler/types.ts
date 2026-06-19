@@ -221,3 +221,52 @@ export interface ClassifierConfig {
    */
   nvCorePath: string
 }
+
+// ── Read/Write Erasure types (compiler back-end Phase 1) ─────────────────────
+
+/**
+ * Per-binding-hole verdict from the read/write erasure analysis pass.
+ *
+ * ACCEPT     — the binding site is safe: either a provably reactive read (effect
+ *              will track correctly) or a write that does NOT target a sync-written
+ *              signal. Wire as normal.
+ *
+ * DECLINE    — write safety violated: the binding's expression contains a .set()
+ *              call whose target SignalId is in the syncTargetIds set (a sync-target
+ *              signal is being written from outside the sync machinery). Leave the
+ *              binding untouched (wire as normal for correctness) and emit the
+ *              diagnostic. Do NOT silently produce a second writer.
+ *
+ *              This is the §2 escalation tripwire in source form: a mutation-write
+ *              to a sync-target signal is provably not the sole writer, so the
+ *              erasure pass must decline to bless it.
+ *
+ * PLAIN      — the binding expression contains no provable reactive reads AND no
+ *              writes. Wire as normal (effect wires it even if non-reactive —
+ *              interpreter behavior). Diagnostic optional (compile-visible).
+ *
+ * All-or-nothing: if a sub-expression in the hole is unanalyzable, emit DECLINE
+ *   for the HOLE (not the sub-expression), consistent with the step-4 rule.
+ *   A partial verdict that claims completeness is the failure mode.
+ */
+export type BindingErasureVerdict =
+  | { kind: 'ACCEPT'; expressionIndex: number }
+  | {
+      kind: 'DECLINE'
+      expressionIndex: number
+      reason: string
+      /** User-facing diagnostic — attribute name + write target for actionability. */
+      diagnostic: string
+      /** The sync-target SignalId that caused the decline (same derivation as steps 1–4). */
+      syncTargetId: SignalId
+    }
+  | { kind: 'PLAIN'; expressionIndex: number; reason: string }
+
+/**
+ * Erasure analysis result for one `html` tagged-template call site.
+ * `verdicts` is indexed by expression position (0-based hole index).
+ */
+export interface TemplateErasureResult {
+  callNode: ts.TaggedTemplateExpression
+  verdicts: BindingErasureVerdict[]
+}
