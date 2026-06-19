@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**)_
+_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**; **Compiler back-end Phase 1 erasure design APPROVED, scope locked [2026-06-19]**; **PK = documentation only; GitHub authoritative for code [2026-06-19]**)_
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state (Clean/Check/Dirty)
@@ -1957,3 +1957,80 @@ Suite remains 235/235.
 - Step 4 (`_compilerSources` branch-variant oracle): wired, gated, measured (Spec #2) — SHELVED (no benefit path).
 
 **Status: CLOSED.**
+
+---
+
+### 2026-06-19 — Compiler back-end Phase 1 (read/write erasure) design APPROVED; scope locked
+
+**Decision.** The compiler back-end's first piece — the read/write syntax erasure pinned
+2026-06-18 (bare-read → accessor call; mutation-write → `nodeSet`/`.set()`) — has an
+architect-approved soundness design (`design-compiler-backend-phase1-erasure.md`), gated
+before code per the step-4 discipline. This is IR back-end #2 (interpreter is #1); it proves
+the IR *compiles* to code observably identical to the interpreter.
+
+**Soundness obligation.** Back-end equivalence (Invariant BE, IR v0.2): a differential gate —
+emitted code vs. interpreter on the same IR, structural DOM comparison + reactive behavior,
+the TC-01–TC-09 corpus through both back-ends. The whole proof reduces to one capability:
+**reliably identifying which identifiers are reactive bindings**, reusing the existing
+nominal-origin discipline (not structural shape). All-or-nothing: anything not provably
+reactive is left as plain JS, untouched. The load-bearing gate test is the unprovable-binding
+case — it must be left plain *and surface visibly* (diagnostic / differential mismatch), never
+a silent stale read; if a miss can be silent, the erasure is unsound and escalates rather than
+ships.
+
+**Escalation tripwire (write-erasure analog of step 4's forbidden skip-tracking):** never
+rewrite a binding the analysis cannot prove reactive. Doing so trades a compile-visible miss
+for a silent wrong-target/wrong-write. Decline and diagnose.
+
+**Scope locked (architect-ruled):**
+- **Front-end: tagged-template only, Phase 1** (proven interpreter path = differential ground
+  truth). `.nv` is a close follow-up iff tagged-template lands clean.
+- **Emit target: executable form** (in-memory, run directly by the gate). String-codegen is a
+  later separate concern.
+- **Write-rewrite + `sync` composition: DECLINE + diagnose.** A mutation-write to a
+  `sync`-written signal is not rewritten — erasing a second write would create silent
+  last-write-wins races and a write the §8.5.2 cycle checker never analyzed (a silent hole in
+  build-time cycle safety). To detect this, the erasure pass consults sync-classification via
+  the shared `signalSymbolId` identity (named as a wired input, not a rediscovery). Added as a
+  required gate case.
+
+**Deferred (separate follow-up doc):** hook emission (`setCompilerEquals`/`setCompilerSources`
+onto rewritten sites) — attaches to sites this erasure produces, sequenced after.
+
+**Path.** Architect-approved (here) → compiler session builds correctness/logic + sandbox
+differential gate (claude.ai, where steps 1–4 were built) → CC confirms the real-browser half
+of back-end equivalence (same convergence trigger as the PoC Phase 0 final gate). Touches no
+`core.ts` (emits calls *to* the existing runtime API; if a core change appears needed, stop —
+separate escalation, though 2026-06-18 predicts it should not).
+
+**Contract impact.** None. Read/write syntax is an authoring-layer concern above the contract
+(per 2026-06-18). No version bump.
+
+**Status.** Design approved, scope locked. Handoff to the compiler session pending (with the
+four live GitHub files: `src/compiler/signal-type-utils.ts`, `src/renderer/interpreter.ts`,
+`src/renderer/ir.ts`, `src/core/index.ts`).
+
+---
+
+### 2026-06-19 — PK code files removed; GitHub authoritative for code, PK documentation-only
+
+**Decision.** All source-code files are removed from project knowledge. PK holds
+**documentation only** (decision log, contract, design docs). GitHub is the single source of
+truth for code; the decision log + contract remain the single source of truth for decisions
+and semantics.
+
+**Rationale.** Post-migration, the PK code copies had drifted into a competing, stale second
+source of truth — pre-migration names (`syncTargetClassifier.ts`, flat layout, `.ts`/extensionless
+mix) against a post-migration repo (kebab-case, `src/{core,compiler,renderer}/`, `.js`-explicit,
+vitest). Same failure class as the deleted MIGRATION.md: a stale artifact asserting things no
+longer true. Building against stale PK copies risks sandbox false-greens that break at the
+GitHub merge — exactly what the two-gate discipline exists to prevent.
+
+**Consequence for sessions.** claude.ai sessions cannot `git clone`; they read GitHub via
+fetch/paste. Removing the PK mirror means each session pulls the specific live files it needs
+from GitHub at start, rather than trusting a local mirror. More correct (always-live), slightly
+more per-session friction. Handoffs name the exact paths a session must read.
+
+**Contract impact.** None. Process/sourcing decision.
+
+**Status.** Locked. PK = documentation only going forward.
