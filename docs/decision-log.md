@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**; **Compiler back-end Phase 1 erasure design APPROVED, scope locked [2026-06-19]**; **PK = documentation only; GitHub authoritative for code [2026-06-19]**; **Phase 1a LANDED: read/write erasure analyzer placed, 235→250 tests, cross-pass seam confirmed [2026-06-19]**; **Phase 1b-1 LANDED: emitted-mount placer placed, 250→262 tests, all 5 §5 differential gate cases green against real interpreter [2026-06-19]**; **Phase 1b-2 LANDED: Child + Conditional added to emitter, 262→272 tests, all gate cases green, 1000-flip no-leak confirmed, direct-capture preserved [2026-06-19]**)_
+_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**; **Compiler back-end Phase 1 erasure design APPROVED, scope locked [2026-06-19]**; **PK = documentation only; GitHub authoritative for code [2026-06-19]**; **Phase 1a LANDED: read/write erasure analyzer placed, 235→250 tests, cross-pass seam confirmed [2026-06-19]**; **Phase 1b-1 LANDED: emitted-mount placer placed, 250→262 tests, all 5 §5 differential gate cases green against real interpreter [2026-06-19]**; **Phase 1b-2 LANDED: Child + Conditional added to emitter, 262→272 tests, all gate cases green, 1000-flip no-leak confirmed, direct-capture preserved [2026-06-19]**; **Phase 2 CLOSED: step-3 hook emission landed, 272→282 tests, FALSE-policy sites emit setCompilerEquals(fn, false), first specialization to reach compiled output; HC perturbation finding carried forward as createSignals tripwire companion [2026-06-19]**)_
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state (Clean/Check/Dirty)
@@ -2155,3 +2155,64 @@ equal — expected, since flip cost is dominated by the shared condition `effect
 the emitSetup/emitMount shape. The compiler back-end is now at interpreter parity for the PoC
 binding set; the deferred items (.nv front-end, List/Sync bindings, string codegen, real-browser
 confirmation) remain as previously scoped.
+
+---
+
+### 2026-06-19 — Phase 2 CLOSED: step-3 hook emission; first specialization to reach compiled output
+
+**What landed.** The emit back-end now feeds the step-3 equality hook. New file
+`src/compiler/equality-hook-emitter.ts` (`emitEqualityHook` / `emitEqualityHooks`); for each
+FALSE-policy site (mutable container) it emits `setCompilerEquals(fn, false)`. First time a
+closed compiler specialization reaches real compiled output. Barrel-exported from
+`src/compiler/index.ts`. `core.ts` untouched — Phase 2 only calls the existing (wired + gated)
+`setCompilerEquals` setter.
+
+**Phase 2 is NOT an emitMount extension.** Hooks attach to signal/derived CONSTRUCTION sites in
+component code, before the template mounts — distinct from emitMount's template wiring.
+
+**Step-4 NOT emitted** (decided): `setCompilerSources` stays shelved (Spec #2 net-negative);
+emitting a dormant net-negative hook into production contradicts the shelve. Deferred to
+step-4's own reopen trigger (Phase 2b, if ever).
+
+**Emission policy (option-1 fidelity, §2 skip-OBJECT_IS decision).**
+- FALSE → emit `setCompilerEquals(fn, false)` — the only behavior-changing case.
+- OBJECT_IS → SKIP. No-op by construction (Object.is → Object.is) AND avoids the HC
+  perturbation a setter write triggers (§5 finding). Confining emission to FALSE keeps the cost
+  off the OBJECT_IS majority.
+- DECLINE / explicit-user-`equals` → SKIP. The step-3 analysis DECLINES explicit-equals sites
+  (primary protection); the runtime `nodesWithUserEquals` guard is the backstop.
+
+**Gate 4a — emission fidelity (5/5).** FALSE emits + slot becomes `false`; OBJECT_IS no call;
+DECLINE no call; explicit-equals site stays the user's predicate (analysis declines + runtime
+guard both hold); batch emission touches only FALSE sites.
+
+**Gate 4b — behavioral differential (4/4, the payoff).** `arr.push(x); set(arr)`: without
+emission → Object.is sees the same reference → DOM suppressed (`0`); with emission → slot
+`false` → propagates → DOM updates (`1`, `2`). Confirmed through the full `emitMount` compiled
+stack. Primitive/OBJECT_IS-skipped: identical behavior, no regression. **First mechanical proof
+a closed specialization benefits compiled output.**
+
+**Finding — HC perturbation real at scale (carry forward; intersects the createSignals
+tripwire).** §5 characterization (10k signals, jsdom): no-emission ~1.1μs/signal; FALSE-path
+emission ~2.0μs/signal — ~82% per-signal construction overhead on the FALSE path, from
+`setCompilerEquals` writing two fields (`_compilerEquals` + `equals`) → a hidden-class
+transition per node. Consequences:
+1. Validates the §2 skip-OBJECT_IS decision — emit-all would have put this cost on every
+   non-declined signal; skipping confines it to the FALSE minority (mutable-container signals,
+   typically a small fraction of a component's signals).
+2. Latent tripwire, joined to the createSignals list-churn tripwire (2026-06-18) — both concern
+   signal-construction cost. A FALSE-heavy component under list churn pays the structural
+   createSignals cost AND this emission multiplier on its FALSE fraction. Do NOT act on the
+   synthetic 10k number; when the createSignals list-churn validation runs, it should include a
+   FALSE-policy-heavy row to capture the combined cost. Reopen lever for both: real-app
+   list-churn evidence, not the microbench.
+
+**Gates.** Suite 272 → 282 (10 new: 4a ×5, 4b ×4, §5 ×1). `tsc -p tsconfig.build.json` clean;
+`tsc --strict` clean; biome clean. `core.ts` untouched.
+
+**Contract impact.** None. No version bump.
+
+**Status.** Phase 2 closed. The compiler back-end now emits binding wiring (1b) + step-3
+specialization (2) for tagged-template input. Remaining renderer threads: `.nv` front-end;
+real-browser gate (CC convergence). Step-4 emission and the eager/lazy (row 3) / wide-fanout
+(row 5) hooks remain deferred/unbuilt as previously scoped.
