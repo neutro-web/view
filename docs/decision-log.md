@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-18 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**)_
+_Last updated: 2026-06-18 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18]**)_
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state (Clean/Check/Dirty)
@@ -1446,3 +1446,104 @@ versioned entry — gated on the spike, not decided here.
 list-churn validation deferred with tripwire. Spec #4/#2 remain unblocked; the wide-graph spike
 runs first only because it shares the `core.ts` hot path #4 will wire into — but it is
 field/logic-light and unlikely to fight #4.
+
+---
+
+### 2026-06-18 — Wide-graph profiling spike RESULT: gap is structural; field reorder attempted and reverted
+
+**Spike mandate (from entry above).** Profile the `4-1000x12 - dyn5%` (1.47x gap) and
+`25-1000x5` (1.66x gap) wide-graph benchmark cases. Test hypothesis that nv rebuilds a stable
+edge set every recompute (H3/H4). Profile first; if constant-factor win found, measure and ship;
+if win requires persistent-edges, write characterized proposal; always log.
+
+**Baseline (post-Opt-A, alien-signals@3.1.2):**
+- `4-1000x12 - dyn5%`: nv 616.82ms vs alien 420.36ms → **1.47x**
+- `25-1000x5`: nv 853.46ms vs alien 514.65ms → **1.66x**
+
+**Profiling method.** Custom micro-profiler (`/tmp/profile_wg4.mjs`) replicating the wide-graph
+structure. `node --cpu-prof --cpu-prof-interval=50`. V8 sampling profiler on M2 Max / Node
+v20.19.0. 38,623 samples over ~3,092ms.
+
+**Profile result — top self-time:**
+| Function | Self-time |
+|---|---|
+| `fn` (derived accessor wrapper) | 37% |
+| `runRecompute` (recompute machinery) | 34% |
+| `trackRead` | 0.05% |
+| `poolLink + makeLink` combined | ~0.2% |
+
+**Hypothesis H3/H4 REFUTED.** Edge rebuild (trackRead + poolLink + makeLink) = ~4ms total out of
+~3,092ms = **0.2% of runtime**. The Opt-A free-list pool completely solved the allocation cost.
+Persistent edges cannot recover meaningful time because there is no meaningful time to recover
+here.
+
+**Actual bottleneck — structural.** The 71% concentration in `fn` + `runRecompute` reflects the
+overhead of nv's 29-field monomorphic `ReactiveNode` struct relative to alien-signals' 7-field
+computed node. Key contributors:
+
+1. **`fn` (37%):** The derived accessor wrapper `() => { isDisposed check; trackRead; updateIfNecessary; hasError; value }`. This is the outer frame for every reactive read. With pointer compression, the node's 29 fields span 3 cache lines (CL0=0-13, CL1=14-27, CL2=28). For CLEAN reads, only CL0 is needed — but it is loaded regardless of how short the path is.
+
+2. **`runRecompute` (34%):** Setup and teardown around every recompute — context save/restore (`prevObserver`, `prevOwner`), pre-run cleanup, try/finally, edge reconciliation. These operations touch CL0 and CL1. alien-signals has fewer fields → fewer cache lines → less work per recompute.
+
+3. **Structural gap:** alien-signals' 7-field computed fits entirely in one pointer-compressed cache line. nv's 29-field struct cannot. At wide-graph scale (thousands of nodes, reads per update), the extra CL misses per node dominate. The gap is not algorithmic — both runtimes run the same DFS traversal at the same O() complexity — it is purely field-count → cache-line count.
+
+**Field reordering attempted (in-stream candidate).** V8 assigns property indices in initialization
+order. The DFS walk-stack fields `_walkParent` (field 24, CL1) and `_walkCursor` (field 25, CL1)
+were candidates to move to CL0 — if the BFS propagation phase loads CL1 for `_markNext`, then
+the DFS phase can read `_walkParent`/`_walkCursor` from warm CL1 cache for free. Moving them to
+CL0 would require a separate CL0 load per node in the DFS. Similarly, `_seenRunId` was at field
+28 (isolated CL2); moving it to CL1 alongside `_seenBy` (field 27) would eliminate a CL miss
+per `trackRead` write.
+
+Conservative reorder implemented: `_walkParent`/`_walkCursor` → CL0 (fields 12-13), `_seenRunId`
+→ CL1 (field 16), `error`/`owner` evicted from CL0 to CL1 (cold). Tests: 203/203 green.
+
+**Field reorder CAUSED REGRESSION — reverted.** Conservative-reorder benchmark result
+(b9mq3us44, clean run with alien numbers matching baseline to within noise):
+- `4-1000x12 - dyn5%`: nv 733ms vs alien 423ms → **1.73x** (baseline 1.47x — **+18% regression**)
+- `25-1000x5`: nv 1085ms vs alien 503ms → **2.16x** (baseline 1.66x — **+27% regression**)
+
+**Root cause of regression — BFS→DFS accidental pre-fetch broken.** In the original field layout,
+`_markNext` (field 23), `_walkParent` (field 24), `_walkCursor` (field 25), `_runId` (field 26),
+`_seenBy` (field 27), `_seenRunId` (field 28) are all adjacent. When `propagate`'s BFS phase
+accesses `node._markNext` to iterate the BFS queue, it loads CL1 (fields 14-27), accidentally
+pre-fetching `_walkParent`/`_walkCursor`. When `updateIfNecessary`'s DFS phase then runs for
+those same nodes, the walk-stack fields are already warm in the cache — a free pre-fetch. Moving
+`_walkParent`/`_walkCursor` to CL0 breaks this: BFS still loads CL1, but DFS now needs a separate
+CL0 load per node. The regression is consistent in direction and magnitude across both wide-graph
+cases; alien (unaffected) matches baseline. The original co-location in CL1 was accidentally
+optimal.
+
+**Field reorder reverted.** Original field order restored in `makeNode` and `ReactiveNode`.
+203/203 tests still green.
+
+**Conclusion — gap is structural, accepted.**
+The 1.47x / 1.66x gap on wide-graph cases reflects the fundamental difference in struct width
+(29 fields vs 7 fields = 3 CL vs 1 CL). No in-stream fix exists: the one candidate optimization
+(field reordering) made things measurably worse by breaking an accidental cache-prefetch synergy.
+The correct path to close the gap is **struct reduction** — kind-split (separate signal/derived
+structs with only their own fields) or equivalent field reduction per §9. That is an architecture
+change touching the kind-distinguished monomorphism invariant and requires a separate spike with
+its own proposal, not an in-stream edit.
+
+**Escalation proposal — struct reduction.**
+If closing the wide-graph gap is a future priority, the proposal is:
+- Split `ReactiveNode` into `SignalNode` (kind=SIGNAL: kind, state, value, firstObserver,
+  lastObserver, equals = ~6 fields, 1 CL) and `ComputedNode` (kind=DERIVED: all of the above +
+  compute, firstSource, lastSource, _walkParent, _walkCursor, _runId, _seenBy, _seenRunId,
+  _markNext = ~15 fields, 2 CL) and `EffectNode`/`SyncNode` (include scheduling and ownership
+  fields = ~20 fields, 2-3 CL).
+- `fn`/`runRecompute` would operate on the narrower `ComputedNode` type, reducing CL traffic by
+  ~30% per recompute on wide-graph cases.
+- Soundness: the kind-discrimination code (`if (node.kind === KIND_DERIVED)`) becomes a type
+  guard rather than a runtime branch. No semantic change.
+- Risk: requires touching every call-site that currently passes `ReactiveNode`. Large change,
+  coordinate with renderer and compiler streams. Not in-stream.
+
+**This escalation is noted, not approved.** The gap is accepted at the current level (the ratio
+for the profiled cases is 1.47x / 1.66x, not 6x). The nv wins or ties 5/7 benchmark cases;
+the 1.5x-ish wide-graph gap is a known structural deficit without an in-stream remedy. Revisit
+if wide-graph performance becomes a user-facing priority.
+
+**Status.** Spike closed. No ship. Original field layout locked. Gap characterized. Spec #4
+(compiler `_compilerSources` wiring) and Spec #2 (compiler beats-baseline) are next.
