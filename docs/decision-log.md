@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**)_
+_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**)_
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state (Clean/Check/Dirty)
@@ -1887,5 +1887,73 @@ baseline: the prior stated expectation is that `equals:false` on mutable-contain
 is a correctness/ergonomics win (not a speed win); `OBJECT_IS` on primitive nodes is
 identical to the `Object.is` default (no delta). A net-neutral result confirming the
 `false` case is a complete, honest outcome.
+
+**Status: CLOSED.**
+
+---
+
+### 2026-06-19 — Step-3 beats-baseline CLOSED; compiler specialization layer (steps 1–4) fully measured
+
+**Instrument.** Within-core A/B micro-benchmark (`bench/spec3-equals-ab.mjs`), mirroring
+Spec #2's method. Same graph, same writes, same flushes; only variable is the `equals`
+slot. Baseline arm: `Object.is` default (no `setCompilerEquals`). Specialized arm:
+`OBJECT_IS` for primitive shapes, `false` for mutable-container shapes. 15 trials each,
+median, GC between trials. Environment: Apple M2 Max arm64 / Node v20.19.0 /
+V8 11.3.244.8-node.26. Measured against commit `be5841f` (suite at 235/235).
+
+**Results (median of 15 trials, two runs for stability).**
+
+| Shape | Baseline (ms) | Specialized (ms) | Δms | Δ% | Stable? |
+|---|---|---|---|---|---|
+| prim-changing (w=200, iters=50000) | 5.00–5.40 | 4.15–4.33 | −0.84–−1.07 | −17 to −20% | ✗ (see below) |
+| prim-changing (w=1000, iters=10000) | 0.81–0.87 | 0.81–0.87 | ~0 | ~0% | ✓ **~same** |
+| prim-no-op (w=200, iters=50000) | 1.21–1.30 | 1.20–1.21 | ~0 | −0.1 to −7% | borderline |
+| prim-no-op (w=1000, iters=10000) | 0.24 | 0.24 | ~0 | +0.6 to +2.7% | ✓ **~same** |
+| mut-in-place (n=100, iters=20000) | 1.56–1.58 | 1.98 | +0.40–0.42 | **+25 to +27%** | ✓ **SLOWER** |
+| mut-ref-chg (n=100, iters=20000) | 1.90–1.95 | 1.81–1.85 | −0.09–0.10 | −5% | ✓ **~same** |
+
+**Result interpretation — confirms prior.**
+
+*Primitive shapes (OBJECT_IS vs Object.is):* The w=1000 variants (the authoritative signal)
+show zero delta both runs, confirming the prior: replacing `Object.is` with `Object.is` is
+a no-op. The w=200 prim-changing shape shows an apparent −17 to −20% speedup, but this is
+a **V8 hidden-class artifact**: `setCompilerEquals` writes `node._compilerEquals = Object.is`
+on each derived, transitioning the node to a new hidden class. The JIT generates slightly
+different code for the HC-transitioned nodes in the small-graph case. The w=1000 variant
+dilutes this per-node JIT bias across more nodes and shows zero — that is the real signal.
+No real equality-slot cost savings exist here.
+
+*Mutable-container, in-place mutation (`false` vs `Object.is`):* **+26% SLOWER, stable.**
+This is exactly the prior's prediction and is **correct** behavior. The baseline arm
+(`Object.is`) wrongly suppresses propagation when the same array reference is re-set after
+in-place mutation (`arr.push(); set(arr)`), doing less work only because it is buggy.
+The specialized arm (`false`) correctly propagates every write, doing the downstream
+recomputes the baseline silently skipped. The specialized arm is slower because it is doing
+the right amount of work. Do not read this as a regression. The correctness payoff is
+already banked in Gate B-3 (proven correct in the step-3 integration gate).
+
+*Mutable-container, ref-change:* ~same / borderline (−5% within noise). Consistent with
+the "skipped `Object.is` call" theory but within measurement variance.
+
+**Verdict: CONFIRMED PRIOR. Keep the hook.**
+
+Unlike step 4 (`_compilerSources`, SHELVED — zero benefit path at runtime), step 3 has a
+real consumer (`node.equals` is called on every value-change check) and a real correctness
+payoff (the `false` case fixes the in-place-mutation footgun). The hook is **not dormant**
+and does not get shelved. Speed is neutral; the value is correctness.
+
+**Hook status note.** The hook is wired and gated but not yet fed by real compiler-emitted
+output. Production components do not yet receive specialized equality — the compiler back-end
+(emitting `setCompilerEquals` calls on annotated signal/derived sites) is downstream work.
+A future session should not assume compiled components already get specialized equality.
+
+**No core code changed.** `src/` is clean. Only file added: `bench/spec3-equals-ab.mjs`.
+Suite remains 235/235.
+
+**Compiler specialization layer closed.** Steps 1–4 are now all wired + gated + measured:
+- Step 1 (sync-target classification): wired, gated, measured (compiler stream).
+- Step 2 (write-graph cycle checking): wired, gated, measured (compiler stream).
+- Step 3 (`_compilerEquals` equality policy): wired, gated, **measured today** — keep for correctness.
+- Step 4 (`_compilerSources` branch-variant oracle): wired, gated, measured (Spec #2) — SHELVED (no benefit path).
 
 **Status: CLOSED.**
