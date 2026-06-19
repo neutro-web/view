@@ -240,10 +240,16 @@ _Last updated: 2026-06-18 (Contract **v0.4.1** — runtime correctness verified;
 - Beating an alien-signals-class performance baseline. **Opt-A (2026-06-18) closed the two
   named deferrals** (Link free-list pool + O(1) epoch-stamp dedup): wide-graph cases
   improved 4.7–11.3x, `updateSignals`/`repeatedObservers`/`createComputations` now beat or
-  tie alien. **`createSignals` gap (6x) confirmed structural-and-accepted** (spike
-  2026-06-18): dominated by WeakMap.set + fn.set — not addressable by struct-shape changes;
-  thin-signal shape negative result logged; field-reduction too small to ship; full kind-split
-  declined. **Spec #4 and #2 now unblocked.**
+  tie alien. **`createSignals` gap (6x) confirmed structural-and-accepted** (struct-shape
+  spike 2026-06-18): dominated by WeakMap.set + fn.set, not struct width; only API redesign
+  moves it; thin-signal/field-reduction/kind-split all declined. **List-churn validation
+  deferred (tripwire):** validate signal-construction cost under a realistic ListBinding
+  churn harness before treating the gap as permanently accepted — the microbench likely
+  overstates it (real rows also create deriveds, which nv wins). **Wide-graph cases
+  (~1.5x behind) — profiling spike commissioned** to find whether the remaining constant
+  factor is a safe win or an accepted floor; highest-value hypothesis is stable-edge rebuild
+  vs. alien's persistent links (fixing that is contract-adjacent, not in-stream). **Spec #4
+  and #2 unblocked.**
 - Compiler specializations as optimization hypotheses, each of which must beat the
   unspecialized baseline on the benchmark before shipping.
 
@@ -1381,3 +1387,62 @@ different scope; it does not block current work.
 finding logged). Tier 2: negative result, logged as closed finding. `createSignals` gap
 confirmed structural-and-accepted. **Spec #4 (`_compilerSources` wiring) and Spec #2
 (compiler beats-baseline) are now unblocked.**
+
+### 2026-06-18 — Wide-graph profiling spike commissioned; createSignals list-churn validation deferred (tripwire set)
+
+**Context.** The struct-shape spike (same date) confirmed `createSignals` is
+structural-and-accepted (WeakMap + fn.set dominate, not struct width; closing it needs API
+redesign, not tuning). Post-Opt-A standing: nv wins or ties 5 of 7 benchmark cases. Two
+remain ~1.5x behind alien — `4-1000x12 - dyn5%` (1.47x) and `25-1000x5` (1.66x), down from
+16.5x/8.1x before Opt-A. This entry decides what to do next on perf.
+
+**Decision 1 — wide-graph profiling spike commissioned (before Spec #4/#2 perf-sensitive work).**
+1.5x is the range where a *constant-factor* win in the propagation hot path is plausible
+(unlike the 6x `createSignals` gap, which is API-richness). The spike profiles where the 1.5x
+actually goes — same method as the createSignals spike: **profile first, trust the profile
+over hypotheses, hard gate on the won cases (no net-negative regression), log the result
+positive or negative.** A "the remaining gap is irreducible constant-factor, accepted" result
+is a complete, valid outcome.
+
+The highest-value hypothesis to test (architect flag, unprofiled): nv may **rebuild a stable
+edge set every recompute** (full `reconcileEdges` teardown + `trackRead` rebuild) where
+alien-signals reuses persistent links via version stamps. If the wide-graph dependency set is
+unchanged across recomputes, that teardown/rebuild is wasted work. **Crucially, fixing this is
+NOT in-stream** — persisting edges across recomputes touches §5.4.1 (reconcile-always-in-finally
+is the soundness net) and changes what the graph *is* across recomputes. The spike
+*investigates and characterizes*; if the win lives here, it returns a proposal for architect
+review with its own soundness obligation, it does not change reconciliation in place. The
+in-stream/escalation line: making the *existing* rebuild cheaper is in-stream; *not rebuilding*
+is an architecture change that comes back here.
+
+**Decision 2 — createSignals list-churn validation deferred, tripwire set.** The accepted-
+structural ruling on `createSignals` carries a real worry: list-heavy UIs (ListBinding, row
+churn) create signals constantly, and a 6x construction cost could compound. This worry is
+currently **untested** — and the createSignals spike just demonstrated that untested cost
+hypotheses are often wrong (the cost wasn't where anyone predicted). So the worry is converted
+to a scheduled measurement, not a standing fear:
+
+> **Deferred validation (tripwire):** before treating `createSignals` as permanently accepted,
+> benchmark signal-construction cost under a *realistic ListBinding churn harness* (create/
+> destroy N rows, each row = signal + derived(s) + bindings), not the isolated `createSignals`
+> microbench. Rationale it may be a non-issue: the microbench creates bare signals in a tight
+> loop, but a real row also creates deriveds — and **nv already wins `createComputations`** — so
+> the blended per-row create cost may be competitive even though raw signal creation is 6x. If
+> the realistic harness shows construction dominating row churn, *then* the API-redesign question
+> (should the signal be a callable; can fn→node lookup avoid the WeakMap) opens as its own
+> architecture pass. Not before — chasing a microbench into an API reversal is the tail wagging
+> the dog. Trigger: real ListBinding work, or first real-app profiling, whichever comes first.
+
+**Standing practice reaffirmed.** Both decisions reaffirm the Opt-A loop as the perf method
+going forward: one hypothesis at a time, profile-led, single trial, hard gate on won cases,
+logged result. Novel bottleneck-shaving is welcome but always one trial at a time against the
+gate — never a batch of speculative changes.
+
+**Contract impact.** None from this entry. The persistent-edge proposal, *if* the spike returns
+one and *if* architecture later approves it, would be a §5.4.1-adjacent change with its own
+versioned entry — gated on the spike, not decided here.
+
+**Status.** Wide-graph spike commissioned (time-boxed, result to be logged). createSignals
+list-churn validation deferred with tripwire. Spec #4/#2 remain unblocked; the wide-graph spike
+runs first only because it shares the `core.ts` hot path #4 will wire into — but it is
+field/logic-light and unlikely to fight #4.
