@@ -2150,5 +2150,8 @@ equal — expected, since flip cost is dominated by the shared condition `effect
 
 **Suite:** 262 → 272 (10 new tests, all pass). `tsc` clean. `biome` clean. `core.ts` untouched.
 
-**Status.** Phase 1b (full Text/Attr/Prop/Event/Child/Conditional slice) is complete.
-Next: architect review of this entry; then Phase 1c or integration planning.
+**Status.** Phase 1b complete (all six PoC bindings emit at interpreter parity). Next: Phase 2
+(hook emission — setCompilerEquals/setCompilerSources onto emitted sites, separate doc), built on
+the emitSetup/emitMount shape. The compiler back-end is now at interpreter parity for the PoC
+binding set; the deferred items (.nv front-end, List/Sync bindings, string codegen, real-browser
+confirmation) remain as previously scoped.
