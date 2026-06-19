@@ -155,6 +155,15 @@ interface ReactiveNode {
   _runId: number // observer-side
   _seenBy: ReactiveNode | null // source-side
   _seenRunId: number // source-side
+
+  // §10 row 4: branch-variant oracle (Spec #4). Fields appended at tail per the
+  // cache-load-bearing placement rule (2026-06-18 wide-graph spike). Absent
+  // (undefined) on non-annotated nodes — those nodes pay zero on every hot-path call.
+  // When _compilerSources is set, trackRead checks membership after the epoch-stamp
+  // dedup; on the first out-of-union read, _diverged is set to true and further
+  // oracle checks are skipped for this run. reconcileEdges is never touched.
+  _compilerSources?: ReadonlySet<ReactiveNode> | null
+  _diverged?: boolean
 }
 
 function makeNode(kind: 0 | 1 | 2 | 3): ReactiveNode {
@@ -300,6 +309,16 @@ function trackRead(source: ReactiveNode): void {
   if (source._seenBy === observer && source._seenRunId === observer._runId) return
   source._seenBy = observer
   source._seenRunId = observer._runId
+
+  // §10 oracle: fires only for compiler-annotated nodes (_compilerSources set),
+  // and only until the first out-of-union read (_diverged acts as the "oracle
+  // active" guard). Never touches edges, source lists, or stamp fields.
+  // A node without _compilerSources skips this block entirely (undefined != null → false).
+  if (observer._compilerSources != null && !observer._diverged) {
+    if (!observer._compilerSources.has(source)) {
+      observer._diverged = true
+    }
+  }
 
   const link = makeLink(source, observer)
   appendToSourceList(link, observer)
@@ -460,6 +479,9 @@ function runRecompute(node: ReactiveNode): void {
   }
   // Assign a new run identity for O(1) trackRead dedup (§5.1 epoch stamp).
   node._runId = _nextRunId++
+  // §10: reset oracle divergence flag for the new run. Gated so non-annotated
+  // nodes (where _compilerSources is undefined/null) pay zero — no field write.
+  if (node._compilerSources != null) node._diverged = false
   _recomputeCount++ // §B1: test-only instrumentation (tree-shaken in prod)
   if (_perNodeOn) {
     // JIT-removable when false
@@ -1233,5 +1255,51 @@ export const __test = {
       l = l.nextObserver
     }
     return c
+  },
+
+  /**
+   * §10 row 4 integration (Spec #4): set the compiler-declared union for a derived.
+   * Pass null to clear. Sources are passed as accessor functions (signal()/derived()).
+   * Converts fn→ReactiveNode via nodeForFn. Used by Gate B tests.
+   */
+  setCompilerSources(fn: object, sources: ReadonlySet<object> | null): void {
+    const n = nodeForFn.get(fn)
+    if (!n) throw new Error('[nv/__test] setCompilerSources: unknown fn')
+    if (sources === null) {
+      n._compilerSources = null
+      return
+    }
+    const ns = new Set<ReactiveNode>()
+    for (const s of sources) {
+      const sn = nodeForFn.get(s)
+      if (sn === undefined)
+        throw new Error('[nv/__test] setCompilerSources: source fn not in nodeForFn')
+      ns.add(sn)
+    }
+    n._compilerSources = ns
+  },
+
+  /** §10 row 4: read the _diverged flag for the node behind fn. */
+  isDiverged(fn: object): boolean {
+    const n = nodeForFn.get(fn)
+    if (!n) return false
+    return n._diverged === true
+  },
+
+  /**
+   * Walk source list in order; returns raw ReactiveNode refs.
+   * Stable across recomputes (nodes are never pooled, only links are).
+   * Used for differential source-order comparison in Gate B tests.
+   */
+  sourceNodes(fn: object): ReactiveNode[] {
+    const n = nodeForFn.get(fn)
+    if (!n) return []
+    const result: ReactiveNode[] = []
+    let l = n.firstSource
+    while (l) {
+      result.push(l.source)
+      l = l.nextSource
+    }
+    return result
   },
 }
