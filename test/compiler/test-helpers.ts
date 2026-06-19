@@ -7,8 +7,8 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import * as ts from 'typescript'
-import { SyncTargetClassifier } from '../../src/compiler/sync-target-classifier'
-import type { ClassifierConfig, TargetVerdict } from '../../src/compiler/types'
+import { SyncTargetClassifier } from '../../src/compiler/sync-target-classifier.js'
+import type { ClassifierConfig, TargetVerdict } from '../../src/compiler/types.js'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 

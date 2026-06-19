@@ -35,7 +35,7 @@ import type {
   TemplateIR,
   TemplateShape,
   TextBinding,
-} from './ir'
+} from './ir.js'
 
 // ── Hole classification ───────────────────────────────────────────────────────
 

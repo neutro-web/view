@@ -22,8 +22,8 @@
  */
 
 import { describe, expect, test } from 'vitest'
-import { derived, flushSync, signal } from '../../src/core/core'
-import { __test } from '../../src/core/core'
+import { derived, flushSync, signal } from '../../src/core/core.js'
+import { __test } from '../../src/core/core.js'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 

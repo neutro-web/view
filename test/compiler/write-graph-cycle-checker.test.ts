@@ -17,10 +17,10 @@
 
 import * as ts from 'typescript'
 import { expect, test } from 'vitest'
-import { SyncTargetClassifier } from '../../src/compiler/sync-target-classifier'
-import type { CycleReport, ReadEnumResult, TargetVerdict } from '../../src/compiler/types'
-import { WriteGraphCycleChecker } from '../../src/compiler/write-graph-cycle-checker'
-import { getVerdicts, makeTestProgram } from './test-helpers'
+import { SyncTargetClassifier } from '../../src/compiler/sync-target-classifier.js'
+import type { CycleReport, ReadEnumResult, TargetVerdict } from '../../src/compiler/types.js'
+import { WriteGraphCycleChecker } from '../../src/compiler/write-graph-cycle-checker.js'
+import { getVerdicts, makeTestProgram } from './test-helpers.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

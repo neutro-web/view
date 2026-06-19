@@ -12,8 +12,8 @@
  */
 
 import { expect, test } from 'vitest'
-import type { TargetVerdict } from '../../src/compiler/types'
-import { getVerdicts } from './test-helpers'
+import type { TargetVerdict } from '../../src/compiler/types.js'
+import { getVerdicts } from './test-helpers.js'
 
 // ── Assertion helpers ──────────────────────────────────────────────────────────
 

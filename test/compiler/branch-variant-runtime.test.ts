@@ -26,7 +26,7 @@
  */
 
 import { expect, test } from 'vitest'
-import { HarnessDerived, HarnessSignal } from './variant-runtime-harness'
+import { HarnessDerived, HarnessSignal } from './variant-runtime-harness.js'
 
 // ── Test 1: Property — branch-flip correctness ────────────────────────────────
 

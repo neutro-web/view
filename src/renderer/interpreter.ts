@@ -40,7 +40,7 @@
  *   - Flag if jsdom diverges from real browsers on any of these.
  */
 
-import { createRoot, effect, onCleanup } from '../core/core'
+import { createRoot, effect, onCleanup } from '../core/core.js'
 import type {
   AttrBinding,
   Binding,
@@ -51,7 +51,7 @@ import type {
   PropBinding,
   TemplateIR,
   TextBinding,
-} from './ir'
+} from './ir.js'
 
 // ── DOM utilities ─────────────────────────────────────────────────────────────
 

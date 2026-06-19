@@ -14,9 +14,9 @@
 
 import * as ts from 'typescript'
 import { expect, test } from 'vitest'
-import { BranchVariantAnalyzer } from '../../src/compiler/branch-variant-analyzer'
-import type { BranchVariantVerdict } from '../../src/compiler/types'
-import { makeTestProgram } from './test-helpers'
+import { BranchVariantAnalyzer } from '../../src/compiler/branch-variant-analyzer.js'
+import type { BranchVariantVerdict } from '../../src/compiler/types.js'
+import { makeTestProgram } from './test-helpers.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -212,7 +212,7 @@ test('DECLARED: signal ref not called (in ternary false branch) is not a read', 
   if (v0.kind === 'DECLARED') {
     expect([...v0.declaredUnion].some((id) => idContains(id, 'cond'))).toBe(true)
     expect([...v0.declaredUnion].some((id) => idContains(id, 'a'))).toBe(true)
-    expect(![...v0.declaredUnion].some((id) => idContains(id, 'b'))).toBe(true)
+    expect([...v0.declaredUnion].some((id) => idContains(id, 'b'))).toBe(false)
   }
 })
 

@@ -5,7 +5,7 @@
 
 import * as path from 'node:path'
 import * as ts from 'typescript'
-import type { SignalId } from './types'
+import type { SignalId } from './types.js'
 
 // ── Path normalization ─────────────────────────────────────────────────────────
 

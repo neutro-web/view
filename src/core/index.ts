@@ -13,11 +13,11 @@ export {
   createRoot,
   onCleanup,
   flushSync,
-} from './core'
+} from './core.js'
 
 export type {
   SignalAccessor,
   DerivedAccessor,
   PubSub,
   ExternalSource,
-} from './core'
+} from './core.js'

@@ -28,8 +28,8 @@ import {
   normPath,
   signalSymbolId,
   symbolIsFromNvCore,
-} from './signal-type-utils'
-import type { ClassifierConfig, EnumResult, SignalId, TargetVerdict } from './types'
+} from './signal-type-utils.js'
+import type { ClassifierConfig, EnumResult, SignalId, TargetVerdict } from './types.js'
 
 const REJECT_DIAGNOSTIC =
   'sync target is not statically resolvable. ' +

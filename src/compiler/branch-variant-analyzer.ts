@@ -49,8 +49,8 @@ import {
   normPath,
   signalSymbolId,
   symbolIsFromNvCore,
-} from './signal-type-utils'
-import type { BranchVariantVerdict, ClassifierConfig, SignalId } from './types'
+} from './signal-type-utils.js'
+import type { BranchVariantVerdict, ClassifierConfig, SignalId } from './types.js'
 
 // ── Internal body analysis result ─────────────────────────────────────────────
 

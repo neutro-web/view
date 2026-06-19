@@ -27,7 +27,7 @@ import {
   isNvSignalType,
   signalSymbolId,
   symbolIsFromNvCore,
-} from './signal-type-utils'
+} from './signal-type-utils.js'
 import type {
   ClassifierConfig,
   CycleReport,
@@ -35,7 +35,7 @@ import type {
   SignalId,
   SyncEdge,
   TargetVerdict,
-} from './types'
+} from './types.js'
 
 // ── Public API ─────────────────────────────────────────────────────────────────
 

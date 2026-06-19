@@ -22,10 +22,10 @@
 
 import { JSDOM } from 'jsdom'
 import { expect, test } from 'vitest'
-import { __test, flushSync, signal } from '../../src/core/core'
-import { structurallyEqual } from '../../src/renderer/comparator'
-import { createHtmlTag } from '../../src/renderer/html-tag'
-import { mount } from '../../src/renderer/interpreter'
+import { __test, flushSync, signal } from '../../src/core/core.js'
+import { structurallyEqual } from '../../src/renderer/comparator.js'
+import { createHtmlTag } from '../../src/renderer/html-tag.js'
+import { mount } from '../../src/renderer/interpreter.js'
 import type {
   ChildBinding,
   ConditionalBinding,
@@ -33,7 +33,7 @@ import type {
   PropBinding,
   TemplateIR,
   TextBinding,
-} from '../../src/renderer/ir'
+} from '../../src/renderer/ir.js'
 
 // ── jsdom setup ───────────────────────────────────────────────────────────────
 

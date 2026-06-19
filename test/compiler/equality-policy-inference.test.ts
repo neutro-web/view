@@ -17,9 +17,9 @@
 
 import * as ts from 'typescript'
 import { expect, test } from 'vitest'
-import { EqualityPolicyInferencer } from '../../src/compiler/equality-policy-inference'
-import type { EqualityPolicy, EqualityPolicyVerdict } from '../../src/compiler/types'
-import { makeTestProgram } from './test-helpers'
+import { EqualityPolicyInferencer } from '../../src/compiler/equality-policy-inference.js'
+import type { EqualityPolicy, EqualityPolicyVerdict } from '../../src/compiler/types.js'
+import { makeTestProgram } from './test-helpers.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

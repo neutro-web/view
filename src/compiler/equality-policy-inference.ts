@@ -31,8 +31,8 @@
 
 import * as path from 'node:path'
 import * as ts from 'typescript'
-import { normPath, symbolIsFromNvCore } from './signal-type-utils'
-import type { ClassifierConfig, EqualityPolicy, EqualityPolicyVerdict } from './types'
+import { normPath, symbolIsFromNvCore } from './signal-type-utils.js'
+import type { ClassifierConfig, EqualityPolicy, EqualityPolicyVerdict } from './types.js'
 
 // ── Public API ─────────────────────────────────────────────────────────────────
 

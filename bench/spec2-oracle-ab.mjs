@@ -3,7 +3,7 @@
  * Run: node --expose-gc bench/spec2-oracle-ab.mjs
  */
 
-import { derived, flushSync, signal, __test } from '../dist/core/core.js'
+import { __test, derived, flushSync, signal } from '../dist/core/core.js'
 
 const WARMUP = 5
 const TRIALS = 15
@@ -52,7 +52,7 @@ function runBranchFlip(iters, useOracle) {
 
 function runManyNarrow(iters, count, useOracle) {
   const srcs = Array.from({ length: count }, (_, i) => signal(i))
-  const ds = srcs.map(s => {
+  const ds = srcs.map((s) => {
     const d = derived(() => s() * 2)
     if (useOracle) __test.setCompilerSources(d, new Set([s]))
     d()
@@ -93,10 +93,16 @@ function runDeepChain(iters, depth, useOracle) {
 function runShape(name, fn) {
   for (let i = 0; i < WARMUP; i++) fn(false)
   const baseTimes = []
-  for (let i = 0; i < TRIALS; i++) { GC(); baseTimes.push(fn(false)) }
+  for (let i = 0; i < TRIALS; i++) {
+    GC()
+    baseTimes.push(fn(false))
+  }
   for (let i = 0; i < WARMUP; i++) fn(true)
   const specTimes = []
-  for (let i = 0; i < TRIALS; i++) { GC(); specTimes.push(fn(true)) }
+  for (let i = 0; i < TRIALS; i++) {
+    GC()
+    specTimes.push(fn(true))
+  }
   const bMs = median(baseTimes)
   const sMs = median(specTimes)
   const dMs = sMs - bMs
@@ -107,12 +113,12 @@ function runShape(name, fn) {
 // ── run ───────────────────────────────────────────────────────────────────────
 
 const shapes = [
-  ['wide-stable  (w=200,  iters=2000)', u => runWideStable(2000,  200, u)],
-  ['wide-stable  (w=1000, iters=500) ', u => runWideStable(500,  1000, u)],
-  ['branch-flip  (iters=5000)        ', u => runBranchFlip(5000,       u)],
-  ['many-narrow  (n=500,  iters=5000)', u => runManyNarrow(5000,  500, u)],
-  ['deep-chain   (d=20,   iters=5000)', u => runDeepChain(5000,    20, u)],
-  ['deep-chain   (d=100,  iters=2000)', u => runDeepChain(2000,   100, u)],
+  ['wide-stable  (w=200,  iters=2000)', (u) => runWideStable(2000, 200, u)],
+  ['wide-stable  (w=1000, iters=500) ', (u) => runWideStable(500, 1000, u)],
+  ['branch-flip  (iters=5000)        ', (u) => runBranchFlip(5000, u)],
+  ['many-narrow  (n=500,  iters=5000)', (u) => runManyNarrow(5000, 500, u)],
+  ['deep-chain   (d=20,   iters=5000)', (u) => runDeepChain(5000, 20, u)],
+  ['deep-chain   (d=100,  iters=2000)', (u) => runDeepChain(2000, 100, u)],
 ]
 
 console.log('\n=== Spec #2 — _compilerSources oracle A/B (median of 15 trials) ===\n')
@@ -134,7 +140,7 @@ for (const [name, fn] of shapes) {
     r.bMs.toFixed(2).padStart(13),
     r.sMs.toFixed(2).padStart(12),
     r.dMs.toFixed(2).padStart(8),
-    ((r.dPct >= 0 ? '+' : '') + r.dPct.toFixed(1) + '%').padStart(8),
+    `${(r.dPct >= 0 ? '+' : '') + r.dPct.toFixed(1)}%`.padStart(8),
     verdict.padStart(10),
   )
 }

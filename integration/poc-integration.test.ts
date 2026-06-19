@@ -38,19 +38,19 @@ import { expect, test } from 'vitest'
 // ── Runtime stream (Stream 1) — §11 public surface only ──────────────────────
 // Gate 4 seam: only signal, derived, flushSync, and the __test hook surface
 // are imported. No reference to ReactiveNode, Link, or any internal.
-import { __test, derived, flushSync, signal } from '../src/core/core'
+import { __test, derived, flushSync, signal } from '../src/core/core.js'
 
 // ── Renderer stream (Stream 3) — IR contract + mount entry point ─────────────
 // Gate 4 seam: TemplateIR (the IR contract type) and mount() (the §11-adjacent
 // render entry point). No interpreter internals (walkPath, wireText, etc.).
-import { mount } from '../src/renderer/interpreter'
-import type { TemplateIR } from '../src/renderer/ir'
+import { mount } from '../src/renderer/interpreter.js'
+import type { TemplateIR } from '../src/renderer/ir.js'
 
 // ── Compiler stream (Stream 2) — classifier + cycle checker ──────────────────
 // Gate 4 seam: the public APIs of both compiler passes. No internal types.
-import { SyncTargetClassifier } from '../src/compiler/sync-target-classifier'
-import type { ClassifierConfig, TargetVerdict } from '../src/compiler/types'
-import { WriteGraphCycleChecker } from '../src/compiler/write-graph-cycle-checker'
+import { SyncTargetClassifier } from '../src/compiler/sync-target-classifier.js'
+import type { ClassifierConfig, TargetVerdict } from '../src/compiler/types.js'
+import { WriteGraphCycleChecker } from '../src/compiler/write-graph-cycle-checker.js'
 
 // ── Core path derivation ──────────────────────────────────────────────────────
 const _dir = nodePath.dirname(new URL(import.meta.url).pathname)
@@ -429,6 +429,7 @@ test('flip-then-dispose: conditional flip leaves no residual DOM or leaked edges
 test('Gate 4: seam audit — all cross-stream interactions are via contract surfaces', () => {
   // Verified by inspection of the import block and authoring pattern above.
   // The passing of Gates 1–3 demonstrates the contracts hold at runtime.
+  // structural-intent marker: Gate-4 is verified by the import audit above, not this expect
   expect(true).toBe(true)
 })
 
