@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**; **Compiler back-end Phase 1 erasure design APPROVED, scope locked [2026-06-19]**; **PK = documentation only; GitHub authoritative for code [2026-06-19]**)_
+_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**; **Compiler back-end Phase 1 erasure design APPROVED, scope locked [2026-06-19]**; **PK = documentation only; GitHub authoritative for code [2026-06-19]**; **Phase 1a LANDED: read/write erasure analyzer placed, 235→250 tests, cross-pass seam confirmed [2026-06-19]**)_
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state (Clean/Check/Dirty)
@@ -2034,3 +2034,35 @@ more per-session friction. Handoffs name the exact paths a session must read.
 **Contract impact.** None. Process/sourcing decision.
 
 **Status.** Locked. PK = documentation only going forward.
+
+---
+
+### 2026-06-19 — Phase 1a LANDED: read/write erasure analyzer placed into repo
+
+**What landed.** The compiler-session's read/write erasure analysis pass (the verdict pass
+from the approved 2026-06-18/19 soundness design) was placed into the live repo under live
+convention. Commit `b6fe5b8`.
+
+**Files placed.**
+- `src/compiler/read-write-erasure-analyzer.ts` — the analysis pass
+- `test/compiler/read-write-erasure-analyzer.test.ts` — 15 verdict tests (vitest)
+- `src/compiler/types.ts` — `BindingErasureVerdict` + `TemplateErasureResult` merged in
+- `src/compiler/index.ts` — `ReadWriteErasureAnalyzer` and both new types barrel-exported
+
+**Convention changes from compiler-session output.** Rename (camelCase → kebab-case),
+`.js`-explicit imports, test harness conversion (custom `assert`/`test`/`summarize` →
+vitest `expect`/`test`). No logic changes.
+
+**Gates.**
+- Suite: 235 → 250 (15 new tests, all pass).
+- `tsc -p tsconfig.build.json` clean.
+- `biome check` clean.
+- Cross-pass seam confirmed: DECLINE fires through the real `SyncTargetClassifier` with the
+  real `signalSymbolId` derivation — the seam is a live integration check, not a stubbed unit
+  test. No derivation mismatch found.
+
+**Scope note.** Phase 1a = analysis pass (verdicts) only. Phase 1b (code emission + the
+back-end-equivalence differential gate) is the next step in the compiler session; this
+placement task does not touch emission.
+
+**Status.** Phase 1a landed. Phase 1b pending (compiler session).
