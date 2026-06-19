@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**; **Compiler back-end Phase 1 erasure design APPROVED, scope locked [2026-06-19]**; **PK = documentation only; GitHub authoritative for code [2026-06-19]**; **Phase 1a LANDED: read/write erasure analyzer placed, 235→250 tests, cross-pass seam confirmed [2026-06-19]**; **Phase 1b-1 LANDED: emitted-mount placer placed, 250→262 tests, all 5 §5 differential gate cases green against real interpreter [2026-06-19]**)_
+_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**; **Compiler back-end Phase 1 erasure design APPROVED, scope locked [2026-06-19]**; **PK = documentation only; GitHub authoritative for code [2026-06-19]**; **Phase 1a LANDED: read/write erasure analyzer placed, 235→250 tests, cross-pass seam confirmed [2026-06-19]**; **Phase 1b-1 LANDED: emitted-mount placer placed, 250→262 tests, all 5 §5 differential gate cases green against real interpreter [2026-06-19]**; **Phase 1b-2 LANDED: Child + Conditional added to emitter, 262→272 tests, all gate cases green, 1000-flip no-leak confirmed, direct-capture preserved [2026-06-19]**)_
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state (Clean/Check/Dirty)
@@ -2103,3 +2103,52 @@ scheduling variance explains the spread).
 **Suite:** 250 → 262 (12 new tests, all pass). `tsc` clean. `biome` clean. `core.ts` untouched.
 
 **Status.** Phase 1b-1 landed. Phase 1b-2 (ChildBinding/ConditionalBinding) is the next slice.
+
+---
+
+### 2026-06-19 — Phase 1b-2 LANDED: ChildBinding + ConditionalBinding added to emitter
+
+**What landed.** Phase 1b-2 merges ChildBinding and ConditionalBinding support into
+the emitter and its differential gate. Placement only — no logic changes beyond the 1b-1
+slice. Commit `0e903c5`.
+
+**Structural change (required for ConditionalBinding).** Flat `emitMount` split into:
+- `emitSetup(ir, verdicts)` — internal; resolves IR into `SetupFn` within the CURRENT
+  reactive scope (no `createRoot`). Used by ConditionalBinding to mount branch templates
+  inside their own per-branch root.
+- `emitMount(ir, verdicts)` — public API; wraps `emitSetup` in `createRoot`. Identical
+  contract to interpreter `mount()`.
+
+**Carry-forward rules preserved.**
+- Direct-capture rule: all closures capture `expr`/`name`/`condition` directly. No
+  binding-object reference in any closure. Confirmed in code review.
+- DECLINE: diagnostic collected, binding still wired.
+- PLAIN: wired identically to ACCEPT.
+- core.ts untouched. Emitted code calls `createRoot`/`effect`/`onCleanup` only.
+
+**Gate cases (all pass against real interpreter).**
+- GATE 1 (Child) ×2 — reactive update as `.data` mutation; null/undefined → `''`
+- GATE 2 (Child) — non-primitive rejection routes error identically (TC-09 parity)
+- GATE 3 (Conditional) ×2 — flip parity; null alternate (pure-if)
+- GATE 4 (Conditional) — 1000-flip no-leak: no DOM accumulation, observer count stays 1
+  per back-end, drops to 0 after dispose. THE load-bearing case.
+- GATE 5 (Conditional) ×2 — severance parity (stale write to old branch has no DOM
+  effect); parent-dispose-while-mounted full cleanup
+- GATE 6 (Conditional + Text) — reactive text inside branch updates correctly
+
+**§6 perf characterization (2000 mount iters, 200 flips; logged, not a gate).**
+  Child mount:   interpreter 127ms  emitter 82ms  (1.54x)
+  Cond mount:    interpreter 151ms  emitter 133ms  (1.14x)
+  Cond flip:     interpreter 11ms   emitter 9ms    (1.29x)
+
+Emitter is faster at mount for both binding kinds. Flip parity is essentially
+equal — expected, since flip cost is dominated by the shared condition `effect` and
+`createRoot` in both back-ends.
+
+**`GATE 5: Out-of-slice` test updated.** `kind: 'child'` (now in scope) replaced with
+`kind: 'list'` (deferred). Error regex updated from `/1b-1 scope/` → `/Phase 1b scope/`.
+
+**Suite:** 262 → 272 (10 new tests, all pass). `tsc` clean. `biome` clean. `core.ts` untouched.
+
+**Status.** Phase 1b (full Text/Attr/Prop/Event/Child/Conditional slice) is complete.
+Next: architect review of this entry; then Phase 1c or integration planning.
