@@ -6,6 +6,8 @@ export { WriteGraphCycleChecker } from './write-graph-cycle-checker.js'
 export { EqualityPolicyInferencer } from './equality-policy-inference.js'
 export { BranchVariantAnalyzer } from './branch-variant-analyzer.js'
 export { ReadWriteErasureAnalyzer } from './read-write-erasure-analyzer.js'
+export { emitMount } from './emitted-mount.js'
+export type { EmitResult } from './emitted-mount.js'
 
 export type {
   ClassifierConfig,
