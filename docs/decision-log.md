@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-20 (Contract **v0.4.2** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**; **Compiler back-end Phase 1 erasure design APPROVED, scope locked [2026-06-19]**; **PK = documentation only; GitHub authoritative for code [2026-06-19]**; **Phase 1a LANDED: read/write erasure analyzer placed, 235→250 tests, cross-pass seam confirmed [2026-06-19]**; **Phase 1b-1 LANDED: emitted-mount placer placed, 250→262 tests, all 5 §5 differential gate cases green against real interpreter [2026-06-19]**; **Phase 1b-2 LANDED: Child + Conditional added to emitter, 262→272 tests, all gate cases green, 1000-flip no-leak confirmed, direct-capture preserved [2026-06-19]**; **Phase 2 CLOSED: step-3 hook emission landed, 272→282 tests, FALSE-policy sites emit setCompilerEquals(fn, false), first specialization to reach compiled output; HC perturbation finding carried forward as createSignals tripwire companion [2026-06-19]**; **`.nv` front-end SCOPED: syntax + component model settled ($component/$script/$style/$render/holes); TS-API-delegation parser strategy; FE-equivalence seam carries all back-end proofs; renderer-session handoff pending §7 confirmations [2026-06-19]**; **`.nv` front-end scope APPROVED: all four §7 confirmations resolved (IR structural comparison, TS-API delegation + mutation-write rewrite ordering load-bearing, PoC binding set only); renderer-session handoff ready [2026-06-19]**; **`.nv` front-end IMPLEMENTED: nv-parser.ts ~770 lines, 48 FE-equivalence + 34 interpreter tests green, erasure sound (mutation-write RHS fix, compound desugaring, scope-aware shadowing closed); pending CC placement [2026-06-19]**; **`.nv` front-end PLACED: nv-parser.ts in-repo, 48 FE-equivalence tests live against real seam, 330/330 green, stale v0-limitations comment corrected [2026-06-19]**; **Real-browser gate PASSED (Chromium): 12/12, both halves, both flags settled (event dispatch + sentinel-strip); async scheduler confirmed lazy; Phase 0 ROADMAP CLOSED; cross-engine tripwire open [2026-06-19]**; **Row-churn tripwires RESOLVED [2026-06-20]: #1 createSignals CLEARED structural-accepted (derived-dilution refuted H — gap plateaus ~5x, persistent but minority of full-row cost; allocation-dominated, WeakMap-share not further isolable by sampling profiler, ablation deliberately not run); #2 FALSE-heavy CHARACTERIZED watch-item (+8.2%→+18.6%/row real-in-construction: HC-transition + read-pollution tax, contained at realistic 0–1 FALSE/row, reopen on real-app FALSE-heavy evidence with a steady-state-update harness); kind-split decline STRENGTHENED not fired; `_compilerEquals` null-preinit mitigation named-and-declined (§9 field-width locked); cross-engine tripwire still OPEN**; **Cross-engine tripwire CLOSED [2026-06-20]: parse-divergence flag retired — sentinel-strip + event dispatch verified identical across Blink/Gecko/WebKit (36/36, zero skips, both back-ends), regex sentinel approach confirmed not parser-dependent. ALL THREE perf-validation-phase tripwires now resolved (#1 cleared, #2 characterized watch-item, #3 closed).**; **ListBinding LANDED [2026-06-20]: both back-ends, 54 browser + 340 unit, tsc clean; reactive-item + correct-simple reconciler + error-route. Required core `getOwner`/`runWithOwner` (owner-context redirection for per-item roots; observation-neutral) → CONTRACT v0.4.1 → v0.4.2 (§6.1 + §11). First at-scale consumer of the §8.5.4 effect-write path. Process note: unescalated core/§6 change, approved post-hoc, surface-before-landing next time.**; **§12.24 added [2026-06-20]: owner-context utilities (`getOwner`/`runWithOwner`) pinned directly in the core conformance suite (4 DOM-free tests: ownership redirection + no-redirect control, observation-neutrality, runWithOwner(null) detach). Closes the v0.4.2 contract/suite consistency gap — guarantee was previously only transitive via renderer TC-10. No version bump (pins existing v0.4.2 §6.1 behavior). Baseline updated 36/36 → 40/40 against v0.4.2.**)_
+_Last updated: 2026-06-20 (Contract **v0.4.2** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**; **Compiler back-end Phase 1 erasure design APPROVED, scope locked [2026-06-19]**; **PK = documentation only; GitHub authoritative for code [2026-06-19]**; **Phase 1a LANDED: read/write erasure analyzer placed, 235→250 tests, cross-pass seam confirmed [2026-06-19]**; **Phase 1b-1 LANDED: emitted-mount placer placed, 250→262 tests, all 5 §5 differential gate cases green against real interpreter [2026-06-19]**; **Phase 1b-2 LANDED: Child + Conditional added to emitter, 262→272 tests, all gate cases green, 1000-flip no-leak confirmed, direct-capture preserved [2026-06-19]**; **Phase 2 CLOSED: step-3 hook emission landed, 272→282 tests, FALSE-policy sites emit setCompilerEquals(fn, false), first specialization to reach compiled output; HC perturbation finding carried forward as createSignals tripwire companion [2026-06-19]**; **`.nv` front-end SCOPED: syntax + component model settled ($component/$script/$style/$render/holes); TS-API-delegation parser strategy; FE-equivalence seam carries all back-end proofs; renderer-session handoff pending §7 confirmations [2026-06-19]**; **`.nv` front-end scope APPROVED: all four §7 confirmations resolved (IR structural comparison, TS-API delegation + mutation-write rewrite ordering load-bearing, PoC binding set only); renderer-session handoff ready [2026-06-19]**; **`.nv` front-end IMPLEMENTED: nv-parser.ts ~770 lines, 48 FE-equivalence + 34 interpreter tests green, erasure sound (mutation-write RHS fix, compound desugaring, scope-aware shadowing closed); pending CC placement [2026-06-19]**; **`.nv` front-end PLACED: nv-parser.ts in-repo, 48 FE-equivalence tests live against real seam, 330/330 green, stale v0-limitations comment corrected [2026-06-19]**; **Real-browser gate PASSED (Chromium): 12/12, both halves, both flags settled (event dispatch + sentinel-strip); async scheduler confirmed lazy; Phase 0 ROADMAP CLOSED; cross-engine tripwire open [2026-06-19]**; **Row-churn tripwires RESOLVED [2026-06-20]: #1 createSignals CLEARED structural-accepted (derived-dilution refuted H — gap plateaus ~5x, persistent but minority of full-row cost; allocation-dominated, WeakMap-share not further isolable by sampling profiler, ablation deliberately not run); #2 FALSE-heavy CHARACTERIZED watch-item (+8.2%→+18.6%/row real-in-construction: HC-transition + read-pollution tax, contained at realistic 0–1 FALSE/row, reopen on real-app FALSE-heavy evidence with a steady-state-update harness); kind-split decline STRENGTHENED not fired; `_compilerEquals` null-preinit mitigation named-and-declined (§9 field-width locked); cross-engine tripwire still OPEN**; **Cross-engine tripwire CLOSED [2026-06-20]: parse-divergence flag retired — sentinel-strip + event dispatch verified identical across Blink/Gecko/WebKit (36/36, zero skips, both back-ends), regex sentinel approach confirmed not parser-dependent. ALL THREE perf-validation-phase tripwires now resolved (#1 cleared, #2 characterized watch-item, #3 closed).**; **ListBinding LANDED [2026-06-20]: both back-ends, 54 browser + 340 unit, tsc clean; reactive-item + correct-simple reconciler + error-route. Required core `getOwner`/`runWithOwner` (owner-context redirection for per-item roots; observation-neutral) → CONTRACT v0.4.1 → v0.4.2 (§6.1 + §11). First at-scale consumer of the §8.5.4 effect-write path. Process note: unescalated core/§6 change, approved post-hoc, surface-before-landing next time.**; **§12.24 added [2026-06-20]: owner-context utilities (`getOwner`/`runWithOwner`) pinned directly in the core conformance suite (4 DOM-free tests: ownership redirection + no-redirect control, observation-neutrality, runWithOwner(null) detach). Closes the v0.4.2 contract/suite consistency gap — guarantee was previously only transitive via renderer TC-10. No version bump (pins existing v0.4.2 §6.1 behavior). Baseline updated 36/36 → 40/40 against v0.4.2.**; **Minor-follow-up closures [2026-06-20]: TC-10g reorder-identity tightened (per-key `===`, both back-ends + unit), `core.ts` header → v0.4.2, `core_ts6_patched.ts` retired, PoC Gate-4 placeholder annotated, stale import-extension Known-Issues bullet retired (Spec 3c already closed it). Double-negation tidy remains OPEN (6 sites, pinned); CC false-"clean" traced to line-oriented grep vs newline-wrapped `expect(\n !` — verify with `grep -rPzo`.**)_
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state (Clean/Check/Dirty)
@@ -205,23 +205,14 @@ _Last updated: 2026-06-20 (Contract **v0.4.2** — runtime correctness verified;
   `tsconfig_check.json` now both set `strict: true` + `lib: ["ES2022", "DOM"]`, so
   strict-with-DOM-lib is the standing build/check configuration and a future
   DOM-global collision surfaces immediately. See the dated entry below for detail.
-- **Renderer to retire `core_ts6_patched.ts` (pending).** The renderer's temporary
-  `@ts-expect-error` forked core is now obsolete. Renderer re-points its interpreter
-  import to the real `core.ts` and deletes the patched copy — restoring single
-  source of truth. One-line import change + file deletion.
-- **Repo-wide import-extension style inconsistency (cleanup, non-urgent).** Compiler
-  files use **extensionless** imports (`from './types'`); renderer/core files use
-  **`.ts`** imports (`from './core.ts'`). Each stream's own tsconfig tolerates its
-  style, but there is not yet *one* config under which the whole codebase compiles —
-  a single consumer importing both (the PoC) had to use a CommonJS/node-resolution
-  tsconfig to bridge them. No defect (both styles work, code is correct), but the
-  Claude Code convergence (one shared build) should settle on one import style
-  repo-wide. Surfaced by the PoC integration; resolved poc-locally, not at source.
-- **Test-hygiene follow-up (non-blocking, from the 2026-06-18 migration review).**
-  The integration PoC's Gate-4 `expect(true).toBe(true)` is a structural-intent
-  placeholder, not a real assertion — give it a clarifying comment so it is not
-  mistaken for a passing check. Compiler tests have some `expect(!expr).toBe(true)`
-  double-negations worth tidying. No correctness impact.
+- **Test-hygiene follow-up — Gate-4 CLOSED 2026-06-20; double-negations OPEN.** The PoC
+  Gate-4 `expect(true).toBe(true)` now carries its clarifying comment (done). The
+  `expect(!EXPR).toBe(true)` double-negations remain at six sites — rewrite to
+  `expect(EXPR).toBe(false)` (cosmetic, no correctness impact):
+  `branch-variant-analyzer.test.ts` L155, `write-graph-cycle-checker.test.ts` L162,
+  `nv-parser.test.ts` L653/677/716/760. **Verify newline-tolerant:**
+  `grep -rPzo "expect\(\s*!" test/` — a line-oriented `grep "expect(!"` gives a false
+  "clean" (the form is `expect(\n  !…`); see the 2026-06-20 closures entry.
 
 ### PoC coherence gate (Phase 0 ROADMAP)
 - **Sandbox portion CLOSED (2026-06-18).** Stream 5 (integration) built and
@@ -2776,3 +2767,74 @@ Gate B tests, not just consumer coverage).
 self-consistency, it does not change semantics.
 
 **Contract impact.** §12 item 24 added (v0.4.2, no bump).
+
+### 2026-06-20 — Minor-follow-up closures (stale-log reconciliation); double-negation residual pinned
+
+Closes five non-blocking follow-ups that were filed across earlier entries and never
+struck from Current State. All five are architect-verified **by reading the placed
+files**, not by trusting a summary or a green count. Five closed; one (test-hygiene
+double-negations) remains open and is pinned to exact file:line below.
+
+**Closed:**
+1. **TC-10g reorder-identity tightened — both back-ends.** The reorder test asserted
+   only text order; node-identity-under-reorder was pinned nowhere (the value-change
+   test pinned identity, but never reordered). Now both layers assert per-key object
+   identity (`afterByLabel.get(...) === beforeNode` via a label→element map), proving
+   move-not-rebuild — exactly the distinction `wireList`'s `insertBefore`-on-existing-
+   `rootEl` reconciler is built to make:
+   - `test/renderer/interpreter.test.ts` TC-10g — replaced the weak
+     `lisAfter.some(li => lisBefore.includes(li))` membership check (passed on a single
+     reused node) with full per-key `===`; retains the `A#0/B#1/C#2 → C#0/A#1/B#2`
+     assertions that also pin the reactive index signal.
+   - `test/browser/real-browser.spec.ts` reorder — added `beforeI`/`beforeE` label→node
+     maps + `iIdentity`/`eIdentity` per-key `===` assertions for both back-ends.
+   Closes the "tighten TC-10g" follow-up from the 2026-06-20 ListBinding entry.
+   (Method note: the unit test must build its label→node map AFTER the reorder because
+   the index-template text changes per row; rebuilt nodes would be new objects and fail
+   `===` regardless — the move/rebuild distinction holds. Do not hoist the map above the
+   `items.set(...)` or the keys go stale.)
+2. **`core.ts` source header → v0.4.2.** File header now reads
+   `Contract: nv-reactive-core-contract.md v0.4.2` (was `v0.4`). Closes the header
+   follow-up from the 2026-06-20 ListBinding entry. (Source-file header only — not the
+   contract document; no version bump.)
+3. **`core_ts6_patched.ts` retired.** The renderer's temporary `@ts-expect-error` forked
+   core is gone; `interpreter.ts` imports the real core via `from '../core/core.js'`
+   (single source of truth restored). File confirmed absent from the codebase.
+4. **PoC Gate-4 placeholder annotated.** `integration/poc-integration.test.ts` Gate-4
+   `expect(true).toBe(true)` now carries the clarifying comment
+   (`structural-intent marker: Gate-4 is verified by the import audit above, not this expect`).
+   Closes the first half of the test-hygiene follow-up (2026-06-18 migration review).
+5. **Import-extension convergence — stale Known-Issues bullet retired.** Already closed
+   by Spec 3c (2026-06-19, nodenext config). Re-corroborated here: one `nodenext`
+   `tsconfig.base.json`; all renderer/compiler/core/test files use `.js` specifiers;
+   `@nv/core` alias resolved in `test/compiler/test-helpers.ts`. The Known-Issues entry
+   contradicted the Current-State header (which already marked it CLOSED); bullet now
+   removed so the two surfaces agree.
+
+**Open (pinned residual): test-hygiene double-negations.** Six
+`expect(!EXPR, msg).toBe(true)` sites remain; rewrite each to
+`expect(EXPR, msg).toBe(false)` (semantics identical, no correctness impact):
+- `test/compiler/branch-variant-analyzer.test.ts` L155 (untrack-exclusion test)
+- `test/compiler/write-graph-cycle-checker.test.ts` L162 (untrack-exclusion test)
+- `test/renderer/nv-parser.test.ts` L653 (FE-09i `double.set`), L677 (FE-09j),
+  L716 (FE-09k), L760 (FE-09l)
+
+**Process/method lesson (recorded so it does not recur).** CC reported these six as
+"zero hits via both shell and Python" twice; the files contained them throughout. Root
+cause: a **line-oriented search** for `expect(!` cannot match the code's newline-wrapped
+form (`expect(\n    !processed.includes(...)`) — the literal token pair `expect(!` never
+occurs because a newline + indent separates them. The architect's own first quick grep
+hit the same false negative. **Verification of this pattern must be newline-tolerant:**
+`grep -rPzo "expect\(\s*!" test/` (zero matches = actually clean). A plain
+`grep "expect(!"` will report clean even when it is not — that is the trap. This was a
+search-methodology error, not a stale artifact or a GitHub sync problem; the bytes were
+consistent across every attachment.
+
+**Verification basis.** Items 1–4 verified by reading the placed files (assertions,
+header line, import line, comment). Item 5 verified by reading the unified tsconfig +
+import style across files. The six open sites verified by execution
+(`grep -rPzo "expect\(\s*!"`), not eyeball. Suite reported by CC at 344/344 with no
+count delta (TC-10g is an in-place tightening, no new test); the TC-10g assertions
+themselves are architect-verified by reading, the count is CC-reported.
+
+**Contract impact.** None.
