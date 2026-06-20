@@ -3,8 +3,11 @@ import { defineConfig } from '@playwright/test'
 export default defineConfig({
   testDir: './test/browser',
   testMatch: '**/*.spec.ts',
-  // Chromium only to pass. WebKit/Firefox: near-term tripwire — add as additional projects entries.
-  projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
+  projects: [
+    { name: 'chromium', use: { browserName: 'chromium' } },
+    { name: 'webkit', use: { browserName: 'webkit' } },
+    { name: 'firefox', use: { browserName: 'firefox' } },
+  ],
   use: {
     headless: true,
     // --headed --debug flag: npx playwright test --headed --debug
