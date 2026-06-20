@@ -151,6 +151,16 @@ pnpm lint        # biome
 pnpm build       # emit dist/
 ```
 
+## Done means committed and on main
+
+A task is not "done" when files are written — only when its changes are **committed and pushed
+to main** (or an explicit PR), verified by `git log` / `git show` on **main's HEAD**, not on a
+worktree. An agent that writes files without committing produces zero branch divergence, so a
+merge is a silent no-op and main never receives the change. Verify divergence before merging;
+treat "Already up to date" as a red flag to investigate, not success. The same distrust applies
+to a worktree's copy of `docs/implementation-state.md` — it may have been written against an
+earlier state; reconcile it against main, not the worktree.
+
 ## Tooling / where work happens
 
 Correctness, logic, and analysis are deterministic and were prototyped in the

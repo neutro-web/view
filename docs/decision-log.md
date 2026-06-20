@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-20 (Contract **v0.4.2** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**; **Compiler back-end Phase 1 erasure design APPROVED, scope locked [2026-06-19]**; **PK = documentation only; GitHub authoritative for code [2026-06-19]**; **Phase 1a LANDED: read/write erasure analyzer placed, 235→250 tests, cross-pass seam confirmed [2026-06-19]**; **Phase 1b-1 LANDED: emitted-mount placer placed, 250→262 tests, all 5 §5 differential gate cases green against real interpreter [2026-06-19]**; **Phase 1b-2 LANDED: Child + Conditional added to emitter, 262→272 tests, all gate cases green, 1000-flip no-leak confirmed, direct-capture preserved [2026-06-19]**; **Phase 2 CLOSED: step-3 hook emission landed, 272→282 tests, FALSE-policy sites emit setCompilerEquals(fn, false), first specialization to reach compiled output; HC perturbation finding carried forward as createSignals tripwire companion [2026-06-19]**; **`.nv` front-end SCOPED: syntax + component model settled ($component/$script/$style/$render/holes); TS-API-delegation parser strategy; FE-equivalence seam carries all back-end proofs; renderer-session handoff pending §7 confirmations [2026-06-19]**; **`.nv` front-end scope APPROVED: all four §7 confirmations resolved (IR structural comparison, TS-API delegation + mutation-write rewrite ordering load-bearing, PoC binding set only); renderer-session handoff ready [2026-06-19]**; **`.nv` front-end IMPLEMENTED: nv-parser.ts ~770 lines, 48 FE-equivalence + 34 interpreter tests green, erasure sound (mutation-write RHS fix, compound desugaring, scope-aware shadowing closed); pending CC placement [2026-06-19]**; **`.nv` front-end PLACED: nv-parser.ts in-repo, 48 FE-equivalence tests live against real seam, 330/330 green, stale v0-limitations comment corrected [2026-06-19]**; **Real-browser gate PASSED (Chromium): 12/12, both halves, both flags settled (event dispatch + sentinel-strip); async scheduler confirmed lazy; Phase 0 ROADMAP CLOSED; cross-engine tripwire open [2026-06-19]**; **Row-churn tripwires RESOLVED [2026-06-20]: #1 createSignals CLEARED structural-accepted (derived-dilution refuted H — gap plateaus ~5x, persistent but minority of full-row cost; allocation-dominated, WeakMap-share not further isolable by sampling profiler, ablation deliberately not run); #2 FALSE-heavy CHARACTERIZED watch-item (+8.2%→+18.6%/row real-in-construction: HC-transition + read-pollution tax, contained at realistic 0–1 FALSE/row, reopen on real-app FALSE-heavy evidence with a steady-state-update harness); kind-split decline STRENGTHENED not fired; `_compilerEquals` null-preinit mitigation named-and-declined (§9 field-width locked); cross-engine tripwire still OPEN**; **Cross-engine tripwire CLOSED [2026-06-20]: parse-divergence flag retired — sentinel-strip + event dispatch verified identical across Blink/Gecko/WebKit (36/36, zero skips, both back-ends), regex sentinel approach confirmed not parser-dependent. ALL THREE perf-validation-phase tripwires now resolved (#1 cleared, #2 characterized watch-item, #3 closed).**; **ListBinding LANDED [2026-06-20]: both back-ends, 54 browser + 340 unit, tsc clean; reactive-item + correct-simple reconciler + error-route. Required core `getOwner`/`runWithOwner` (owner-context redirection for per-item roots; observation-neutral) → CONTRACT v0.4.1 → v0.4.2 (§6.1 + §11). First at-scale consumer of the §8.5.4 effect-write path. Process note: unescalated core/§6 change, approved post-hoc, surface-before-landing next time.**; **§12.24 added [2026-06-20]: owner-context utilities (`getOwner`/`runWithOwner`) pinned directly in the core conformance suite (4 DOM-free tests: ownership redirection + no-redirect control, observation-neutrality, runWithOwner(null) detach). Closes the v0.4.2 contract/suite consistency gap — guarantee was previously only transitive via renderer TC-10. No version bump (pins existing v0.4.2 §6.1 behavior). Baseline updated 36/36 → 40/40 against v0.4.2.**; **Minor-follow-up closures [2026-06-20]: TC-10g reorder-identity tightened (per-key `===`, both back-ends + unit), `core.ts` header → v0.4.2, `core_ts6_patched.ts` retired, PoC Gate-4 placeholder annotated, stale import-extension Known-Issues bullet retired (Spec 3c already closed it). **Double-negation tidy CLOSED [2026-06-20]; all six minor follow-ups closed.**)_
+_Last updated: 2026-06-20 (Contract **v0.4.2** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**; **Compiler back-end Phase 1 erasure design APPROVED, scope locked [2026-06-19]**; **PK = documentation only; GitHub authoritative for code [2026-06-19]**; **Phase 1a LANDED: read/write erasure analyzer placed, 235→250 tests, cross-pass seam confirmed [2026-06-19]**; **Phase 1b-1 LANDED: emitted-mount placer placed, 250→262 tests, all 5 §5 differential gate cases green against real interpreter [2026-06-19]**; **Phase 1b-2 LANDED: Child + Conditional added to emitter, 262→272 tests, all gate cases green, 1000-flip no-leak confirmed, direct-capture preserved [2026-06-19]**; **Phase 2 CLOSED: step-3 hook emission landed, 272→282 tests, FALSE-policy sites emit setCompilerEquals(fn, false), first specialization to reach compiled output; HC perturbation finding carried forward as createSignals tripwire companion [2026-06-19]**; **`.nv` front-end SCOPED: syntax + component model settled ($component/$script/$style/$render/holes); TS-API-delegation parser strategy; FE-equivalence seam carries all back-end proofs; renderer-session handoff pending §7 confirmations [2026-06-19]**; **`.nv` front-end scope APPROVED: all four §7 confirmations resolved (IR structural comparison, TS-API delegation + mutation-write rewrite ordering load-bearing, PoC binding set only); renderer-session handoff ready [2026-06-19]**; **`.nv` front-end IMPLEMENTED: nv-parser.ts ~770 lines, 48 FE-equivalence + 34 interpreter tests green, erasure sound (mutation-write RHS fix, compound desugaring, scope-aware shadowing closed); pending CC placement [2026-06-19]**; **`.nv` front-end PLACED: nv-parser.ts in-repo, 48 FE-equivalence tests live against real seam, 330/330 green, stale v0-limitations comment corrected [2026-06-19]**; **Real-browser gate PASSED (Chromium): 12/12, both halves, both flags settled (event dispatch + sentinel-strip); async scheduler confirmed lazy; Phase 0 ROADMAP CLOSED; cross-engine tripwire open [2026-06-19]**; **Row-churn tripwires RESOLVED [2026-06-20]: #1 createSignals CLEARED structural-accepted (derived-dilution refuted H — gap plateaus ~5x, persistent but minority of full-row cost; allocation-dominated, WeakMap-share not further isolable by sampling profiler, ablation deliberately not run); #2 FALSE-heavy CHARACTERIZED watch-item (+8.2%→+18.6%/row real-in-construction: HC-transition + read-pollution tax, contained at realistic 0–1 FALSE/row, reopen on real-app FALSE-heavy evidence with a steady-state-update harness); kind-split decline STRENGTHENED not fired; `_compilerEquals` null-preinit mitigation named-and-declined (§9 field-width locked); cross-engine tripwire still OPEN**; **Cross-engine tripwire CLOSED [2026-06-20]: parse-divergence flag retired — sentinel-strip + event dispatch verified identical across Blink/Gecko/WebKit (36/36, zero skips, both back-ends), regex sentinel approach confirmed not parser-dependent. ALL THREE perf-validation-phase tripwires now resolved (#1 cleared, #2 characterized watch-item, #3 closed).**; **ListBinding LANDED [2026-06-20]: both back-ends, 54 browser + 340 unit, tsc clean; reactive-item + correct-simple reconciler + error-route. Required core `getOwner`/`runWithOwner` (owner-context redirection for per-item roots; observation-neutral) → CONTRACT v0.4.1 → v0.4.2 (§6.1 + §11). First at-scale consumer of the §8.5.4 effect-write path. Process note: unescalated core/§6 change, approved post-hoc, surface-before-landing next time.**; **§12.24 added [2026-06-20]: owner-context utilities (`getOwner`/`runWithOwner`) pinned directly in the core conformance suite (4 DOM-free tests: ownership redirection + no-redirect control, observation-neutrality, runWithOwner(null) detach). Closes the v0.4.2 contract/suite consistency gap — guarantee was previously only transitive via renderer TC-10. No version bump (pins existing v0.4.2 §6.1 behavior). Baseline updated 36/36 → 40/40 against v0.4.2.**; **Minor-follow-up closures [2026-06-20]: TC-10g reorder-identity tightened (per-key `===`, both back-ends + unit), `core.ts` header → v0.4.2, `core_ts6_patched.ts` retired, PoC Gate-4 placeholder annotated, stale import-extension Known-Issues bullet retired (Spec 3c already closed it). **Double-negation tidy CLOSED [2026-06-20]; all six minor follow-ups closed.**; **Build pipeline `.nv→.js` LANDED Mode A [2026-06-20]: parseNvFileForEmit + eraseHandlerExpr + emitModule + nvPlugin; render-hole erasure incl. handler mutation-write; executable-module gate CLOSED (esbuild-aliased import()); multi-root dispose FIXED both back-ends; multi-root list items deferred (loud guard). Template-IR v0.2 → v0.2.1. Component API still the open gate.**)_
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state (Clean/Check/Dirty)
@@ -181,12 +181,13 @@ _Last updated: 2026-06-20 (Contract **v0.4.2** — runtime correctness verified;
   (`class="${x}"`); unquoted/partial-value interpolation unsupported (documented).
   Harness note: the interpreter is async-scheduled — tests/probes must `flushSync()`
   after a signal write before asserting DOM state.
-- **Build pipeline `.nv→.js` — transform/erasure layer LANDED 2026-06-20 (Mode A).**
-  `parseNvFileForEmit` + `eraseHandlerExpr` + `emitModule` + `nvPlugin`; coverage
-  text/attr/prop/event/conditional; 25 tests, typecheck+test green. Render-hole erasure
-  (incl. handler mutation-write) resolved. **Open:** executable-module gate (emitted string
-  never run; only thunk sources verified). Published exports added: `parseNvFileForEmit`,
-  `NvEmitPayload`, `ThunkSource`. Component API still the open gate (provisional scaffold).
+- **Build pipeline `.nv→.js` LANDED (Mode A):** factory emits a real-thunk IR literal →
+  interpreter `mount`; coverage text/attr/prop/event/conditional. Render-hole erasure (incl.
+  handler mutation-write) done. Executable-module gate CLOSED (emitted modules written,
+  esbuild-aliased to `src/`, `import()`-ed, mounted). Multi-root component dispose FIXED in
+  both back-ends (differential TCs lock equivalence; EX-01c asserts full teardown). Multi-root
+  **list items** deferred (single-root guard, both back-ends). Component API still the open
+  gate (provisional scaffold).
 
 ### Open design decisions (chosen later; not blocking)
 - Compile-time vs. runtime split — the boundary of what is compiled away vs.
@@ -211,14 +212,15 @@ _Last updated: 2026-06-20 (Contract **v0.4.2** — runtime correctness verified;
   `tsconfig_check.json` now both set `strict: true` + `lib: ["ES2022", "DOM"]`, so
   strict-with-DOM-lib is the standing build/check configuration and a future
   DOM-global collision surfaces immediately. See the dated entry below for detail.
-- **Build-pipeline executable-module gate open** — round-trip verifies thunk sources, not the
-  emitted module string. Close by `import()`-ing an emitted module with `@neutro/view/*`
-  mapped to `src/`. (2026-06-20)
 - **`AGENTS.md` + `docs/implementation-state.md` added 2026-06-20.** Two rules added
   (*read seams before speccing*; *halt at undecided gate*); orientation digest added.
 - **Test-hygiene follow-up — FULLY CLOSED 2026-06-20.** Gate-4 placeholder annotated;
   `expect(!EXPR).toBe(true)` double-negations CLOSED 2026-06-20 (6 sites → `.toBe(false)`;
   verified `grep -rPzo`). Test-hygiene follow-up fully closed.
+- **Multi-root list items deferred** — both back-ends guard single-root with an identical
+  diagnostic; close before multi-root is promoted as a general feature or on real-app need.
+- **`wireList` `roots[0] as Node` cast** — provably-safe-by-guard; prefer guarded
+  `biome-ignore` if revisited (low priority).
 
 ### PoC coherence gate (Phase 0 ROADMAP)
 - **Sandbox portion CLOSED (2026-06-18).** Stream 5 (integration) built and
@@ -2947,3 +2949,147 @@ and asserting its mounted DOM. Tracked in `implementation-state.md`.
 **Status.** Transform/erasure layer landed. Executable-module gate open. Component API still the
 open gate (provisional scaffold shape unchanged). No contract change (reactive-core v0.4.2,
 template-ir v0.2).
+
+### 2026-06-20 — Minor-follow-up closures (stale-log reconciliation)
+
+Closes six non-blocking follow-ups filed across earlier entries and never struck from
+Current State. All architect-verified **by reading the placed files**, not by trusting a
+summary or a green count.
+
+1. **TC-10g reorder-identity tightened — both back-ends.** Replaced the weak membership
+   check (passed on a single reused node) with full per-key object identity
+   (`afterByLabel.get(...) === beforeNode`), proving move-not-rebuild — the distinction
+   `wireList`'s insertBefore-on-existing-rootEl reconciler exists to make.
+   `test/renderer/interpreter.test.ts` TC-10g + `test/browser/real-browser.spec.ts` reorder
+   (both back-ends, `iIdentity`/`eIdentity` per-key `===`). Method note: build the
+   label→node map AFTER the reorder (index-template text changes per row).
+2. **`core.ts` source header → v0.4.2** (was v0.4). Source-file header only; no contract bump.
+3. **`core_ts6_patched.ts` retired.** `interpreter.ts` imports the real core via
+   `../core/core.js`; the forked file is absent. Single source of truth restored.
+4. **PoC Gate-4 placeholder annotated.** `integration/poc-integration.test.ts` Gate-4
+   `expect(true).toBe(true)` now carries a structural-intent marker comment.
+5. **Import-extension convergence — stale Known-Issues bullet retired.** Closed by Spec 3c
+   (2026-06-19, nodenext); re-confirmed. The bullet contradicted the header; removed so the
+   two surfaces agree.
+6. **Test-hygiene double-negations closed.** Six `expect(!EXPR).toBe(true)` sites rewritten
+   to `expect(EXPR).toBe(false)` (branch-variant-analyzer L155, write-graph-cycle-checker
+   L162, nv-parser FE-09i/j/k/l). **Method lesson (recorded so it does not recur):** these
+   were twice reported "zero hits" by a line-oriented search — `expect(!` never matches the
+   newline-wrapped form `expect(\n    !…)`. Newline-tolerant verification required:
+   `grep -rPzo "expect\(\s*!" test/`. A plain `grep "expect(!"` reports clean when it is not.
+   Search-methodology error, not a stale artifact or sync problem.
+
+**Contract impact.** None.
+
+### 2026-06-20 — Build pipeline `.nv → .js` locked (Mode A) and transform layer landed
+
+**Decision.** Build `.nv → .js` as **Mode A**: emit a factory that runs the erased `$script`
+once and produces a **real-thunk `TemplateIR`**, handed to the interpreter `mount` (IR §2.1:
+"the compiler emits a factory function that, when called, produces a TemplateIR"). No
+per-binding source codegen (the deferred compiler back-end).
+
+**Emit mechanism is forced by source, not chosen** (recorded so neither dead alternative is
+re-attempted): emit an **IR object literal** — real shape/paths/kinds/names from the parser,
+real thunks generated from erased hole source. Eliminated: a runtime `` html`` `` call
+(`html-tag.ts` does text+attr only) and lifting the parser's IR (its thunks are stubs,
+`(() => undefined)`).
+
+**Scope.** v1 coverage = the kinds the `.nv` parser produces: text, attr, prop, event,
+conditional. Child/List are **out** (not `.nv`-reachable). `$script` ownership = nested roots
+bridged by `onCleanup` (mount creates its own root; no setup-without-root primitive).
+
+**Render-hole erasure gap — discovered and resolved.** `preprocessMutationWrites` erased
+`$script` only; render holes (incl. event handlers) were never erased — invisible until the
+first real render thunk. v1 includes render-hole erasure: bare-read everywhere, **and
+mutation-write inside event handlers** (`count = x` → `count.set(x)`), via `eraseHandlerExpr`
+reusing the `$script` shadow helpers (no duplicated logic). Write-safety preserved
+(derived-write → diagnostic; shadowed/unknown targets untouched).
+
+**Landed.** `parseNvFileForEmit` + `eraseHandlerExpr` + `emitModule` + `nvPlugin` (esbuild,
+build-time jsdom). `pnpm typecheck` clean, `pnpm test` green. New published surface on
+`@neutro/view/renderer`: `parseNvFileForEmit`, types `NvEmitPayload` / `ThunkSource`
+(intended — the build tool is an external consumer). `@neutro/view/core` unchanged.
+
+**Component API explicitly NOT decided.** The emitted module shape (`export function Name()`
+returning `{ mount }`) is a provisional scaffold; props/slots/identity remain the open gate
+(IR §9.3). Emitter structured so the outer signature can change without touching IR-build.
+
+**Documented v1 limitation (fails safe):** handler destructuring-write targets
+(`[a,b]=…`, `({x}=…)`) are not detected as signal writes — bare-read only, no false-positive
+`.set()`. Use explicit `.set()`. No v1 fix.
+
+**Open follow-up at this point:** executable-module gate (closed in the next entry).
+
+**Contract impact.** None (reactive-core v0.4.2, template-ir v0.2).
+
+### 2026-06-20 — Executable-module gate closed; multi-root dispose gap opened
+
+**Gate closed.** Mode A's "emitted `.js`, run, equals interpreter" claim is verified for
+single-root components. Emitted modules are written to disk, esbuild-bundled with
+`@neutro/view/*` → `src/` aliases, `import()`-ed from disk, and mounted — not eval/`new
+Function`. Fixtures cover text/attr/prop/event/conditional + multi-component; the conditional
+fixture (highest-risk string-assembly path) runs clean as emitted code, flipped via a real DOM
+event. Implementation note: the bundle gets its own core copy (separate scheduler), so the
+test calls `flushSync` re-exported from the bundle, not the test's instance. No emitter
+string-assembly bugs found.
+
+**Decision opened — multi-root component dispose leak.** Running the gate surfaced a real
+defect (not in the emitter): the interpreter's `mountFragment` returns only `frag.firstChild`
+and disposal removes only that node ("assumes single-root template for the PoC"). The emitter
+legitimately emits multi-root `$render` output (Counter = `<span>` + `<button>`), so on
+dispose the non-first roots — and their listeners — leak. Contract/renderer-level (touches
+disposal + what `mount` guarantees), not in-stream. Resolved in the next entry.
+
+**Contract impact.** None.
+
+### 2026-06-20 — Multi-root components: fixed in both back-ends (resolves the dispose-leak decision)
+
+Resolves the multi-root dispose-leak decision opened in the executable-gate entry (same date).
+
+**Decision.** Fix, not constrain. A component's `$render` may produce any number of top-level
+DOM roots. Both back-ends now track and dispose **all** top-level fragment nodes:
+`mountFragment` (interpreter) / `setup` (emitted-mount) snapshot `Array.from(frag.childNodes)`
+before insert and return `{ roots: Node[] }` (was `{ rootEl }`); `mount` and both
+`wireConditional`s remove every root on cleanup. Symmetric in both files.
+
+**Not a reactive-core change.** §6 owner-tree disposal never depended on DOM root count; only
+`removeChild` scales 1→N. **Reactive-core v0.4.2 unchanged.** No IR-shape change (the IR always
+permitted multi-root; the single-root limit was an implementation detail in `mountFragment`,
+now removed). **template-ir bumped v0.2 → v0.2.1** (doc clarification only: back-ends support
+multi-root shapes).
+
+**No front-end change, no fragment syntax.** Both front-ends already emit correct multi-root
+IR (multi-node `shape.html`, fragment-relative `bindingPaths`). Bare multi-root `$render` was
+always parsed correctly; it now disposes correctly. No wrapper element and no `<>` added — `<>`
+is a JSX-ism for a single-return constraint nv's tagged template does not have; the only fix
+needed was back-end disposal.
+
+**Multi-root list items: deferred, guarded, tracked as near-term debt.** `wireList` uses the
+item's single node as both removal target and reorder reference; multi-root items need
+contiguous-run moves + first/last tracking. Both back-ends throw an identical loud diagnostic
+on a multi-root list item. This is the only enforcement point (lists are interpreter-only; the
+`.nv` parser produces no list bindings). **Trigger to close:** before multi-root is documented/
+promoted as a general feature, or on first real-app need — the component-vs-list-item asymmetry
+must not ship as a quiet permanent gap.
+
+**Landed (2026-06-20, main 124fa5a).** Verified on main's HEAD (not the worktree): `{ roots }`
+return, pre-insert snapshot, all-roots removal in both back-ends. `pnpm test` 1508/1508 (62
+files); typecheck clean; lint clean (orphaned worktree warning removed). `core.ts` / `ir.ts`
+untouched. Differential TCs: TC-MR-01a/b (multi-root mount + dispose, `childElementCount === 0`
+— the exact leak repro), TC-MR-02a/b (conditional multi-root branch flip-no-leak), TC-MR-03a/b
+(multi-root list item throws the identical message in both back-ends). Executable-gate EX-01c
+tightened from "first root gone" to full teardown (`childElementCount === 0`) — the assertion
+that was accommodating the bug now proves the fix.
+
+**Post-fix note.** `wireList` `roots[0]` is provably non-null (the `roots.length !== 1` guard
+throws above it); cast as `roots[0] as Node` to satisfy biome — `!` would be the more
+future-safe form (type-checker catches removal of the guard; the cast launders silently).
+Low-priority cleanup: prefer a guarded `biome-ignore`. No runtime impact.
+
+**Process note (this is the durable lesson).** The merge required three manual interventions:
+the worktree agent wrote files without committing → zero branch divergence → merge no-op → main
+lacked the fix until files were copied/committed by hand; the agent's `implementation-state.md`
+was also written against the pre-gate state and needed a hand-fix. Root cause: "done" was
+reported on file-writes, not commits. Codified in AGENTS.md (see workflow addition).
+
+**Contract impact.** template-ir v0.2 → v0.2.1 (doc). reactive-core v0.4.2 unchanged.
