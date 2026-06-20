@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**; **Compiler back-end Phase 1 erasure design APPROVED, scope locked [2026-06-19]**; **PK = documentation only; GitHub authoritative for code [2026-06-19]**; **Phase 1a LANDED: read/write erasure analyzer placed, 235→250 tests, cross-pass seam confirmed [2026-06-19]**; **Phase 1b-1 LANDED: emitted-mount placer placed, 250→262 tests, all 5 §5 differential gate cases green against real interpreter [2026-06-19]**; **Phase 1b-2 LANDED: Child + Conditional added to emitter, 262→272 tests, all gate cases green, 1000-flip no-leak confirmed, direct-capture preserved [2026-06-19]**; **Phase 2 CLOSED: step-3 hook emission landed, 272→282 tests, FALSE-policy sites emit setCompilerEquals(fn, false), first specialization to reach compiled output; HC perturbation finding carried forward as createSignals tripwire companion [2026-06-19]**; **`.nv` front-end SCOPED: syntax + component model settled ($component/$script/$style/$render/holes); TS-API-delegation parser strategy; FE-equivalence seam carries all back-end proofs; renderer-session handoff pending §7 confirmations [2026-06-19]**; **`.nv` front-end scope APPROVED: all four §7 confirmations resolved (IR structural comparison, TS-API delegation + mutation-write rewrite ordering load-bearing, PoC binding set only); renderer-session handoff ready [2026-06-19]**)_
+_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**; **Compiler back-end Phase 1 erasure design APPROVED, scope locked [2026-06-19]**; **PK = documentation only; GitHub authoritative for code [2026-06-19]**; **Phase 1a LANDED: read/write erasure analyzer placed, 235→250 tests, cross-pass seam confirmed [2026-06-19]**; **Phase 1b-1 LANDED: emitted-mount placer placed, 250→262 tests, all 5 §5 differential gate cases green against real interpreter [2026-06-19]**; **Phase 1b-2 LANDED: Child + Conditional added to emitter, 262→272 tests, all gate cases green, 1000-flip no-leak confirmed, direct-capture preserved [2026-06-19]**; **Phase 2 CLOSED: step-3 hook emission landed, 272→282 tests, FALSE-policy sites emit setCompilerEquals(fn, false), first specialization to reach compiled output; HC perturbation finding carried forward as createSignals tripwire companion [2026-06-19]**; **`.nv` front-end SCOPED: syntax + component model settled ($component/$script/$style/$render/holes); TS-API-delegation parser strategy; FE-equivalence seam carries all back-end proofs; renderer-session handoff pending §7 confirmations [2026-06-19]**; **`.nv` front-end scope APPROVED: all four §7 confirmations resolved (IR structural comparison, TS-API delegation + mutation-write rewrite ordering load-bearing, PoC binding set only); renderer-session handoff ready [2026-06-19]**; **`.nv` front-end IMPLEMENTED: nv-parser.ts ~770 lines, 48 FE-equivalence + 34 interpreter tests green, erasure sound (mutation-write RHS fix, compound desugaring, scope-aware shadowing closed); pending CC placement [2026-06-19]**)_
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state (Clean/Check/Dirty)
@@ -2312,3 +2312,64 @@ APPROVED for the renderer-session handoff.
 
 **Status.** `.nv` front-end scope APPROVED. Renderer-session handoff ready (scope doc + live
 files). Contract impact: none.
+
+---
+
+### 2026-06-19 — `.nv` front-end IMPLEMENTED: parser + front-end-equivalence gate; erasure sound
+
+**What was built (renderer session).** `nv-parser.ts` (~770 lines) + `nv-parser-test.ts`. 48/48
+FE-equivalence tests + 34/34 interpreter tests green, `tsc --strict` clean. Produces structurally-
+identical IR to the tagged-template front-end (IR-tree + normalized HTML), per the approved scope.
+
+**Parser shape.** `parseNvFile` → preprocess (mutation-write + bare-read erasure) → TS-API parse →
+extract `$component`s → per-component IR + erasure verdicts + diagnostics. TS-body parsing delegated
+to the TS compiler API; the parser owns only the nv constructs. Hole position-classification:
+text→Text, `attr=`→Attr, `.prop=`→Prop, `@event=`→Event, ternary-of-`` html` ``→Conditional (recursed
+to sub-IRs).
+
+**Erasure correctness (verified in code).**
+- **Mutation-write RHS erased before wrapping:** `count = count + 1` → `count.set(count() + 1)`
+  (runtime-tested 0→1→2). The earlier LHS-only rewrite (`count.set(count + 1)`) was a correctness
+  bug; fixed.
+- **Compound assignment desugared:** `x op= e` → `x.set(x() op erased(e))`, all 15 operators.
+  `count() += 1` is structurally impossible.
+- **Read-set ≠ write-set:** mutation-write fires only on `signal()` names; assignment to a
+  `derived()` → compile-time diagnostic (read-only), never `double.set(...)`.
+- **Scope-aware shadowing (write-safety invariant):** destructured-parameter shadowing,
+  function-scoped `var`, and block-scoped `let`/`const` (with nesting) all detected via
+  `collectBindingNames`/`collectVarShadows`/`gatherBlockShadows`. A name shadowing a signal is
+  never rewritten to `.set()` nor erased to `()`. The "never rewrite a non-signal" invariant is
+  **closed** (was partially open after the first iteration — destructuring/nested-blocks; FE-09k/l
+  pin it). Self-shadow trap avoided: the `$script` body block is walked via `forEachChild`, not
+  `walk`, so `const count = signal(0)` isn't collected as a shadow of itself.
+
+**Verdict direction.** `exprReadsSignal` ACCEPT-biased — never under-reports (false PLAIN = stale
+DOM = bug); false-positive ACCEPT = unnecessary effect, correctness-safe. `derived()` collected
+into the read set so `${double}` is correctly ACCEPT.
+
+**Scope §2 clarifications landed.** (a) Hole bare-reads erase to *thunks* `() => expr()` (binding
+`expr` is a reactive closure); `$script` bare-reads erase to plain calls `expr()` (imperative
+setup). (b) ChildBinding has no `.nv` v0 syntax — text-position holes → TextBinding; ChildBinding
+stays manual-IR (back-end parity case, not front-end-syntax).
+
+**Expressiveness delta (documented, allowed by scope §3).** `.nv` auto-produces Prop (`.prop=`) and
+Event (`@event=`) bindings that tagged-template expresses only via manual IR — a genuine `.nv`
+ergonomic gain. (`@` on events disambiguates event-vs-attribute, same nominal-discipline role `.`
+plays for prop-vs-attribute; not decoration.)
+
+**Known v0 limits (named, narrow).**
+- Shorthand property `{ count }` not erased — author writes `{ count: count() }` (auto-expanding
+  shorthand is a feature, deferred).
+- TDZ corner: a `let`/`const` block-shadow treats a same-block reference *before* the declaration
+  as shadowed (not rewritten). That code is already a TDZ ReferenceError in JS — "defensible out."
+
+**Gates.** 48 FE + 34 interpreter (renderer-local). `tsc --strict` clean. No IR change, no
+back-end change, no `core.ts` change.
+
+**Contract impact.** None. No version bump.
+
+**Status.** `.nv` front-end functionally complete for the PoC binding set, equivalence-gated.
+Both authoring surfaces now feed the same proven IR → both back-ends. **Pending CC placement**
+(kebab-case → `src/renderer/nv-parser.ts`, `.js` imports, vitest, full-suite count). Deferred as
+scoped: `$style` scoping, ComponentBinding composition, build-pipeline integration, List/Sync,
+real-browser gate.
