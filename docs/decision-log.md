@@ -181,11 +181,12 @@ _Last updated: 2026-06-20 (Contract **v0.4.2** — runtime correctness verified;
   (`class="${x}"`); unquoted/partial-value interpolation unsupported (documented).
   Harness note: the interpreter is async-scheduled — tests/probes must `flushSync()`
   after a signal write before asserting DOM state.
-- **Build pipeline `.nv→.js` LOCKED 2026-06-20 (Mode A, design + implementation).** Factory
-  emits a real-thunk IR literal → interpreter `mount`; coverage = text/attr/prop/event/
-  conditional (child/list not `.nv`-reachable). Render-hole erasure (bare-read + handler
-  mutation-write) included in v1. Component API remains the open gate (provisional scaffold
-  shape only). Built and green (369/369, tsc clean). See dated entry.
+- **Build pipeline `.nv→.js` — transform/erasure layer LANDED 2026-06-20 (Mode A).**
+  `parseNvFileForEmit` + `eraseHandlerExpr` + `emitModule` + `nvPlugin`; coverage
+  text/attr/prop/event/conditional; 25 tests, typecheck+test green. Render-hole erasure
+  (incl. handler mutation-write) resolved. **Open:** executable-module gate (emitted string
+  never run; only thunk sources verified). Published exports added: `parseNvFileForEmit`,
+  `NvEmitPayload`, `ThunkSource`. Component API still the open gate (provisional scaffold).
 
 ### Open design decisions (chosen later; not blocking)
 - Compile-time vs. runtime split — the boundary of what is compiled away vs.
@@ -210,11 +211,9 @@ _Last updated: 2026-06-20 (Contract **v0.4.2** — runtime correctness verified;
   `tsconfig_check.json` now both set `strict: true` + `lib: ["ES2022", "DOM"]`, so
   strict-with-DOM-lib is the standing build/check configuration and a future
   DOM-global collision surfaces immediately. See the dated entry below for detail.
-- **Render-hole erasure — LANDED 2026-06-20** (build pipeline v1). Was unbuilt
-  (`preprocessMutationWrites` covered `$script` only); bare-read + handler mutation-write
-  erasure now run on render holes in `parseNvFileForEmit`. Known gap: destructuring
-  assignment targets fall through to bare-read only (fails safe; documented in code +
-  `implementation-state.md`).
+- **Build-pipeline executable-module gate open** — round-trip verifies thunk sources, not the
+  emitted module string. Close by `import()`-ing an emitted module with `@neutro/view/*`
+  mapped to `src/`. (2026-06-20)
 - **`AGENTS.md` + `docs/implementation-state.md` added 2026-06-20.** Two rules added
   (*read seams before speccing*; *halt at undecided gate*); orientation digest added.
 - **Test-hygiene follow-up — FULLY CLOSED 2026-06-20.** Gate-4 placeholder annotated;
@@ -2913,3 +2912,38 @@ hand-off.
 **Status.** Locked (design + implementation). Parser addition incl. render-hole erasure →
 `emitModule` → esbuild plugin → fixtures + round-trip gate. 369/369, tsc clean, biome clean.
 No contract change (reactive-core v0.4.2, template-ir v0.2 both unchanged).
+
+### 2026-06-20 — Build pipeline transform layer landed (Mode A)
+
+**Decision.** The `.nv → .js` transform + erasure layer is built and verified:
+`parseNvFileForEmit` (erased `scriptBody` + index-aligned `bindingThunks`, recursive for
+conditional + `moduleScope`), `eraseHandlerExpr` (render-hole erasure), `emitModule`
+(IR-literal factory, nested-root + `onCleanup` bridge, minimal imports, throws on error
+diagnostics), and `nvPlugin` (esbuild). Coverage: text/attr/prop/event/conditional. Gates:
+`pnpm typecheck` clean, `pnpm test` green (25 new tests, `nv-emitter.test.ts`). Cites the
+2026-06-20 Mode A lock.
+
+**Render-hole erasure gap (named in the lock entry) — RESOLVED.** Handler mutation-write
+erasure is in v1 as approved: `eraseHandlerExpr` rewrites `count = x` → `count.set(x)` and
+compound forms inside event handlers (arrow block-body and arrow-expression-body), reusing the
+`$script` shadow helpers — no duplicated erasure logic. Write-safety preserved (derived-write →
+diagnostic; shadowed/unknown targets untouched).
+
+**New published surface.** `@neutro/view/renderer` now also exports `parseNvFileForEmit` and the
+types `NvEmitPayload` / `ThunkSource` (the build tool is an external consumer — intended).
+`@neutro/view/core` unchanged.
+
+**Documented v1 limitations (failures are safe, not soundness holes).**
+- *Handler destructuring-write:* `[a,b] = …` / `({x} = …)` targets are not detected as signal
+  writes — bare-read erasure only, no false-positive `.set()`. Use explicit `.set()`. No v1 fix.
+
+**Open follow-up — executable-module gate.** The round-trip suite verifies the **erased thunk
+sources** (eval'd via `new Function` + real primitives → mount → DOM); it does **not** execute
+`emitModule`'s emitted string (module string-assembly is covered only by `toContain` smoke
+checks). The pipeline is verified for transform/erasure but **not** for emitted-module
+execution. Close by `import()`-ing one emitted module (with `@neutro/view/*` mapped to `src/`)
+and asserting its mounted DOM. Tracked in `implementation-state.md`.
+
+**Status.** Transform/erasure layer landed. Executable-module gate open. Component API still the
+open gate (provisional scaffold shape unchanged). No contract change (reactive-core v0.4.2,
+template-ir v0.2).
