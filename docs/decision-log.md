@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**; **Compiler back-end Phase 1 erasure design APPROVED, scope locked [2026-06-19]**; **PK = documentation only; GitHub authoritative for code [2026-06-19]**; **Phase 1a LANDED: read/write erasure analyzer placed, 235→250 tests, cross-pass seam confirmed [2026-06-19]**; **Phase 1b-1 LANDED: emitted-mount placer placed, 250→262 tests, all 5 §5 differential gate cases green against real interpreter [2026-06-19]**; **Phase 1b-2 LANDED: Child + Conditional added to emitter, 262→272 tests, all gate cases green, 1000-flip no-leak confirmed, direct-capture preserved [2026-06-19]**; **Phase 2 CLOSED: step-3 hook emission landed, 272→282 tests, FALSE-policy sites emit setCompilerEquals(fn, false), first specialization to reach compiled output; HC perturbation finding carried forward as createSignals tripwire companion [2026-06-19]**; **`.nv` front-end SCOPED: syntax + component model settled ($component/$script/$style/$render/holes); TS-API-delegation parser strategy; FE-equivalence seam carries all back-end proofs; renderer-session handoff pending §7 confirmations [2026-06-19]**; **`.nv` front-end scope APPROVED: all four §7 confirmations resolved (IR structural comparison, TS-API delegation + mutation-write rewrite ordering load-bearing, PoC binding set only); renderer-session handoff ready [2026-06-19]**; **`.nv` front-end IMPLEMENTED: nv-parser.ts ~770 lines, 48 FE-equivalence + 34 interpreter tests green, erasure sound (mutation-write RHS fix, compound desugaring, scope-aware shadowing closed); pending CC placement [2026-06-19]**; **`.nv` front-end PLACED: nv-parser.ts in-repo, 48 FE-equivalence tests live against real seam, 330/330 green, stale v0-limitations comment corrected [2026-06-19]**; **Real-browser gate COMMISSIONED: Playwright, headless Chromium, both back-ends + interaction; cross-engine tripwire set; parse-divergence flag remains open [2026-06-19]**)_
+_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**; **Compiler back-end Phase 1 erasure design APPROVED, scope locked [2026-06-19]**; **PK = documentation only; GitHub authoritative for code [2026-06-19]**; **Phase 1a LANDED: read/write erasure analyzer placed, 235→250 tests, cross-pass seam confirmed [2026-06-19]**; **Phase 1b-1 LANDED: emitted-mount placer placed, 250→262 tests, all 5 §5 differential gate cases green against real interpreter [2026-06-19]**; **Phase 1b-2 LANDED: Child + Conditional added to emitter, 262→272 tests, all gate cases green, 1000-flip no-leak confirmed, direct-capture preserved [2026-06-19]**; **Phase 2 CLOSED: step-3 hook emission landed, 272→282 tests, FALSE-policy sites emit setCompilerEquals(fn, false), first specialization to reach compiled output; HC perturbation finding carried forward as createSignals tripwire companion [2026-06-19]**; **`.nv` front-end SCOPED: syntax + component model settled ($component/$script/$style/$render/holes); TS-API-delegation parser strategy; FE-equivalence seam carries all back-end proofs; renderer-session handoff pending §7 confirmations [2026-06-19]**; **`.nv` front-end scope APPROVED: all four §7 confirmations resolved (IR structural comparison, TS-API delegation + mutation-write rewrite ordering load-bearing, PoC binding set only); renderer-session handoff ready [2026-06-19]**; **`.nv` front-end IMPLEMENTED: nv-parser.ts ~770 lines, 48 FE-equivalence + 34 interpreter tests green, erasure sound (mutation-write RHS fix, compound desugaring, scope-aware shadowing closed); pending CC placement [2026-06-19]**; **`.nv` front-end PLACED: nv-parser.ts in-repo, 48 FE-equivalence tests live against real seam, 330/330 green, stale v0-limitations comment corrected [2026-06-19]**; **Real-browser gate PASSED (Chromium): 12/12, both halves, both flags settled (event dispatch + sentinel-strip); async scheduler confirmed lazy; Phase 0 ROADMAP CLOSED; cross-engine tripwire open [2026-06-19]**)_
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state (Clean/Check/Dirty)
@@ -2455,3 +2455,57 @@ identity + interaction only.
 
 **Status.** Commissioned, handed to CC. On pass: Phase 0 ROADMAP closes (Chromium
 scope); cross-engine tripwire remains the one open follow-up.
+
+---
+
+### 2026-06-19 — Real-browser gate PASSED (Chromium); Phase 0 ROADMAP closed; cross-engine tripwire open
+
+**Supersedes** the COMMISSIONED status of the same-day commission entry. CC ran the gate;
+architect verified the test file (read the actual spec, not the green count) before marking
+passed. Commit `8d92fbc` (atop `9845b89`). Chromium 12/12.
+
+**Both halves passed.**
+1. **Back-end equivalence in real Chromium** (TC-01–TC-08): `mount()` and `emitMount()` on the
+   same IR produce `structurallyEqual` real DOM — initial, after signal write, after conditional
+   flip, after 1000 flips with no accumulated DOM. TC-07 dispose: DOM removed, post-dispose write
+   no-ops in the real engine.
+2. **Real interaction** (TC-04 ×2): `dispatchEvent` fires the EventBinding handler on **both**
+   back-ends (interpreter + emitter buttons each dispatched and asserted, clicks→2), and a real
+   Playwright `.click()` (user-gesture equivalent) fires the handler → signal write → DOM update.
+
+**Flags settled (the reason the gate existed).**
+- **FLAG-1 (event dispatch):** real Chromium `dispatchEvent` AND Playwright `.click()` fire the
+  handler identically to the interpreter suite's assumption — no jsdom-vs-real divergence. Now
+  covers both back-ends' own listeners, not shared-signal inference.
+- **FLAG-2 (sentinel-strip vs real parser):** `html\`` sentinel attributes are stripped cleanly
+  by the real Chromium `<template>.innerHTML` parser; `shape.html` clean, binding paths correct —
+  no parse5-vs-platform divergence on Chromium. (Cross-engine remains open — see tripwire.)
+- **Async scheduler:** confirmed lazy in a real Chromium event loop — a write stays pending
+  (`duringBatch === 'before'`) until `flushSync()`. Matches the spec's batched model; not eager.
+
+**Verification note (architect).** First CC submission was green but included a vacuous
+`expect(true).toBe(true)` for TC-09 and a scheduler test that captured but did not assert the
+discriminating value — "12/12" with two tests not proving their claims. Sent back; CC corrected:
+TC-09 now intercepts `console.error` and asserts both back-ends route the non-primitive error
+(silent acceptance now fails), and the scheduler test now asserts `duringBatch === 'before'`
+(settling the flag, not just re-proving value-correctness). Re-verified against the corrected
+file. Recorded as a calibration point: a green count is not a passed gate until the assertions
+are read — same reason-vs-run lesson as the C1 classifier finding.
+
+**Narrowed claim (do not over-read).** This closes **real-Chromium** DOM identity + interaction,
+NOT cross-engine identity. Headless Chromium and jsdom are both non-WebKit/non-Gecko, so the
+parse-divergence question (parse5 vs *other* platform parsers) is closed only for Chromium.
+
+**Cross-engine tripwire — OPEN (near-term).** Add WebKit (+ optionally Firefox) as Playwright
+`projects` — near-zero harness cost (config-only), only run-time. Trigger: next renderer session
+OR any real-app/launch milestone, whichever first. The parse-divergence flag stays open for
+non-Chromium engines until this runs.
+
+**Gates.** Chromium 12/12. `src/` untouched. vitest suite still 330/330 (browser gate is additive,
+separate `test/browser/` + Playwright config). New harness only.
+
+**Contract impact.** None. No version bump.
+
+**Status.** Real-browser gate PASSED (Chromium). **Phase 0 ROADMAP closed.** Sole open follow-up:
+the cross-engine tripwire. Everything else (List/Sync, `$style` scoping, `.nv` build-pipeline,
+ComponentBinding, the two perf tripwires, step-4 reopen) remains deferred as previously scoped.
