@@ -59,11 +59,11 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
   another reactive scope (conditional, list, and the build pipeline's `$script` wrapper) must
   bridge the inner `createRoot`'s disposer via `onCleanup` — `createRoot` does **not**
   auto-attach to the parent owner.
-- **Erasure region = `$script` ONLY.** `preprocessMutationWrites` erases bare-reads +
-  mutation-writes inside `$script` blocks. **Render-template holes (incl. event handlers) are
-  NOT erased.** `eraseSignalReadsInNode` (bare-read only, internal/not exported) and the
-  assignment→`.set()` logic (inside `eraseScriptBlock`, `$script`-shaped) are the building
-  blocks; neither runs on render holes yet.
+- **Erasure regions.** `preprocessMutationWrites` erases bare-reads + mutation-writes inside
+  `$script` blocks. **`parseNvFileForEmit` additionally erases render-template holes** (bare-read
+  everywhere; mutation-write in event handler bodies via `eraseHandlerExpr`). Known gap:
+  destructuring assignment targets in handlers fall through to bare-read only (fails safe; see
+  Known gaps).
 - **SignalId derivation** must use the same `signalSymbolId` across compiler steps 1–2/4 and
   any renderer write-back (SyncBinding `writeTargetId`).
 - **`core.ts` is never modified by the compiler** (standing constraint). Field order locked.
@@ -91,5 +91,5 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
 ---
 
 ## Not built at all (forward queue)
-Build pipeline (`.nv`→`.js`), `$style` scoping, ComponentBinding + component API, SyncBinding,
+`$style` scoping, ComponentBinding + component API, SyncBinding,
 LIS list move-minimization (parked), kind-split (parked behind real-app evidence).

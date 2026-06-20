@@ -181,6 +181,11 @@ _Last updated: 2026-06-20 (Contract **v0.4.2** — runtime correctness verified;
   (`class="${x}"`); unquoted/partial-value interpolation unsupported (documented).
   Harness note: the interpreter is async-scheduled — tests/probes must `flushSync()`
   after a signal write before asserting DOM state.
+- **Build pipeline `.nv→.js` LOCKED 2026-06-20 (Mode A, design + implementation).** Factory
+  emits a real-thunk IR literal → interpreter `mount`; coverage = text/attr/prop/event/
+  conditional (child/list not `.nv`-reachable). Render-hole erasure (bare-read + handler
+  mutation-write) included in v1. Component API remains the open gate (provisional scaffold
+  shape only). Built and green (369/369, tsc clean). See dated entry.
 
 ### Open design decisions (chosen later; not blocking)
 - Compile-time vs. runtime split — the boundary of what is compiled away vs.
@@ -188,8 +193,8 @@ _Last updated: 2026-06-20 (Contract **v0.4.2** — runtime correctness verified;
   read/write *syntax* transform is now pinned — authoring surface gets bare-read +
   mutation-write via compiler erasure; the runtime core stays explicit
   call-to-read/`.set()`-write; the boundary is "is there a compile step over this
-  code." The rest of the split (scheduling, encapsulation, what else compiles away)
-  stays open. See dated entry.
+  code." **`.nv→.js` build resolved 2026-06-20 (Mode A, see Log);** the rest of
+  the split (scheduling, encapsulation) stays open. See dated entry.
 - Effect-flush timing primitive (microtask vs. custom scheduler).
 - Compile-time *full* encapsulation (DOM + style), beyond Svelte-style style
   scoping — genuinely open research.
@@ -205,6 +210,13 @@ _Last updated: 2026-06-20 (Contract **v0.4.2** — runtime correctness verified;
   `tsconfig_check.json` now both set `strict: true` + `lib: ["ES2022", "DOM"]`, so
   strict-with-DOM-lib is the standing build/check configuration and a future
   DOM-global collision surfaces immediately. See the dated entry below for detail.
+- **Render-hole erasure — LANDED 2026-06-20** (build pipeline v1). Was unbuilt
+  (`preprocessMutationWrites` covered `$script` only); bare-read + handler mutation-write
+  erasure now run on render holes in `parseNvFileForEmit`. Known gap: destructuring
+  assignment targets fall through to bare-read only (fails safe; documented in code +
+  `implementation-state.md`).
+- **`AGENTS.md` + `docs/implementation-state.md` added 2026-06-20.** Two rules added
+  (*read seams before speccing*; *halt at undecided gate*); orientation digest added.
 - **Test-hygiene follow-up — FULLY CLOSED 2026-06-20.** Gate-4 placeholder annotated;
   `expect(!EXPR).toBe(true)` double-negations CLOSED 2026-06-20 (6 sites → `.toBe(false)`;
   verified `grep -rPzo`). Test-hygiene follow-up fully closed.
@@ -2842,3 +2854,62 @@ branch-variant-analyzer.test.ts (untrack-exclusion), write-graph-cycle-checker.t
 (untrack-exclusion), nv-parser.test.ts FE-09i/j/k/l. Verified newline-tolerant
 (`grep -rPzo "expect\(\s*!" test/` → zero) plus per-site read; 344/344, tsc clean (CC).
 All test-hygiene follow-ups now closed. Contract impact: none.
+
+### 2026-06-20 — Build pipeline `.nv → .js` locked as Mode A
+
+**Decision.** Build the `.nv → .js` transform as **Mode A**: emit a factory that runs the
+erased `$script` once and produces a **real-thunk `TemplateIR`**, handed to the shipped
+interpreter `mount`. No per-binding source codegen (the deferred compiler back-end). Spec:
+`docs/design/build-pipeline-modeA-spec.md`.
+
+**Emit mechanism is forced by source, not chosen** (record so neither alternative is
+re-attempted): the emit builds an **IR object literal** — real `shape`/`bindingPaths`/kinds/
+names taken from the parser, real thunks generated from erased hole source. The two
+alternatives are eliminated: emitting a runtime `` html`` `` call is dead (`html-tag.ts`
+handles `text`+`attr` only); lifting the parser's IR is dead (`nv-parser.ts` binding thunks
+are stubs, `(() => undefined)`).
+
+**Scope.** v1 coverage = the kinds the `.nv` parser produces: `text, attr, prop, event,
+conditional`. Child and List are **out** — not `.nv`-reachable (interpreter-only via manual
+IR). Sync out (throws).
+
+**`$script` ownership.** `mount` creates its own root and exposes no setup-without-root, so
+`$script` runs inside an **outer `createRoot`** and the inner mount root is bridged via
+`onCleanup` — the same manual nested-root bridge the interpreter uses for conditional/list.
+
+**Render-hole erasure gap — discovered and resolved.** `preprocessMutationWrites` erases
+`$script` blocks **only**; render-template holes (incl. event handlers) were never erased (no
+real render thunk had ever run, so it was invisible). v1 **includes** render-hole erasure:
+bare-read everywhere, **and mutation-write inside event handlers** (`count = x` →
+`count.set(x)`), reusing the existing `$script` assignment logic generalized to handler bodies.
+Keeps the first runnable surface consistent with the locked mutation-write-authoring thesis.
+**Known gap: destructuring assignment targets** (`[a, b] = ...`, `({ x } = ...)`) fall through
+to bare-read erasure only — fails safe (no false-positive `.set()`), documented in code +
+`implementation-state.md`, no v1 fix planned.
+
+**Component API explicitly NOT decided.** Export shape / props / slots / parent-invokes-child
+remains the open gate (template-ir §9.3). The v1 emitted module shape (`export function Name()`
+returning `{ mount }`) is a **provisional test scaffold**, not a public contract; the emitter
+is structured so the outer signature can change without touching the IR-build internals.
+
+**Off the v1 path.** Equality-policy and step-4 specialization (no verdict in parser output /
+shelved). `$style` scoping (parsed, not emitted). Mode B source codegen, `shape` hoisting,
+setup-without-root primitive, source maps — deferred.
+
+**Diagnostics.** v1 carries no `BindingErasureVerdict` (interpreter path), so no sync-DECLINE
+warning/error question. Policy: `NvDiagnostic` errors fail the build; that is all.
+
+**Tooling.** esbuild plugin over `emitModule`, build-time jsdom `Document` for path
+computation (parse-once at build time). Acceptance gate: emitted module DOM `structurallyEqual`
+to interpreter `mount` of a hand-authored real-thunk IR, at init / after write / after event,
+plus dispose-no-leak.
+
+**Process.** This session also added two working-instruction rules to `AGENTS.md` (*read the
+seams before you spec*; *halt at an undecided design gate — don't invent the decision*) and a
+new orientation doc `docs/implementation-state.md` (code facts: real-vs-stub, the seams),
+after a spec-revision loop traced to speccing against inferred internals + a lossy session
+hand-off.
+
+**Status.** Locked (design + implementation). Parser addition incl. render-hole erasure →
+`emitModule` → esbuild plugin → fixtures + round-trip gate. 369/369, tsc clean, biome clean.
+No contract change (reactive-core v0.4.2, template-ir v0.2 both unchanged).
