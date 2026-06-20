@@ -44,10 +44,10 @@ import { createHtmlTag } from '../dist/renderer/html-tag.js'
 const WARMUP = 6 // leading trials to discard
 const TRIALS = 20 // steady-state trials (median over these)
 
-const N_ROWS = 1000 // rows per cycle: 100 | 1000 | 10000
-const N_SIGNALS = 2 // signals/row:   2 (default) | 4
-const N_DERIVEDS = 2 // deriveds/row:  2 (default) | 0 (adversarial, strips dilution) | 4
-const FALSE_COUNT = 0 // (variant C) FALSE signals/row: 0 | 1 | 'all'
+const N_ROWS = Number(process.env.N_ROWS ?? 1000) // rows per cycle: 100 | 1000 | 10000
+const N_SIGNALS = Number(process.env.N_SIGNALS ?? 2) // signals/row:   2 (default) | 4
+const N_DERIVEDS = Number(process.env.N_DERIVEDS ?? 2) // deriveds/row:  2 (default) | 0 | 4
+const FALSE_COUNT = process.env.FALSE_COUNT === 'all' ? 'all' : Number(process.env.FALSE_COUNT ?? 0)
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
