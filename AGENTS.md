@@ -6,18 +6,46 @@ points here.)
 
 ## What this project is
 
-Two documents are authoritative and override any code comment or other doc:
+Three documents are authoritative and override any code comment or other doc:
 
 - `docs/reactive-core-contract.md` — source of truth for reactive-core **semantics**.
 - `docs/decision-log.md` — source of truth for **what is decided and why**.
+- `docs/implementation-state.md` — orientation digest of **what exists in the code now**
+  (file inventory, real-vs-stub status, the load-bearing seams). It is *not* authoritative
+  over the code — **GitHub is authoritative for code** — but it is the first thing to read
+  to avoid re-deriving the codebase's current shape from scratch.
 
 If code or discussion conflicts with the contract, flag the conflict explicitly; do
 not silently follow either.
 
 ## Before doing substantive work
 
-Read the decision log's **Current State** header first (what is locked / open /
-superseded right now). Consult the dated Log only for the rationale behind a decision.
+1. Read the decision log's **Current State** header (what is locked / open / superseded).
+2. Read `docs/implementation-state.md` (what is real / stub / deferred, and the seams).
+3. Consult the dated Log only for the rationale behind a decision.
+
+Do not trust a prior-session summary or hand-off note over these files or over the source
+itself; summaries are lossy. Re-establish code facts from `implementation-state.md` + the
+actual source, not from recollection.
+
+## Read the seams before you spec
+
+Before writing a spec or design that **composes existing modules** (e.g. "emit code that
+calls `mount`", "consume the parser's output"), read the actual source of every seam you
+are composing — signatures, return types, what is real vs. stub, what it discards. Do not
+spec against inferred internals. A spec built on a guess about a seam is a spec that will be
+revised once the guess is checked; reading first collapses the revision loop. This is
+distinct from (and in addition to) verifying external library claims.
+
+## Halt at an undecided design gate — do not invent the decision
+
+If executing a task requires a decision that has **not been made** (it is not in the locked
+list, not resolved in the log, and is flagged "open" or "not yet specified" anywhere), stop
+at that boundary and surface it. Do **not** silently pick a default and build past it. A
+task may proceed *up to* the gate — building the parts that don't depend on the undecided
+piece — but must structure the work so the missing decision can be filled in later without a
+rewrite, and must name the gate it stopped at. Fabricating an unmade decision is the costlier
+error; it looks like progress and has to be unwound.
 
 ## Decision-log workflow
 
@@ -27,6 +55,10 @@ update the Current State header. Append-only — never rewrite history; record r
 as new entries citing the superseded entry's date. If a decision changes the contract,
 note the contract version bump in the entry. When the Log grows unwieldy, move stale
 entries to `docs/decision-log-archive.md` with a one-line pointer left behind.
+
+When a change lands code that alters the inventory or a seam, update
+`docs/implementation-state.md` in the same pass (it is orientation, not history — edit it in
+place; do not append-and-date it like the log).
 
 ## Locked architectural decisions (do not drift without explicit reversal)
 
@@ -44,6 +76,16 @@ entries to `docs/decision-log-archive.md` with a one-line pointer left behind.
 - The compiler may only **skip provable work**; misclassification costs performance,
   never correctness (a soundness fallback always applies).
 
+## Authoring surface (`.nv`) vs. runtime core
+
+The authoring surface (`.nv` files: `$component`, `$script`, `$render`, `$style`) gets
+bare-read + mutation-write **via compiler erasure**; the runtime core stays explicit
+call-to-read / `.set()`-write. The boundary is "is there a compile step over this code." The
+`.nv` constructs are compiled away — the compiler emits a factory that produces a Template IR
+(IR §2.1). What that factory's **public contract** is (export shape, props, slots, component
+identity, how a parent invokes a child) is the **component-API gate — open, not yet
+specified** (IR §9.3). Do not bake a public component API while that gate is open.
+
 ## Repo shape
 
 Single published package `@neutro/view` with **subpath exports** — not multiple
@@ -54,7 +96,8 @@ packages. One version, one build, one release (mirrors `@neutro/form`).
 - `src/renderer/` → `@neutro/view/renderer` (Template IR → live DOM).
 - `test/` mirrors `src/` (`test/core`, `test/compiler`, `test/renderer`).
 - `integration/` holds cross-concern tests (the PoC gate); owns no component.
-- `docs/` holds the contract, decision log, template-IR contract, and design notes.
+- `docs/` holds the contract, decision log, implementation-state map, template-IR
+  contract, and design notes.
 
 ### Import style (decided — apply consistently)
 
@@ -65,6 +108,8 @@ packages. One version, one build, one release (mirrors `@neutro/form`).
 - **The `@neutro/view/*` aliases are the external/published surface only** — for
   consumers, declared in `package.json` `exports` and the `src/*/index.ts` barrels.
   Do not use them for internal source.
+- **Generated build output (e.g. `.nv`→`.js`) is a consumer of the published package**, so
+  it imports via the `@neutro/view/*` aliases, not relative paths.
 - A genuinely orthogonal future concern (e.g. a meta-framework) becomes its **own
   package**, not a subpath.
 
@@ -86,10 +131,11 @@ A question is contract-level (escalate; don't decide in-stream) if it touches a 
 §1 invariant, the §6 owner/disposal contract, or determines what a computation
 observes mid-propagation — even if it feels like an implementation or scheduler
 detail. For the compiler specifically: if a specialization's failure mode is a *wrong
-result* rather than slower execution, that's a contract violation — escalate. Pure
-layout, helper organization, parser/data-structure tuning, and import organization are
-in-stream. When unsure, surface it; under-escalating a semantics question is the
-costlier error.
+result* rather than slower execution, that's a contract violation — escalate. A question is
+also gate-level (surface it, per "Halt at an undecided design gate") if answering it requires
+making a design decision that is flagged open or unspecified. Pure layout, helper
+organization, parser/data-structure tuning, and import organization are in-stream. When
+unsure, surface it; under-escalating is the costlier error.
 
 ## Two standing gates (separate, both required)
 
@@ -120,4 +166,5 @@ on the strength of one.
 Direct and concise. Steelman a proposal, then state where it holds and where it leaks.
 Distinguish decided / open-decision / genuine-research. Don't relitigate settled
 decisions unless new information changes them. Verify framework/library claims rather
-than asserting from memory — the reactive-engine space moves fast.
+than asserting from memory — the reactive-engine space moves fast. Own mistakes and fix
+them without self-abasement.
