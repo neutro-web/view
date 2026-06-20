@@ -312,8 +312,13 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
         const dispose = runWithOwner(listOwner, () =>
           createRoot((d) => {
             const itemIR = binding.itemTemplate(valueSig, indexSig)
-            const { rootEl } = mountFragment(itemIR, parent, doc, anchorNode)
-            mountedRoot = rootEl
+            const { roots } = mountFragment(itemIR, parent, doc, anchorNode)
+            if (roots.length !== 1) {
+              throw new Error(
+                '[nv] Multi-root list items are not supported in v1. Wrap the item template in a single root element.',
+              )
+            }
+            mountedRoot = roots[0] as Node
             onCleanup(() => {
               if (mountedRoot.parentNode !== null) mountedRoot.parentNode.removeChild(mountedRoot)
             })
@@ -393,9 +398,11 @@ function wireConditional(binding: ConditionalBinding, anchorNode: Node, doc: Doc
     // The branch's effects are owned by the branch root (not by this effect),
     // so toggling the condition disposes only the branch, not this effect.
     branchDisposer = createRoot((dispose) => {
-      const { rootEl } = mountFragment(template, parent, doc, anchorNode)
+      const { roots } = mountFragment(template, parent, doc, anchorNode)
       onCleanup(() => {
-        if (rootEl.parentNode !== null) rootEl.parentNode.removeChild(rootEl)
+        for (const n of roots) {
+          if (n.parentNode !== null) n.parentNode.removeChild(n)
+        }
       })
       return dispose
     })
@@ -414,8 +421,8 @@ function wireConditional(binding: ConditionalBinding, anchorNode: Node, doc: Doc
 
 /**
  * Internal: mount a TemplateIR fragment into `parent`, inserting before `before`
- * (or appending if null). Returns the first child of the mounted fragment (for
- * onCleanup removal). Assumes single-root template for the PoC.
+ * (or appending if null). Returns ALL child nodes of the mounted fragment so
+ * callers can remove every root on cleanup. Multi-root templates are fully supported.
  *
  * Called inside a createRoot callback by both mount() and wireConditional().
  */
@@ -424,7 +431,7 @@ function mountFragment(
   parent: Element | Node,
   doc: Document,
   before: Node | null = null,
-): { rootEl: Node } {
+): { roots: Node[] } {
   // 1. Parse shape.html into a fresh DocumentFragment via <template>.
   //    jsdom supports <template> element; real browsers also support this.
   const tmpl = doc.createElement('template')
@@ -448,22 +455,21 @@ function mountFragment(
     wireBinding(ir.bindings[i]!, targets[i]!, doc)
   }
 
-  // 4. Insert fragment into the parent.
-  //    PoC constraint: template is assumed to have a single root element.
-  //    The rootEl is the first child for cleanup reference.
-  const firstChild = frag.firstChild
-  if (firstChild === null) {
+  // 4. Snapshot all fragment children BEFORE inserting (after insert the fragment is empty).
+  //    Multi-root templates are fully supported — all roots are tracked for cleanup.
+  const roots = Array.from(frag.childNodes)
+  if (roots.length === 0) {
     throw new Error('[nv/interpreter] Template produced an empty fragment')
   }
+
   if (before !== null) {
     parent.insertBefore(frag, before)
   } else {
     parent.appendChild(frag)
   }
 
-  // After appendChild/insertBefore, frag is empty (nodes moved to parent).
-  // firstChild is now in parent; it's safe to reference for removal.
-  return { rootEl: firstChild }
+  // roots are now in parent. Return all of them so callers can remove every node on teardown.
+  return { roots }
 }
 
 /**
@@ -484,11 +490,12 @@ function mountFragment(
  */
 export function mount(ir: TemplateIR, parent: Element, doc: Document): () => void {
   return createRoot((dispose) => {
-    const { rootEl } = mountFragment(ir, parent, doc)
+    const { roots } = mountFragment(ir, parent, doc)
     onCleanup(() => {
-      // Remove the mounted DOM from parent.
-      // rootEl.remove() is safe even if rootEl is already detached.
-      if (rootEl.parentNode !== null) rootEl.parentNode.removeChild(rootEl)
+      // Remove ALL mounted root nodes from parent (multi-root template support).
+      for (const n of roots) {
+        if (n.parentNode !== null) n.parentNode.removeChild(n)
+      }
     })
     return dispose
   })

@@ -14,7 +14,7 @@ it disagrees with the source, the source wins and this file is stale → fix it.
 **Maintenance.** Update in the same pass that lands code, as a ready-to-commit edit (same
 discipline as log entries). Keep it to roughly this length; detail belongs in the code.
 
-Last verified against source: **2026-06-20.** Contract **v0.4.2**, Template IR **v0.2**.
+Last verified against source: **2026-06-20.** Contract **v0.4.2**, Template IR **v0.2.1**.
 
 ---
 
@@ -45,7 +45,7 @@ Legend: **REAL** = production-complete & verified · **PARTIAL** = works for a s
 | `nv-parser.ts` | PARTIAL → **REAL for the build path** | Adds `parseNvFileForEmit` + `eraseHandlerExpr` + `computeThunksForTemplate`/`computeThunkSource` + `extractScriptBodySource`/`extractModuleScope`. `parseNvFile` (structural-only, stub thunks) unchanged and still used by FE-equivalence tests. `parseNvFileForEmit` returns the real `emit` payload: erased `scriptBody`, index-aligned `bindingThunks` (recursive for conditional), `moduleScope`. |
 | `nv-emitter.ts` | **REAL** | `emitModule(results) → ES module text`. IR object literal; nested-root factory with `onCleanup(disposeMount)` bridge; minimal imports via word-boundary detection; throws on error diagnostics. Spec §5. |
 | `nv-esbuild-plugin.ts` | **REAL** | `nvPlugin()`: `onLoad(/\.nv$/)` → jsdom doc → `parseNvFileForEmit` → `emitModule` → `{ contents, loader: 'js' }`. Thin I/O glue. |
-| build pipeline (overall) | **PARTIAL** | Transform + erasure layer REAL and verified. **Executable-module gate still OPEN** — see Known gaps. |
+| build pipeline (overall) | **REAL** | Transform + erasure layer verified. Executable-module gate CLOSED (EX-01..03, dynamic import, esbuild alias). Multi-root dispose fixed. |
 | `comparator.ts` | REAL | Structural DOM comparison (`structurallyEqual`) for the differential suite. |
 
 **Published surface note.** `@neutro/view/renderer` barrel now also exports `parseNvFileForEmit`
@@ -80,15 +80,10 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
 
 ## Known gaps / stubs / v0 limitations (named, not hidden)
 
-- **Build pipeline executable-module gate — OPEN.** The round-trip suite
-  (`nv-emitter.test.ts` EM-01..12) verifies the **erased thunk sources** by `eval`-ing
-  `emit.bindingThunks` via `new Function` + real primitives → mount → DOM. It does **not**
-  execute `emitModule`'s emitted string; module string-assembly (esp. the conditional
-  literal in `emitThunkSource`/`emitIrLiteral`, imports, `bindingPaths` rendering) is
-  covered only by `toContain` smoke checks (EM-11). Close by writing one emitted module to
-  a temp file and `import()`-ing it with `@neutro/view/*` mapped to `src/` (import map /
-  esbuild alias / vite-node), then mounting that output and asserting DOM. Until then, the
-  pipeline is verified for transform/erasure but **not** for emitted-module execution.
+- **Build pipeline executable-module gate — CLOSED (2026-06-20).** EX-01..03 in
+  `nv-emitter-exec.test.ts` write the emitted `.js` to disk, bundle via esbuild (alias
+  `@neutro/view/*` → `src/`), `import()` the bundle, mount, and assert DOM. Conditional
+  literal and multi-component emission both verified end-to-end.
 - **Handler destructuring-write gap.** `eraseHandlerExpr` does not detect destructuring
   assignment targets (`[a,b] = …`, `({x} = …)`) as signal writes — falls through to
   bare-read only, no false-positive `.set()` (fails safe). A destructuring write to a
@@ -105,6 +100,10 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
   (IR §9.3, *open*). No public component-invocation contract exists.
 - **Equality hook inert; step 4 shelved** — neither specialization is wired to save work.
 - **SyncBinding** throws at both back-ends.
+- **Multi-root mount/dispose — FIXED (v0.2.1).** Both back-ends now snapshot all fragment
+  children before insert and remove every root on cleanup. The single-root PoC constraint is gone.
+- **Multi-root list items not supported** — both back-ends throw loudly if an item template
+  produces more than one root node. Single-root guard is the v1 limitation; wrap in a container element.
 - **`$style`** — parser extracts `{form, keys, source}`; scoping/injection unbuilt (own item).
 
 ---

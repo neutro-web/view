@@ -1,8 +1,11 @@
-# nv Template IR — Design v0.2
+# nv Template IR — Design v0.2.1
  
 **Stream:** (3) Renderer/templating  
 **Contract reference:** nv Reactive Core Runtime Contract v0.4  
-**Status:** Approved — v0.2 (arch review closed 2026-06-17). PoC implementation may begin.
+**Status:** Approved — v0.2 (arch review closed 2026-06-17). PoC implementation may begin.  
+**v0.2.1 note (2026-06-20):** Back-ends support multi-root template shapes. The single-root
+constraint was an implementation detail of the initial PoC, not an IR constraint. List item
+templates remain limited to a single root element (loudly enforced; v1 limitation).
  
 ---
  

@@ -22,6 +22,7 @@
 
 import { JSDOM } from 'jsdom'
 import { expect, test } from 'vitest'
+import { emitMount } from '../../src/compiler/emitted-mount.js'
 import {
   __test,
   createRoot as coreCreateRoot,
@@ -1505,5 +1506,235 @@ test('TC-10j  nested ListBinding: disposal cascades to inner list', () => {
   expect(parent.querySelectorAll('li').length, '0 li after dispose').toBe(0)
   expect(__test.observerCount(groups), 'groups has 0 observers after dispose').toBe(0)
 
+  rmParent(parent)
+})
+
+// ── TC-MR: Multi-root template support ───────────────────────────────────────
+//
+// Back-ends previously only removed the first child of a mounted template on
+// dispose. A 2-root template (<span> + <button>) leaked all but the first.
+// These tests verify both back-ends correctly handle multi-root templates.
+
+/**
+ * Helper: mount via the given back-end and return a disposer.
+ * Abstracts interpreter vs emitted-mount so the same assertions run for both.
+ */
+function mountVia(
+  backend: 'interpreter' | 'emitted',
+  ir: TemplateIR,
+  parent: Element,
+  doc: Document,
+): () => void {
+  if (backend === 'interpreter') {
+    return mount(ir, parent, doc)
+  }
+  const { mountFn } = emitMount(ir)
+  return mountFn(parent, doc)
+}
+
+/** 2-root template: <span>hello</span><button>click</button> */
+const twoRootIR: TemplateIR = {
+  id: 'tc-mr-two-root',
+  shape: { html: '<span>hello</span><button>click</button>', bindingPaths: [] },
+  bindings: [],
+}
+
+test('TC-MR-01a  interpreter: 2-root mount — both roots present, dispose removes all', () => {
+  const parent = mkParent()
+  const dispose = mountVia('interpreter', twoRootIR, parent, document)
+  flushSync()
+
+  expect(parent.children.length, '2 root elements mounted').toBe(2)
+  expect(parent.querySelector('span') !== null, 'span present').toBe(true)
+  expect(parent.querySelector('button') !== null, 'button present').toBe(true)
+
+  dispose()
+  expect(parent.childElementCount, 'no children after dispose').toBe(0)
+
+  rmParent(parent)
+})
+
+test('TC-MR-01b  emitted-mount: 2-root mount — both roots present, dispose removes all', () => {
+  const parent = mkParent()
+  const dispose = mountVia('emitted', twoRootIR, parent, document)
+  flushSync()
+
+  expect(parent.children.length, '2 root elements mounted').toBe(2)
+  expect(parent.querySelector('span') !== null, 'span present').toBe(true)
+  expect(parent.querySelector('button') !== null, 'button present').toBe(true)
+
+  dispose()
+  expect(parent.childElementCount, 'no children after dispose').toBe(0)
+
+  rmParent(parent)
+})
+
+/** Outer IR wrapper with a conditional anchor. */
+function makeConditionalIRMultiRoot(
+  condition: () => boolean,
+  consequent: TemplateIR,
+  alternate: TemplateIR | null = null,
+): TemplateIR {
+  return {
+    id: `cond-mr:${Date.now()}`,
+    shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'conditional',
+        pathIndex: 0,
+        condition,
+        consequent,
+        alternate,
+      } satisfies ConditionalBinding,
+    ],
+  }
+}
+
+const twoRootConsequent: TemplateIR = {
+  id: 'tc-mr-cond-consequent',
+  shape: { html: '<span>yes</span><em>also</em>', bindingPaths: [] },
+  bindings: [],
+}
+
+const singleRootAlternate: TemplateIR = {
+  id: 'tc-mr-cond-alternate',
+  shape: { html: '<p>no</p>', bindingPaths: [] },
+  bindings: [],
+}
+
+test('TC-MR-02a  interpreter: conditional with 2-root consequent — mount/unmount cleans up', () => {
+  const show = signal(true)
+  const ir = makeConditionalIRMultiRoot(() => show(), twoRootConsequent, singleRootAlternate)
+  const parent = mkParent()
+  const dispose = mountVia('interpreter', ir, parent, document)
+  flushSync()
+
+  const div = parent.querySelector('div') as Element
+  // consequent: span + em + anchor comment = 3 childNodes
+  expect(div.querySelector('span') !== null, 'span present on true').toBe(true)
+  expect(div.querySelector('em') !== null, 'em present on true').toBe(true)
+
+  show.set(false)
+  flushSync()
+  expect(div.querySelector('span') === null, 'span gone after flip').toBe(true)
+  expect(div.querySelector('em') === null, 'em gone after flip').toBe(true)
+  expect(div.querySelector('p') !== null, 'alternate p present').toBe(true)
+
+  // Flip N times — no accumulation
+  for (let i = 0; i < 10; i++) {
+    show.set(i % 2 === 0)
+    flushSync()
+  }
+  // After 10 flips (i=0..9; last i=9 is odd → show=false → alternate)
+  expect(div.querySelector('p') !== null, 'alternate present after N flips').toBe(true)
+  expect(div.querySelector('span') === null, 'no span leak after N flips').toBe(true)
+
+  dispose()
+  expect(parent.childElementCount, 'no children after dispose').toBe(0)
+  expect(__test.observerCount(show), 'no observer leak on condition signal').toBe(0)
+
+  rmParent(parent)
+})
+
+test('TC-MR-02b  emitted-mount: conditional with 2-root consequent — mount/unmount cleans up', () => {
+  const show = signal(true)
+  const ir = makeConditionalIRMultiRoot(() => show(), twoRootConsequent, singleRootAlternate)
+  const parent = mkParent()
+  const dispose = mountVia('emitted', ir, parent, document)
+  flushSync()
+
+  const div = parent.querySelector('div') as Element
+  expect(div.querySelector('span') !== null, 'span present on true').toBe(true)
+  expect(div.querySelector('em') !== null, 'em present on true').toBe(true)
+
+  show.set(false)
+  flushSync()
+  expect(div.querySelector('span') === null, 'span gone after flip').toBe(true)
+  expect(div.querySelector('em') === null, 'em gone after flip').toBe(true)
+  expect(div.querySelector('p') !== null, 'alternate p present').toBe(true)
+
+  for (let i = 0; i < 10; i++) {
+    show.set(i % 2 === 0)
+    flushSync()
+  }
+  expect(div.querySelector('p') !== null, 'alternate present after N flips').toBe(true)
+  expect(div.querySelector('span') === null, 'no span leak after N flips').toBe(true)
+
+  dispose()
+  expect(parent.childElementCount, 'no children after dispose').toBe(0)
+  expect(__test.observerCount(show), 'no observer leak on condition signal').toBe(0)
+
+  rmParent(parent)
+})
+
+/** Outer list IR with items that have 2-root templates. */
+function makeTwoRootListIR(items: () => readonly { id: number }[]): TemplateIR {
+  return {
+    id: 'tc-mr-list',
+    shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'list',
+        pathIndex: 0,
+        items: items as () => readonly unknown[],
+        key: (item) => (item as { id: number }).id,
+        itemTemplate: (_vs, _is) => ({
+          id: 'two-root-item',
+          shape: { html: '<span>a</span><em>b</em>', bindingPaths: [] },
+          bindings: [],
+        }),
+      } satisfies ListBinding,
+    ],
+  }
+}
+
+/** Capture all console.error arguments as a flat string array. */
+function captureErrors(fn: () => void): string[] {
+  const captured: string[] = []
+  const orig = console.error
+  console.error = (...args: unknown[]) => {
+    captured.push(args.map(String).join(' '))
+  }
+  try {
+    fn()
+  } finally {
+    console.error = orig
+  }
+  return captured
+}
+
+test('TC-MR-03a  interpreter: multi-root list item throws loudly', () => {
+  const items = signal([{ id: 1 }])
+  const ir = makeTwoRootListIR(() => items())
+  const parent = mkParent()
+  const dispose = mountVia('interpreter', ir, parent, document)
+
+  const errors = captureErrors(() => flushSync())
+
+  const match = errors.find((e) => e.includes('Multi-root list items are not supported'))
+  expect(
+    match !== undefined,
+    `Expected multi-root list error. Got: ${JSON.stringify(errors)}`,
+  ).toBe(true)
+
+  dispose()
+  rmParent(parent)
+})
+
+test('TC-MR-03b  emitted-mount: multi-root list item throws the SAME error message', () => {
+  const items = signal([{ id: 1 }])
+  const ir = makeTwoRootListIR(() => items())
+  const parent = mkParent()
+  const dispose = mountVia('emitted', ir, parent, document)
+
+  const errors = captureErrors(() => flushSync())
+
+  const match = errors.find((e) => e.includes('Multi-root list items are not supported'))
+  expect(
+    match !== undefined,
+    `Expected multi-root list error. Got: ${JSON.stringify(errors)}`,
+  ).toBe(true)
+
+  dispose()
   rmParent(parent)
 })

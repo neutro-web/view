@@ -170,10 +170,9 @@ const Counter = $component(() => {
     dispose()
   })
 
-  test('EX-01c  dispose → mounted root element removed from parent', async () => {
-    // The Counter template has two root elements (span + button). The interpreter
-    // is a single-root PoC: rootEl = firstChild (span). Dispose removes span.
-    // We verify the span (the tracked rootEl) is gone after dispose.
+  test('EX-01c  dispose → all mounted root elements removed from parent', async () => {
+    // The Counter template has two root elements (span + button). Both back-ends
+    // now track all roots; dispose must remove every root (no leaks).
     const mod = await buildCounter()
     const doc = makeDoc()
     const parent = makeParent(doc)
@@ -182,7 +181,7 @@ const Counter = $component(() => {
 
     expect(parent.querySelector('span')).not.toBeNull()
     dispose()
-    expect(parent.querySelector('span')).toBeNull()
+    expect(parent.childElementCount).toBe(0)
   })
 })
 

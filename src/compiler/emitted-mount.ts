@@ -83,9 +83,10 @@ type WireSpec = {
  * Does NOT createRoot — effects are owned by whatever root is active when called.
  * Used by ConditionalBinding to mount branches inside their branch createRoot.
  *
- * Returns the first child of the inserted fragment (for onCleanup DOM removal).
+ * Returns ALL child nodes of the inserted fragment (for onCleanup DOM removal).
+ * Multi-root templates are fully supported.
  */
-type SetupFn = (parent: Node, doc: Document, before: Node | null) => { rootEl: Node }
+type SetupFn = (parent: Node, doc: Document, before: Node | null) => { roots: Node[] }
 
 // ── Emit result ───────────────────────────────────────────────────────────────
 
@@ -297,9 +298,11 @@ function emitSetup(
               // The branch's effects are owned by the branch root, NOT by this
               // condition effect — so flipping the condition disposes only the branch.
               branchDisposer = createRoot((dispose) => {
-                const { rootEl } = branchSetup(parent, doc, anchorNode)
+                const { roots } = branchSetup(parent, doc, anchorNode)
                 onCleanup(() => {
-                  if (rootEl.parentNode !== null) rootEl.parentNode.removeChild(rootEl)
+                  for (const n of roots) {
+                    if (n.parentNode !== null) n.parentNode.removeChild(n)
+                  }
                 })
                 return dispose
               })
@@ -383,8 +386,13 @@ function emitSetup(
                     createRoot((d) => {
                       const itemIR = makeItemTemplate(valueSig, indexSig)
                       const { setup } = emitSetup(itemIR, listEmptyVerdicts)
-                      const { rootEl } = setup(parent, doc, anchorNode)
-                      mountedRoot = rootEl
+                      const { roots } = setup(parent, doc, anchorNode)
+                      if (roots.length !== 1) {
+                        throw new Error(
+                          '[nv] Multi-root list items are not supported in v1. Wrap the item template in a single root element.',
+                        )
+                      }
+                      mountedRoot = roots[0] as Node
                       onCleanup(() => {
                         if (mountedRoot.parentNode !== null)
                           mountedRoot.parentNode.removeChild(mountedRoot)
@@ -463,13 +471,15 @@ function emitSetup(
       wireSpecs[i]?.wire(targets[i] as Node, doc)
     }
 
-    const firstChild = frag.firstChild
-    if (firstChild === null) throw new Error('[nv/emit] Template produced an empty fragment')
+    // Snapshot all fragment children BEFORE inserting (after insert the fragment is empty).
+    // Multi-root templates are fully supported — all roots are tracked for cleanup.
+    const roots = Array.from(frag.childNodes)
+    if (roots.length === 0) throw new Error('[nv/emit] Template produced an empty fragment')
 
     if (before !== null) parent.insertBefore(frag, before)
     else parent.appendChild(frag)
 
-    return { rootEl: firstChild }
+    return { roots }
   }
 
   return { setup, diagnostics }
@@ -491,9 +501,11 @@ export function emitMount(
 
   const mountFn = (parent: Element, doc: Document): (() => void) => {
     return createRoot((dispose) => {
-      const { rootEl } = setup(parent, doc, null)
+      const { roots } = setup(parent, doc, null)
       onCleanup(() => {
-        if (rootEl.parentNode !== null) rootEl.parentNode.removeChild(rootEl)
+        for (const n of roots) {
+          if (n.parentNode !== null) n.parentNode.removeChild(n)
+        }
       })
       return dispose
     })
