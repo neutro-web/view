@@ -73,6 +73,32 @@ export interface NvDiagnostic {
   end: number
 }
 
+// ── Emit types (build pipeline §6) ───────────────────────────────────────────
+
+/**
+ * Per-binding erased thunk source for the build pipeline.
+ * Index-aligned with ir.bindings.
+ */
+export type ThunkSource =
+  | { kind: 'text' | 'attr' | 'prop'; exprSrc: string }
+  | { kind: 'event'; handlerSrc: string }
+  | {
+      kind: 'conditional'
+      conditionSrc: string
+      consequent: ThunkSource[]
+      alternate: ThunkSource[] | null
+    }
+
+/** Emit payload attached to NvComponentResult when using parseNvFileForEmit. */
+export interface NvEmitPayload {
+  /** Erased $script body — all $script block statements concatenated, in order. */
+  scriptBody: string
+  /** Per-binding erased thunk source, index-aligned with ir.bindings. */
+  bindingThunks: ThunkSource[]
+  /** Top-level imports and non-$component statements, verbatim from source. */
+  moduleScope: string
+}
+
 export interface NvComponentResult {
   name: string
   ir: TemplateIR
@@ -81,6 +107,8 @@ export interface NvComponentResult {
   style: NvStyleInfo | null
   verdicts: ReadonlyArray<'ACCEPT' | 'PLAIN'>
   diagnostics: ReadonlyArray<NvDiagnostic>
+  /** Present only when produced by parseNvFileForEmit. */
+  emit?: NvEmitPayload
 }
 
 export interface NvStyleInfo {
@@ -838,6 +866,400 @@ export function parseNvFile(source: string, fileName: string, doc: Document): Nv
         style: extractStyleInfo(componentFn),
         verdicts: renderResult.verdicts,
         diagnostics: [...diagnostics],
+      })
+    }
+  })
+
+  return results
+}
+
+// ── Render-hole erasure for emit ──────────────────────────────────────────────
+
+/**
+ * Erase a handler arrow-function expression for emit.
+ *
+ * The handler hole is expected to be an arrow function `() => body` where body is:
+ *   - An expression (possibly an assignment: `count = count + 1`)
+ *   - A block containing statements
+ *
+ * Applies the same rewrite logic as eraseScriptBlock:
+ *   - Bare-read erasure on all reactive names
+ *   - Mutation-write erasure (assignment → .set()) for writable signals
+ *   - Diagnostic for assignment to derived
+ *
+ * Halts (throws) if the handler body is complex in a way that can't be erased
+ * soundly: e.g., a destructuring assignment target, or non-expression-statement
+ * binary expressions that aren't top-level assignments.
+ *
+ * Returns the erased source text of the ENTIRE handler expression.
+ */
+function eraseHandlerExpr(
+  handlerExpr: ts.Expression,
+  symbols: ScriptSymbols,
+  diagnostics: NvDiagnostic[],
+): string {
+  if (!ts.isArrowFunction(handlerExpr)) {
+    // Non-arrow handler (e.g., bare identifier): just erase bare reads
+    return eraseSignalReadsInNode(handlerExpr, symbols.all)
+  }
+
+  const fn = handlerExpr
+  const rewrites: Rewrite[] = []
+  const nodeStart = fn.getStart()
+
+  // Gather function-level shadows (parameters + var hoisting in body)
+  const fnShadowed = gatherFunctionShadows(fn, new Set<string>(), symbols.all)
+
+  function walkHandlerNode(node: ts.Node, shadowed: ReadonlySet<string>): void {
+    // Scope entry: nested function
+    if (
+      ts.isArrowFunction(node) ||
+      ts.isFunctionExpression(node) ||
+      ts.isFunctionDeclaration(node)
+    ) {
+      const nested = node as ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration
+      const newShadowed = gatherFunctionShadows(nested, shadowed, symbols.all)
+      const body =
+        ts.isArrowFunction(nested) || ts.isFunctionExpression(nested)
+          ? nested.body
+          : (nested as ts.FunctionDeclaration).body
+      if (body) {
+        if (ts.isBlock(body)) ts.forEachChild(body, (child) => walkHandlerNode(child, newShadowed))
+        else walkHandlerNode(body, newShadowed)
+      }
+      return
+    }
+
+    // Nested block: collect block-scoped shadows
+    if (ts.isBlock(node)) {
+      const newShadowed = gatherBlockShadows(node, shadowed, symbols.all)
+      ts.forEachChild(node, (child) => walkHandlerNode(child, newShadowed))
+      return
+    }
+
+    // Assignment detection (simple and compound) at statement level
+    if (ts.isExpressionStatement(node) && ts.isBinaryExpression(node.expression)) {
+      const { left: lhs, operatorToken, right: rhs } = node.expression
+      const op = operatorToken.kind
+      const isSimple = op === ts.SyntaxKind.EqualsToken
+      const binaryOp = compoundOpMap.get(op)
+      if ((isSimple || binaryOp !== undefined) && ts.isIdentifier(lhs) && !shadowed.has(lhs.text)) {
+        const name = lhs.text
+        if (symbols.writable.has(name)) {
+          const erasedRhs = eraseSignalReadsInNode(rhs, symbols.all)
+          rewrites.push({
+            start: node.expression.getStart(),
+            end: node.expression.getEnd(),
+            replacement: isSimple
+              ? `${name}.set(${erasedRhs})`
+              : `${name}.set(${name}() ${binaryOp} ${erasedRhs})`,
+          })
+          return
+        }
+        if (symbols.readonly.has(name)) {
+          diagnostics.push({
+            kind: 'error',
+            message: `Assignment to derived '${name}': deriveds are read-only. Use signal() for writable state, or refactor the mutation into the reactive graph via sync().`,
+            start: node.expression.getStart(),
+            end: node.expression.getEnd(),
+          })
+          return
+        }
+      }
+    }
+
+    // Assignment expression (arrow expression body, not wrapped in ExpressionStatement)
+    if (ts.isBinaryExpression(node)) {
+      const { left: lhs, operatorToken, right: rhs } = node
+      const op = operatorToken.kind
+      const isSimple = op === ts.SyntaxKind.EqualsToken
+      const binaryOp = compoundOpMap.get(op)
+      if ((isSimple || binaryOp !== undefined) && ts.isIdentifier(lhs) && !shadowed.has(lhs.text)) {
+        const name = lhs.text
+        if (symbols.writable.has(name)) {
+          const erasedRhs = eraseSignalReadsInNode(rhs, symbols.all)
+          rewrites.push({
+            start: node.getStart(),
+            end: node.getEnd(),
+            replacement: isSimple
+              ? `${name}.set(${erasedRhs})`
+              : `${name}.set(${name}() ${binaryOp} ${erasedRhs})`,
+          })
+          return
+        }
+        if (symbols.readonly.has(name)) {
+          diagnostics.push({
+            kind: 'error',
+            message: `Assignment to derived '${name}': deriveds are read-only. Use signal() for writable state, or refactor the mutation into the reactive graph via sync().`,
+            start: node.getStart(),
+            end: node.getEnd(),
+          })
+          return
+        }
+      }
+    }
+
+    // Bare read: reactive identifier in a value position, not shadowed
+    if (ts.isIdentifier(node) && symbols.all.has(node.text) && !shadowed.has(node.text)) {
+      const p = node.parent
+      if (ts.isCallExpression(p) && p.expression === node) return
+      if (ts.isPropertyAccessExpression(p) && (p.expression === node || p.name === node)) return
+      if (ts.isVariableDeclaration(p) && p.name === node) return
+      if (ts.isParameter(p) && p.name === node) return
+      if (ts.isShorthandPropertyAssignment(p)) return
+      if (ts.isPropertyAssignment(p) && p.name === node) return
+      if (ts.isImportSpecifier(p) || ts.isImportClause(p)) return
+      if (ts.isLabeledStatement(p) && p.label === node) return
+      rewrites.push({ start: node.getStart(), end: node.getEnd(), replacement: `${node.text}()` })
+      return
+    }
+
+    ts.forEachChild(node, (child) => walkHandlerNode(child, shadowed))
+  }
+
+  // Walk the handler body
+  const body = fn.body
+  if (ts.isBlock(body)) {
+    ts.forEachChild(body, (child) => walkHandlerNode(child, fnShadowed))
+  } else {
+    // Expression body
+    walkHandlerNode(body, fnShadowed)
+  }
+
+  // Apply rewrites to the full handler source text
+  const text = fn.getText()
+  const sorted = [...rewrites].sort((a, b) => b.start - a.start)
+  let result = text
+  for (const r of sorted) {
+    result = result.slice(0, r.start - nodeStart) + r.replacement + result.slice(r.end - nodeStart)
+  }
+  return result
+}
+
+/**
+ * Compute ThunkSource for a single binding hole.
+ * `holeExpr` is the TS expression node for the hole.
+ * `pos` is the classified position kind.
+ * For ConditionalBinding, recursively computes consequent/alternate thunks.
+ */
+function computeThunkSource(
+  holeExpr: ts.Expression,
+  pos: PosKind,
+  doc: Document,
+  symbols: ScriptSymbols,
+  diagnostics: NvDiagnostic[],
+): ThunkSource {
+  if (pos.kind === 'text') {
+    // May be a ConditionalBinding (ternary with html`` branches)
+    if (ts.isConditionalExpression(holeExpr)) {
+      const { condition, whenTrue, whenFalse } = holeExpr
+      const isHtmlTTE = (e: ts.Expression): e is ts.TaggedTemplateExpression =>
+        ts.isTaggedTemplateExpression(e) && ts.isIdentifier(e.tag) && e.tag.text === 'html'
+      const isNullish = (e: ts.Expression): boolean =>
+        e.kind === ts.SyntaxKind.NullKeyword ||
+        (ts.isIdentifier(e) && (e.text === 'null' || e.text === 'undefined'))
+      if (isHtmlTTE(whenTrue) && (isHtmlTTE(whenFalse) || isNullish(whenFalse))) {
+        const conditionSrc = eraseSignalReadsInNode(condition, symbols.all)
+        // Recursively compute thunks for branch bindings
+        const consequentResult = processHtmlTemplate(whenTrue, doc, symbols.all)
+        const consequentThunks = computeThunksForTemplate(whenTrue, doc, symbols, diagnostics)
+        void consequentResult
+        const alternateSrc = isHtmlTTE(whenFalse)
+          ? computeThunksForTemplate(whenFalse, doc, symbols, diagnostics)
+          : null
+        return {
+          kind: 'conditional',
+          conditionSrc,
+          consequent: consequentThunks,
+          alternate: alternateSrc,
+        }
+      }
+    }
+    // Regular text binding
+    return { kind: 'text', exprSrc: eraseSignalReadsInNode(holeExpr, symbols.all) }
+  }
+  if (pos.kind === 'attr') {
+    return { kind: 'attr', exprSrc: eraseSignalReadsInNode(holeExpr, symbols.all) }
+  }
+  if (pos.kind === 'prop') {
+    return { kind: 'prop', exprSrc: eraseSignalReadsInNode(holeExpr, symbols.all) }
+  }
+  // event
+  return { kind: 'event', handlerSrc: eraseHandlerExpr(holeExpr, symbols, diagnostics) }
+}
+
+/**
+ * Compute ThunkSource[] for all holes in a tagged-template expression.
+ */
+function computeThunksForTemplate(
+  tte: ts.TaggedTemplateExpression,
+  doc: Document,
+  symbols: ScriptSymbols,
+  diagnostics: NvDiagnostic[],
+): ThunkSource[] {
+  const template = tte.template
+  if (ts.isNoSubstitutionTemplateLiteral(template)) return []
+
+  const strings: string[] = [template.head.text]
+  const holeExprs: ts.Expression[] = []
+  for (const span of template.templateSpans) {
+    holeExprs.push(span.expression)
+    strings.push(span.literal.text)
+  }
+  const positions: PosKind[] = holeExprs.map((_, i) =>
+    classifyPosition(strings[i] ?? '', strings[i + 1] ?? ''),
+  )
+
+  return holeExprs.map((expr, i) =>
+    computeThunkSource(expr, positions[i] as PosKind, doc, symbols, diagnostics),
+  )
+}
+
+/**
+ * Extract the erased $script body source from a component's $script blocks.
+ * Uses the POST-preprocessMutationWrites source file so the text is already erased.
+ */
+function extractScriptBodySource(componentFn: ts.ArrowFunction): string {
+  if (!ts.isBlock(componentFn.body)) return ''
+  const parts: string[] = []
+  for (const stmt of componentFn.body.statements) {
+    if (!ts.isExpressionStatement(stmt)) continue
+    const call = stmt.expression
+    if (!ts.isCallExpression(call) || !isNvConstruct(call, '$script')) continue
+    const fn = call.arguments[0]
+    if (!fn || !ts.isArrowFunction(fn) || !ts.isBlock(fn.body)) continue
+    for (const s of fn.body.statements) {
+      parts.push(s.getText())
+    }
+  }
+  return parts.join('\n')
+}
+
+/**
+ * Extract module scope: top-level imports and statements that are NOT $component
+ * variable declarations. Returned verbatim from the processed source.
+ */
+function extractModuleScope(sf: ts.SourceFile): string {
+  const parts: string[] = []
+  ts.forEachChild(sf, (node) => {
+    // Include import declarations verbatim
+    if (ts.isImportDeclaration(node)) {
+      parts.push(node.getText())
+      return
+    }
+    // Skip $component variable statements
+    if (ts.isVariableStatement(node)) {
+      const isComponent = node.declarationList.declarations.some(
+        (decl) =>
+          decl.initializer &&
+          ts.isCallExpression(decl.initializer) &&
+          isNvConstruct(decl.initializer, '$component'),
+      )
+      if (isComponent) return
+      parts.push(node.getText())
+      return
+    }
+    // Include all other top-level statements (expression statements, etc.)
+    if (
+      !ts.isVariableStatement(node) &&
+      !ts.isImportDeclaration(node) &&
+      node.kind !== ts.SyntaxKind.EndOfFileToken
+    ) {
+      parts.push(node.getText())
+    }
+  })
+  return parts.join('\n')
+}
+
+// ── Build-pipeline API ────────────────────────────────────────────────────────
+
+/**
+ * Parse a .nv source for the build pipeline.
+ *
+ * Like parseNvFile, but also computes the `emit` payload on each result:
+ *   - scriptBody: erased $script statements
+ *   - bindingThunks: per-binding erased thunk source (index-aligned with ir.bindings)
+ *   - moduleScope: top-level imports + non-$component statements
+ *
+ * Render-hole erasure (§4):
+ *   - Non-event holes: bare-read erasure via eraseSignalReadsInNode
+ *   - Event handler holes: bare-read + mutation-write erasure via eraseHandlerExpr
+ *
+ * @param source    Raw .nv source text
+ * @param fileName  File name (for TS parser)
+ * @param doc       jsdom Document (build-time; used for HTML parsing)
+ */
+export function parseNvFileForEmit(
+  source: string,
+  fileName: string,
+  doc: Document,
+): NvComponentResult[] {
+  const diagnostics: NvDiagnostic[] = []
+  const processed = preprocessMutationWrites(source, fileName, diagnostics)
+
+  const sf = ts.createSourceFile(
+    fileName,
+    processed,
+    ts.ScriptTarget.ES2022,
+    true,
+    ts.ScriptKind.TS,
+  )
+
+  const moduleScope = extractModuleScope(sf)
+  const results: NvComponentResult[] = []
+
+  ts.forEachChild(sf, (node) => {
+    if (!ts.isVariableStatement(node)) return
+    for (const decl of node.declarationList.declarations) {
+      if (!ts.isIdentifier(decl.name)) continue
+      if (!decl.initializer || !ts.isCallExpression(decl.initializer)) continue
+      if (!isNvConstruct(decl.initializer, '$component')) continue
+      const componentFn = decl.initializer.arguments[0]
+      if (!componentFn || !ts.isArrowFunction(componentFn)) continue
+
+      const name = decl.name.text
+      const symbols = extractScriptSymbols(componentFn)
+      const renderResult = extractRenderTemplate(componentFn, doc, symbols)
+      if (renderResult === null) continue
+
+      const scriptBody = extractScriptBodySource(componentFn)
+
+      // Find the $render template expression to compute thunks
+      const emitDiagnostics: NvDiagnostic[] = []
+      let bindingThunks: ThunkSource[] = []
+      if (ts.isBlock(componentFn.body)) {
+        for (const stmt of componentFn.body.statements) {
+          if (!ts.isExpressionStatement(stmt)) continue
+          const call = stmt.expression
+          if (!ts.isCallExpression(call) || !isNvConstruct(call, '$render')) continue
+          const fn = call.arguments[0]
+          if (!fn || !ts.isArrowFunction(fn)) continue
+          const body = fn.body
+          if (
+            !ts.isTaggedTemplateExpression(body) ||
+            !ts.isIdentifier(body.tag) ||
+            body.tag.text !== 'html'
+          )
+            continue
+          bindingThunks = computeThunksForTemplate(body, doc, symbols, emitDiagnostics)
+          break
+        }
+      }
+
+      const allDiagnostics = [...diagnostics, ...emitDiagnostics]
+
+      results.push({
+        name,
+        ir: renderResult.ir,
+        scriptSignals: [...symbols.writable, ...symbols.readonly],
+        style: extractStyleInfo(componentFn),
+        verdicts: renderResult.verdicts,
+        diagnostics: allDiagnostics,
+        emit: {
+          scriptBody,
+          bindingThunks,
+          moduleScope,
+        },
       })
     }
   })
