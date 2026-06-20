@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**; **Compiler back-end Phase 1 erasure design APPROVED, scope locked [2026-06-19]**; **PK = documentation only; GitHub authoritative for code [2026-06-19]**; **Phase 1a LANDED: read/write erasure analyzer placed, 235→250 tests, cross-pass seam confirmed [2026-06-19]**; **Phase 1b-1 LANDED: emitted-mount placer placed, 250→262 tests, all 5 §5 differential gate cases green against real interpreter [2026-06-19]**; **Phase 1b-2 LANDED: Child + Conditional added to emitter, 262→272 tests, all gate cases green, 1000-flip no-leak confirmed, direct-capture preserved [2026-06-19]**; **Phase 2 CLOSED: step-3 hook emission landed, 272→282 tests, FALSE-policy sites emit setCompilerEquals(fn, false), first specialization to reach compiled output; HC perturbation finding carried forward as createSignals tripwire companion [2026-06-19]**; **`.nv` front-end SCOPED: syntax + component model settled ($component/$script/$style/$render/holes); TS-API-delegation parser strategy; FE-equivalence seam carries all back-end proofs; renderer-session handoff pending §7 confirmations [2026-06-19]**; **`.nv` front-end scope APPROVED: all four §7 confirmations resolved (IR structural comparison, TS-API delegation + mutation-write rewrite ordering load-bearing, PoC binding set only); renderer-session handoff ready [2026-06-19]**; **`.nv` front-end IMPLEMENTED: nv-parser.ts ~770 lines, 48 FE-equivalence + 34 interpreter tests green, erasure sound (mutation-write RHS fix, compound desugaring, scope-aware shadowing closed); pending CC placement [2026-06-19]**; **`.nv` front-end PLACED: nv-parser.ts in-repo, 48 FE-equivalence tests live against real seam, 330/330 green, stale v0-limitations comment corrected [2026-06-19]**; **Real-browser gate PASSED (Chromium): 12/12, both halves, both flags settled (event dispatch + sentinel-strip); async scheduler confirmed lazy; Phase 0 ROADMAP CLOSED; cross-engine tripwire open [2026-06-19]**; **Row-churn tripwires RESOLVED [2026-06-20]: #1 createSignals CLEARED structural-accepted (derived-dilution refuted H — gap plateaus ~5x, persistent but minority of full-row cost; allocation-dominated, WeakMap-share not further isolable by sampling profiler, ablation deliberately not run); #2 FALSE-heavy CHARACTERIZED watch-item (+8.2%→+18.6%/row real-in-construction: HC-transition + read-pollution tax, contained at realistic 0–1 FALSE/row, reopen on real-app FALSE-heavy evidence with a steady-state-update harness); kind-split decline STRENGTHENED not fired; `_compilerEquals` null-preinit mitigation named-and-declined (§9 field-width locked); cross-engine tripwire still OPEN**; **Cross-engine tripwire CLOSED [2026-06-20]: parse-divergence flag retired — sentinel-strip + event dispatch verified identical across Blink/Gecko/WebKit (36/36, zero skips, both back-ends), regex sentinel approach confirmed not parser-dependent. ALL THREE perf-validation-phase tripwires now resolved (#1 cleared, #2 characterized watch-item, #3 closed).**)_
+_Last updated: 2026-06-20 (Contract **v0.4.2** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**; **Compiler back-end Phase 1 erasure design APPROVED, scope locked [2026-06-19]**; **PK = documentation only; GitHub authoritative for code [2026-06-19]**; **Phase 1a LANDED: read/write erasure analyzer placed, 235→250 tests, cross-pass seam confirmed [2026-06-19]**; **Phase 1b-1 LANDED: emitted-mount placer placed, 250→262 tests, all 5 §5 differential gate cases green against real interpreter [2026-06-19]**; **Phase 1b-2 LANDED: Child + Conditional added to emitter, 262→272 tests, all gate cases green, 1000-flip no-leak confirmed, direct-capture preserved [2026-06-19]**; **Phase 2 CLOSED: step-3 hook emission landed, 272→282 tests, FALSE-policy sites emit setCompilerEquals(fn, false), first specialization to reach compiled output; HC perturbation finding carried forward as createSignals tripwire companion [2026-06-19]**; **`.nv` front-end SCOPED: syntax + component model settled ($component/$script/$style/$render/holes); TS-API-delegation parser strategy; FE-equivalence seam carries all back-end proofs; renderer-session handoff pending §7 confirmations [2026-06-19]**; **`.nv` front-end scope APPROVED: all four §7 confirmations resolved (IR structural comparison, TS-API delegation + mutation-write rewrite ordering load-bearing, PoC binding set only); renderer-session handoff ready [2026-06-19]**; **`.nv` front-end IMPLEMENTED: nv-parser.ts ~770 lines, 48 FE-equivalence + 34 interpreter tests green, erasure sound (mutation-write RHS fix, compound desugaring, scope-aware shadowing closed); pending CC placement [2026-06-19]**; **`.nv` front-end PLACED: nv-parser.ts in-repo, 48 FE-equivalence tests live against real seam, 330/330 green, stale v0-limitations comment corrected [2026-06-19]**; **Real-browser gate PASSED (Chromium): 12/12, both halves, both flags settled (event dispatch + sentinel-strip); async scheduler confirmed lazy; Phase 0 ROADMAP CLOSED; cross-engine tripwire open [2026-06-19]**; **Row-churn tripwires RESOLVED [2026-06-20]: #1 createSignals CLEARED structural-accepted (derived-dilution refuted H — gap plateaus ~5x, persistent but minority of full-row cost; allocation-dominated, WeakMap-share not further isolable by sampling profiler, ablation deliberately not run); #2 FALSE-heavy CHARACTERIZED watch-item (+8.2%→+18.6%/row real-in-construction: HC-transition + read-pollution tax, contained at realistic 0–1 FALSE/row, reopen on real-app FALSE-heavy evidence with a steady-state-update harness); kind-split decline STRENGTHENED not fired; `_compilerEquals` null-preinit mitigation named-and-declined (§9 field-width locked); cross-engine tripwire still OPEN**; **Cross-engine tripwire CLOSED [2026-06-20]: parse-divergence flag retired — sentinel-strip + event dispatch verified identical across Blink/Gecko/WebKit (36/36, zero skips, both back-ends), regex sentinel approach confirmed not parser-dependent. ALL THREE perf-validation-phase tripwires now resolved (#1 cleared, #2 characterized watch-item, #3 closed).**; **ListBinding LANDED [2026-06-20]: both back-ends, 54 browser + 340 unit, tsc clean; reactive-item + correct-simple reconciler + error-route. Required core `getOwner`/`runWithOwner` (owner-context redirection for per-item roots; observation-neutral) → CONTRACT v0.4.1 → v0.4.2 (§6.1 + §11). First at-scale consumer of the §8.5.4 effect-write path. Process note: unescalated core/§6 change, approved post-hoc, surface-before-landing next time.**)_
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state (Clean/Check/Dirty)
@@ -154,8 +154,11 @@ _Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified;
 - **Renderer/templating stream (stream 3) open.** IR contract: `TemplateShape`
   (static HTML + `NodePath[]`, no runtime sentinel scanning) + six PoC binding
   kinds (TextBinding, AttrBinding, PropBinding, EventBinding, ChildBinding [v0
-  primitives-only], ConditionalBinding); ListBinding + SyncBinding designed-and-
-  deferred. **All PoC DOM-mutation bindings → `effect`** (a DOM write is a side
+  primitives-only], ConditionalBinding); ~~ListBinding + SyncBinding designed-and-
+  deferred~~ — **ListBinding LANDED 2026-06-20** (both back-ends). Keyed,
+  reactive-item, correct-simple reconciler (LIS deferred), terminal-`.map`
+  surface, error-route on key collision. Added core `getOwner`/`runWithOwner`
+  (contract v0.4.2). SyncBinding still deferred (throws at emit). **All PoC DOM-mutation bindings → `effect`** (a DOM write is a side
   effect; `derived` would violate purity, `sync` is for reactive→signal writes).
   `sync` reserved for SyncBinding's DOM→signal write-back (deferred). No `derived`
   in binding plumbing. Disposal: one `createRoot` per mounted region (§6);
@@ -2683,3 +2686,64 @@ retired engine-agnostically (Chromium scope → cross-engine scope).
 perf-validation-phase tripwires are now resolved.** The phase's deferred bets are
 fired and logged; no redesign triggered, no code change beyond the harness and
 the Playwright project config.
+
+### 2026-06-20 — ListBinding LANDED (both back-ends); core gains `getOwner`/`runWithOwner` → contract v0.4.2
+
+**Lands** ListBinding per the soundness spec (reactive-item, correct-simple
+reconciler, error-route on key collision, terminal-`.map` surface, immutable-item
+contract, reactive index). Both back-ends (interpreter `wireList` + emitter list
+case) through the same IR. 54/54 browser tests (TC-10 a–j on both back-ends incl.
+node-identity, reorder, key-collision error-route, unmount no-leak, nested-list
+cascade), 340/340 unit, `tsc --strict` clean. Architect-verified by reading the
+placed files, not the CC summary.
+
+**Core API addition: `getOwner` / `runWithOwner` (contract v0.4.1 → v0.4.2).**
+- **Spec gap (architect-owned).** The ListBinding spec §4 said item roots get their
+  own `createRoot` and are disposed via parent `onCleanup`, but did not work out
+  that `createRoot` *inside the reconcile effect's compute* parents item roots to
+  the effect (`addChild(currentOwner=effect, root)`). §6's dispose-children-before-
+  re-run then destroys all item roots on every reconcile — a full rebuild, killing
+  reactive-item and node identity. The spec under-specified the ownership trap.
+- **Fix.** `getOwner()` captures the outer mount scope at `wireList` time;
+  per-item `createRoot` is wrapped in `runWithOwner(listOwner, …)` so item roots
+  are **siblings** of the reconcile effect (children of the mount root), surviving
+  its re-runs. This is the standard reconciler ownership pattern (Solid has the
+  same primitives) and is genuinely unavoidable: `createRoot` unconditionally uses
+  `currentOwner`, so redirecting ownership away from the effect requires a core
+  mechanism. No alternative avoids a core addition.
+- **Soundness.** `runWithOwner` swaps `currentOwner` only, never `currentObserver`
+  — ownership and tracking are orthogonal (§6). It changes **no** observation rule
+  and adds **no** reactive primitive; the two utilities are peers of
+  `createRoot`/`onCleanup`. Documented in new §6.1 + §11. Version bump v0.4.2.
+- **Process note (discipline, not a redo).** This was an unescalated `core.ts`
+  change touching §6 (a locked-invariant area). The outcome is correct and is
+  approved here as architect, post-hoc. The correct process was to surface the
+  ownership trap before landing the core addition, per the escalation rule
+  ("touch §6/§1 → surface, don't decide in-stream"). Recorded so it does not recur.
+
+**Reconcile soundness confirmed by reading (matches the cleared §5 design):**
+- Reconcile effect's **only** tracked read is `items()`; kept-key change detection
+  uses `Object.is(record.lastValue, item)` on a plain field, never `valueSig()`,
+  so the effect does not over-subscribe to per-item signals.
+- `valueSig.set` / `indexSig.set` are the §8.5.4 non-enumerable-dynamic effect-
+  writes (depth-1, acyclic) cleared in the spec. **ListBinding is the first at-
+  scale consumer of the §8.5.4 effect-write path** — contract text already
+  sanctions it; no §8.5.4 edit needed.
+- Duplicate-key throw fires in the dedup loop **before** any DOM mutation, so it
+  error-routes from a clean (unmutated) state; caught by `errorBoundary` (TC-10h).
+- Double-dispose of item roots (via wireList `onCleanup` and `disposeChildrenOf`
+  of the mount root) is idempotent-safe via the `isDisposed` guard; TC-10i/j
+  assert `observerCount === 0` non-vacuously.
+
+**Minor follow-ups (non-blocking):**
+- TC-10g reorder identity uses `lisAfter.some(li => lisBefore.includes(li))` — a
+  weak check (passes on a single reused node). Full identity is proven by TC-10f;
+  tighten TC-10g to all-nodes-reused when convenient.
+- `core.ts` header still reads "Contract: …v0.4" — update to v0.4.2 in the same
+  pass.
+
+**Deferred, unchanged:** LIS-Ivi move-minimization (correct-simple reconciler
+shipped; gate on the row-churn harness if reorder cost shows). `flatMap` /
+non-terminal `.map` (out of scope). SyncBinding (still throws at emit time).
+
+**Contract impact.** §6.1 added, §11 extended, title v0.4.1 → v0.4.2.

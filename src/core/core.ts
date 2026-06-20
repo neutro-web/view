@@ -1,6 +1,6 @@
 /**
  * nv Reactive Core — Runtime Implementation
- * Contract: nv-reactive-core-contract.md v0.4
+ * Contract: nv-reactive-core-contract.md v0.4.2
  * Workstream: (1) Runtime — correctness phase, no perf tuning
  *
  * Key design points:

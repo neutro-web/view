@@ -1,4 +1,4 @@
-# nv Reactive Core — Runtime Contract (v0.4.1)
+# nv Reactive Core — Runtime Contract (v0.4.2)
 
 > **Status:** Design contract. Pins the reactive-core semantics that everything
 > else in `@neutro/view` (nv) depends on. This document is the fixed target for
@@ -400,6 +400,34 @@ orthogonal and MUST NOT be conflated.
 > dispose; it does not know about the DOM. (This keeps the agnostic core
 > genuinely agnostic.)
 
+### 6.1 Owner-context capture and redirection (`getOwner` / `runWithOwner`)
+
+The ambient owner is normally the computation currently running. Some consumers
+must create owned scopes under a *different* owner than the one running — the
+canonical case is a **list reconciler**: its per-item roots are created inside a
+reconcile `effect`, but they must outlive that effect's re-runs, so they must be
+owned by the reconcile effect's *parent* (a sibling of the effect), not by the
+effect itself. (If owned by the effect, §6's "dispose owned children before each
+re-run" rule would tear down every item root on every reconcile — turning a keyed
+update into a full rebuild.)
+
+Two utilities expose the owner context for this:
+
+- `getOwner()` → returns an opaque handle to the current owner scope (or null
+  outside any scope). Callers cannot inspect it.
+- `runWithOwner(owner, fn)` → runs `fn` with the ambient owner set to `owner`;
+  any `createRoot` / `derived` / `effect` / `onCleanup` created inside `fn` is
+  owned by `owner`. Restores the previous owner on return. `owner = null` detaches
+  (scopes created inside are unowned and must be disposed manually).
+
+**These manipulate the owner context only — never the tracking context.**
+Ownership and propagation are orthogonal (§6 opening). `runWithOwner` does not
+change what any computation observes; a reconcile effect redirecting item-root
+ownership still tracks only its own reads. This is why owner redirection is a §6
+(lifetime) concern, not a §4/§5 (observation) one, and adds no new reactive
+primitive — these are peers of `createRoot`/`onCleanup`, not of the four locked
+primitives (§1).
+
 ---
 
 ## 7. Equality semantics (and the asymmetry that matters)
@@ -796,6 +824,11 @@ The core exposes (names provisional; semantics fixed):
 - `untrack(fn)` → §8.
 - `createRoot(fn)` → establishes a root owner; returns a disposer (§6).
 - `onCleanup(fn)` → registers a cleanup on the current owner (§6).
+- `getOwner()` → opaque handle to the current owner scope, or null (§6.1).
+- `runWithOwner(owner, fn)` → run `fn` with the ambient owner set to `owner`;
+  owned scopes created inside are parented to it. Owner context only — does not
+  affect tracking (§6.1). The primitive a list reconciler needs to create
+  per-item roots as siblings of, not children of, its reconcile effect.
 - `errorBoundary(handler, fn)` → registers an error boundary on the current owner
   scope; errors from within `fn`'s subtree route to `handler` (§5.4.4).
 
