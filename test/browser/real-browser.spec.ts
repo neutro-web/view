@@ -313,32 +313,48 @@ test('TC-04 + FLAG-1: EventBinding — real click fires handler, downstream DOM 
     flushSync()
 
     const btnA = parentA.querySelector('button') as HTMLButtonElement
+    const btnB = parentB.querySelector('button') as HTMLButtonElement
 
-    // Dispatch via the interpreter's mounted button
+    // Dispatch on interpreter button; both spans update via shared signal.
     btnA.dispatchEvent(new Event('click'))
     flushSync()
 
     // TextBinding replaced the comment with a text node inside <span>
     const spanTextA = parentA.querySelector('span')?.textContent
     const spanTextB = parentB.querySelector('span')?.textContent
+    const clicksAfterA = clicks()
+
+    // Dispatch on emitter button to confirm emitter's EventBinding also wires the listener.
+    // spanB after this should reflect clicks=2 (both dispatches fired the same handler).
+    btnB.dispatchEvent(new Event('click'))
+    flushSync()
+    const spanTextBAfterB = parentB.querySelector('span')?.textContent
 
     parentA.remove()
     parentB.remove()
 
     return {
-      clicksAfterA: clicks(),
+      clicksAfterA,
+      clicksAfterB: clicks(),
       spanA: spanTextA,
       spanB: spanTextB,
-      dispatchWorked: clicks() === 1,
+      spanBAfterB: spanTextBAfterB,
+      dispatchWorked: clicksAfterA === 1,
+      emitterDispatchWorked: clicks() === 2,
     }
   })
 
   expect(
     result.dispatchWorked,
-    `dispatchEvent did not fire handler (clicks=${result.clicksAfterA})`,
+    `interpreter dispatchEvent did not fire handler (clicks=${result.clicksAfterA})`,
   ).toBe(true)
   expect(result.spanA).toBe('1')
   expect(result.spanB).toBe('1')
+  expect(
+    result.emitterDispatchWorked,
+    `emitter dispatchEvent did not fire handler (clicks=${result.clicksAfterB})`,
+  ).toBe(true)
+  expect(result.spanBAfterB).toBe('2')
 })
 
 test('TC-04: real Playwright .click() fires handler + DOM updates (true real interaction)', async ({
@@ -649,62 +665,85 @@ test('TC-08: Multi-binding (Attr + Text) — interpreter vs emitter', async ({ p
 
 // ── TC-09: ChildBinding non-primitive rejection — real browser ────────────────
 
-test('TC-09: ChildBinding non-primitive → runtime error thrown in real browser', async ({
+test('TC-09: ChildBinding non-primitive → error-routes in real browser (both back-ends)', async ({
   page,
 }) => {
   await loadNv(page)
 
+  // The effect inside wireChild throws when given a DOM node. Without an error
+  // boundary, routeErrorFrom falls through to console.error (the global fallback).
+  // Intercept console.error to assert both back-ends route the error correctly
+  // rather than silently accepting a non-primitive as text.
   const result = await page.evaluate(() => {
-    const { signal, flushSync, mount } = window.__nv
+    const { flushSync, mount, emitMount } = window.__nv
 
-    const domNode = document.createElement('span')
-    const ir = {
-      id: 'child-reject-tc09',
-      shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0, 0]] },
-      bindings: [
-        { kind: 'child' as const, pathIndex: 0, expr: () => domNode as unknown as string },
-      ],
+    const errors: string[] = []
+    const origConsoleError = console.error
+    console.error = (...args: unknown[]) => {
+      errors.push(args.map(String).join(' '))
     }
 
-    const parent = document.createElement('div')
-    document.body.appendChild(parent)
-    let threw = false
-    let errorMsg = ''
-
-    try {
-      mount(ir, parent, document)
-      flushSync()
-    } catch (e) {
-      threw = true
-      errorMsg = e instanceof Error ? e.message : String(e)
+    const makeIr = (id: string) => {
+      const domNode = document.createElement('span')
+      return {
+        id,
+        shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0, 0]] },
+        bindings: [
+          { kind: 'child' as const, pathIndex: 0, expr: () => domNode as unknown as string },
+        ],
+      }
     }
 
-    parent.remove()
+    const parentA = document.createElement('div')
+    const parentB = document.createElement('div')
+    document.body.appendChild(parentA)
+    document.body.appendChild(parentB)
 
-    // The error is caught by the reactive runtime and re-thrown via flushSync
-    // OR thrown directly — accept either path.
-    return { threw, errorMsg }
+    // Interpreter path
+    mount(makeIr('child-reject-tc09a'), parentA, document)
+    flushSync()
+
+    // Emitter path
+    const { mountFn } = emitMount(makeIr('child-reject-tc09b'))
+    mountFn(parentB, document)
+    flushSync()
+
+    console.error = origConsoleError
+    parentA.remove()
+    parentB.remove()
+
+    return { errors }
   })
 
-  // The test passes if either the error was thrown (throw path) or the runtime
-  // handled it via the error boundary mechanism (non-primitive is a logic error).
-  // Flag if neither — that would mean silently accepting a DOM node as text.
-  const handledCorrectly =
-    result.threw ||
-    result.errorMsg.includes('non-primitive') ||
-    result.errorMsg.includes('ChildBinding')
-  // Both back-ends produce an [nv] error log (seen in jsdom tests) — the error
-  // IS thrown into the reactive graph and caught there. Accept graceful handling.
-  expect(true).toBe(true) // non-primitive rejection: real browser matches jsdom behavior
+  // Both back-ends must route the non-primitive error to console.error.
+  // Accepting a DOM node silently would be a silent data corruption — hard stop.
+  const interpError = result.errors.find(
+    (e) => e.includes('ChildBinding') || e.includes('non-primitive'),
+  )
+  const emitError = result.errors.filter(
+    (e) => e.includes('ChildBinding') || e.includes('non-primitive'),
+  )
+  expect(
+    interpError,
+    `TC-09: interpreter did not route non-primitive ChildBinding error. Logged:\n${result.errors.join('\n')}`,
+  ).toBeTruthy()
+  expect(
+    emitError.length >= 2,
+    `TC-09: expected error from both back-ends, got ${emitError.length}. Logged:\n${result.errors.join('\n')}`,
+  ).toBe(true)
 })
 
 // ── Write-driven update: flushSync scheduler in real event loop ───────────────
 
-test('scheduler: flushSync drains synchronously in real browser event loop', async ({ page }) => {
+// FLAG-1 (async-scheduler): signal writes batch until flushSync — real browser event loop.
+// Settling: duringBatch must still show the OLD value (write is pending, not immediately applied),
+// and afterFlush must show the NEW value. If duringBatch === 'after', the scheduler is
+// synchronous (not batched) in the real event loop — a behavioral divergence from the spec.
+test('scheduler: signal writes batch until flushSync in real browser event loop', async ({
+  page,
+}) => {
   await loadNv(page)
 
-  // Confirm flushSync behaves the same in a real event loop as under jsdom.
-  // This settles the async-scheduler flag from the task brief.
   const result = await page.evaluate(() => {
     const { signal, flushSync, mount } = window.__nv
 
@@ -724,7 +763,7 @@ test('scheduler: flushSync drains synchronously in real browser event loop', asy
     const before = parent.querySelector('span')?.textContent
 
     val.set('after')
-    // WITHOUT flushSync — DOM should not yet reflect the write (batch is pending)
+    // Read DOM WITHOUT flushing — write is batched, DOM must still show 'before'.
     const duringBatch = parent.querySelector('span')?.textContent
 
     flushSync()
@@ -735,7 +774,11 @@ test('scheduler: flushSync drains synchronously in real browser event loop', asy
   })
 
   expect(result.before).toBe('before')
-  // duringBatch may or may not be updated depending on whether the scheduler
-  // runs synchronously without flushSync — the key claim is afterFlush is correct.
-  expect(result.afterFlush, 'flushSync drains writes in real browser event loop').toBe('after')
+  // Core claim: the scheduler is lazy — writes do NOT flush automatically in the
+  // real browser event loop. DOM must still show 'before' until flushSync() is called.
+  expect(
+    result.duringBatch,
+    'scheduler: write must be pending (duringBatch should still be "before") — if "after", scheduler is not batching in the real event loop',
+  ).toBe('before')
+  expect(result.afterFlush, 'flushSync must drain the pending write').toBe('after')
 })
