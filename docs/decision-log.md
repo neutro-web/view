@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**; **Compiler back-end Phase 1 erasure design APPROVED, scope locked [2026-06-19]**; **PK = documentation only; GitHub authoritative for code [2026-06-19]**; **Phase 1a LANDED: read/write erasure analyzer placed, 235→250 tests, cross-pass seam confirmed [2026-06-19]**; **Phase 1b-1 LANDED: emitted-mount placer placed, 250→262 tests, all 5 §5 differential gate cases green against real interpreter [2026-06-19]**; **Phase 1b-2 LANDED: Child + Conditional added to emitter, 262→272 tests, all gate cases green, 1000-flip no-leak confirmed, direct-capture preserved [2026-06-19]**; **Phase 2 CLOSED: step-3 hook emission landed, 272→282 tests, FALSE-policy sites emit setCompilerEquals(fn, false), first specialization to reach compiled output; HC perturbation finding carried forward as createSignals tripwire companion [2026-06-19]**; **`.nv` front-end SCOPED: syntax + component model settled ($component/$script/$style/$render/holes); TS-API-delegation parser strategy; FE-equivalence seam carries all back-end proofs; renderer-session handoff pending §7 confirmations [2026-06-19]**)_
+_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**; **Compiler back-end Phase 1 erasure design APPROVED, scope locked [2026-06-19]**; **PK = documentation only; GitHub authoritative for code [2026-06-19]**; **Phase 1a LANDED: read/write erasure analyzer placed, 235→250 tests, cross-pass seam confirmed [2026-06-19]**; **Phase 1b-1 LANDED: emitted-mount placer placed, 250→262 tests, all 5 §5 differential gate cases green against real interpreter [2026-06-19]**; **Phase 1b-2 LANDED: Child + Conditional added to emitter, 262→272 tests, all gate cases green, 1000-flip no-leak confirmed, direct-capture preserved [2026-06-19]**; **Phase 2 CLOSED: step-3 hook emission landed, 272→282 tests, FALSE-policy sites emit setCompilerEquals(fn, false), first specialization to reach compiled output; HC perturbation finding carried forward as createSignals tripwire companion [2026-06-19]**; **`.nv` front-end SCOPED: syntax + component model settled ($component/$script/$style/$render/holes); TS-API-delegation parser strategy; FE-equivalence seam carries all back-end proofs; renderer-session handoff pending §7 confirmations [2026-06-19]**; **`.nv` front-end scope APPROVED: all four §7 confirmations resolved (IR structural comparison, TS-API delegation + mutation-write rewrite ordering load-bearing, PoC binding set only); renderer-session handoff ready [2026-06-19]**)_
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state (Clean/Check/Dirty)
@@ -2280,3 +2280,35 @@ real-browser. Live files: `src/renderer/{ir,html-tag,comparator,interpreter}.ts`
 **Status.** Scoped, syntax + component model settled. Renderer-session handoff pending the §7
 review confirmations (IR-comparison normalization, TS-API delegation, mutation-write-rewrite
 ordering before erasure, PoC-binding-set-only).
+
+---
+
+### 2026-06-19 — `.nv` front-end review confirmations resolved; scope APPROVED
+
+**Supplements** the same-day "`.nv` front-end scoped; syntax + component model settled" entry.
+That entry settled syntax; this resolves the four approach confirmations and marks the scope
+APPROVED for the renderer-session handoff.
+
+1. **IR-comparison granularity — structurally identical at the IR-tree level, not raw bytes.**
+   Same `NodePath[]`, same binding kinds in the same positions, same binding-field shapes, and
+   `TemplateShape.html` equal *after the comparator's normalization* (whitespace, attribute order,
+   self-closing). Whitespace/quoting differences that parse to the same tree are serialization
+   noise, not drift. Reuse the renderer comparator's `structurallyEqual` normalization (same as
+   the back-end differential gate) — catches real drift without false-failing.
+
+2. **`$script` body parsing via TS compiler API — confirmed.** TS API parses bodies; the `.nv`
+   parser owns only the nv constructs. **Coupled to (3):** mutation-write is invalid TS, so the
+   `.nv` parser must rewrite it before a body reaches the TS API. TS-API delegation works
+   *because* mutation-write is rewritten first — the ordering is load-bearing for the delegation,
+   not only for erasure.
+
+3. **Mutation-write rewrite ordering — confirmed: before Phase 1a erasure analysis and before
+   TS-API body parsing.** The analyzer sees a normal write site; the sync-target DECLINE check
+   (Phase 1a §4) still fires on a mutation-write to a sync-target signal — same conflict, new
+   syntax.
+
+4. **PoC binding set only — confirmed.** Six bindings; **List/Sync explicitly scoped out** of
+   this phase (they follow soon after, their own work).
+
+**Status.** `.nv` front-end scope APPROVED. Renderer-session handoff ready (scope doc + live
+files). Contract impact: none.
