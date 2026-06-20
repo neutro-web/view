@@ -887,9 +887,11 @@ export function parseNvFile(source: string, fileName: string, doc: Document): Nv
  *   - Mutation-write erasure (assignment → .set()) for writable signals
  *   - Diagnostic for assignment to derived
  *
- * Halts (throws) if the handler body is complex in a way that can't be erased
- * soundly: e.g., a destructuring assignment target, or non-expression-statement
- * binary expressions that aren't top-level assignments.
+ * Known gap: destructuring assignment targets (`[a, b] = ...`, `({ x } = ...)`)
+ * are not detected as signal writes and fall through to bare-read erasure only —
+ * the statement survives unchanged. Fails safe (no false-positive .set()), but
+ * a destructuring write to a signal name is silently not rewritten. Document the
+ * limitation at the authoring surface; no plan to fix in v1.
  *
  * Returns the erased source text of the ENTIRE handler expression.
  */
