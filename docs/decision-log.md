@@ -84,7 +84,7 @@ _Last updated: 2026-06-20 (Contract **v0.4.2** — runtime correctness verified;
   `drainSyncPhase` defects fixed during repo migration — cap off-by-one (exactly-
   MAX_CASCADE now settles cleanly) and the reactive/external counter split (external
   bursts no longer capped by the reactive budget; see §8.5.4 and the dated entry).
-  36/36 still green against the patched core.
+  36/36 still green against the patched core (36/36 at that time).
   **Architect review closed (2026-06-15):** two correctness hardenings (sync-target
   Signal guard in `nodeSet`; `resolveTarget` untracking invariant documented) and the
   full set of coverage gaps were landed and verified. The run-once invariant (§1.3) is
