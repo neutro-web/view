@@ -3,3 +3,6 @@
 PK/
 dist/
 node_modules/
+test/browser/dist/
+test/browser/test-results/
+test/browser/playwright-report/
