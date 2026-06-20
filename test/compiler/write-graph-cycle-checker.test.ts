@@ -159,9 +159,9 @@ test('READ: untrack() exclusion — reads inside untrack are NOT reactive', () =
   expect(result.signals.size, `only A should be in reads, not B: ${[...result.signals]}`).toBe(1)
   expect([...result.signals].some((id) => idContains(id, 'A'))).toBe(true)
   expect(
-    ![...result.signals].some((id) => idContains(id, 'B')),
+    [...result.signals].some((id) => idContains(id, 'B')),
     'B (untracked) must NOT be in reads',
-  ).toBe(true)
+  ).toBe(false)
 })
 
 test('READ: nested arrow function in source body → PARTIAL, not SIGNALS', () => {

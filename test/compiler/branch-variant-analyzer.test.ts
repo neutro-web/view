@@ -152,9 +152,9 @@ test('DECLARED: untrack exclusion — reads inside untrack not in union', () => 
   const [union] = [verdicts[0]!] as [BranchVariantVerdict & { kind: 'DECLARED' }]
   if (union.kind === 'DECLARED') {
     expect(
-      ![...union.declaredUnion].some((id) => idContains(id, 'b')),
+      [...union.declaredUnion].some((id) => idContains(id, 'b')),
       'b (untracked) must NOT be in declaredUnion',
-    ).toBe(true)
+    ).toBe(false)
   }
 })
 

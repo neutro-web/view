@@ -649,10 +649,9 @@ const C = $component(() => {
     err !== undefined,
     `Expected error diagnostic for 'double'. Got: ${JSON.stringify(diags)}`,
   ).toBe(true)
-  expect(
-    !processed.includes('double.set'),
-    `Derived write must not emit .set(): ${processed}`,
-  ).toBe(true)
+  expect(processed.includes('double.set'), `Derived write must not emit .set(): ${processed}`).toBe(
+    false,
+  )
 })
 
 test('FE-09j  local variable shadowing signal → inner assignment not rewritten', () => {
@@ -674,9 +673,9 @@ const C = $component(() => {
     'Inner count = 10 must remain as local variable assignment',
   ).toBe(true)
   expect(
-    !processed.includes('count.set(10)'),
+    processed.includes('count.set(10)'),
     'Shadowed count = 10 must not become count.set(10)',
-  ).toBe(true)
+  ).toBe(false)
 })
 
 test('FE-09j-confirm-outer  outer signal writes still rewritten when inner is shadowed', () => {
@@ -713,9 +712,9 @@ const C = $component(() => {
   const processed = preprocessMutationWrites(source, 'test.nv')
 
   expect(
-    !processed.includes('count.set(1)'),
+    processed.includes('count.set(1)'),
     'Destructured param count = 1 must not become count.set(1)',
-  ).toBe(true)
+  ).toBe(false)
   expect(
     processed.includes('count = 1'),
     'Inner assignment to destructured param preserved as-is',
@@ -757,9 +756,9 @@ const C = $component(() => {
   const processed = preprocessMutationWrites(source, 'test.nv')
 
   expect(
-    !processed.includes('count.set(10)'),
+    processed.includes('count.set(10)'),
     'Nested-block let count = 10 must not become count.set(10)',
-  ).toBe(true)
+  ).toBe(false)
   expect(processed.includes('count = 10'), 'Nested-block local assignment preserved').toBe(true)
 })
 
