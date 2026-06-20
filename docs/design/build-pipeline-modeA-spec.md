@@ -84,9 +84,10 @@ addition must erase render-hole expressions:
   handler arrow body. **Recommended for v1**; the authoring-surface direction is locked, so
   shipping handlers that still require explicit `.set()` is a DX regression against the thesis.
 
-**Decision needed:** include handler mutation-write erasure in v1, or ship bare-read-only +
-"`.set()` in handlers" as a named limitation. Recommendation: **include it.** It reuses
-existing logic and avoids a DX hole on the first runnable surface.
+**Decision: include handler mutation-write erasure in v1.** Bare-read everywhere plus
+`count = x` → `count.set(x)` inside event handlers, reusing the generalized `$script`
+assignment logic. Approved 2026-06-20. Avoids a DX hole on the first runnable surface and
+is consistent with the locked authoring model.
 
 ---
 
@@ -226,13 +227,14 @@ modify `core.ts`; or a §4 erasure ambiguity (e.g. handler bodies that aren't si
 
 ---
 
-## 11. Decision-log staging (on approval)
+## 11. Decision-log staging (staged/approved 2026-06-20)
 
-A dated entry recording: Mode A locked with the emit mechanism = **IR object literal**
-(runtime-`html\`\`` and lift-parser-IR both eliminated by source — record so neither is
-re-attempted); v1 coverage = 5 parser-reachable kinds (child/list out, blocked on `.nv`
-syntax); `$script` ownership = nested roots bridged by `onCleanup`; the **render-hole erasure
-gap** discovered and its v1 resolution; component-API explicitly **not** decided (provisional
-scaffold shape, gate remains open); equality/step-4 specialization off the v1 path. Current
-State: resolve the `.nv→.js` half of the compile-time/runtime split. No contract change.
-`implementation-state.md` updated when the code lands.
+Decision-log entry staged and approved 2026-06-20. Records: Mode A locked with the emit
+mechanism = **IR object literal** (runtime-`html\`\`` and lift-parser-IR both eliminated by
+source — record so neither is re-attempted); v1 coverage = 5 parser-reachable kinds (child/list
+out, blocked on `.nv` syntax); `$script` ownership = nested roots bridged by `onCleanup`; the
+**render-hole erasure gap** discovered and its v1 resolution (handler mutation-write erasure
+approved, §4); component-API explicitly **not** decided (provisional scaffold shape, gate remains
+open); equality/step-4 specialization off the v1 path. Current State: resolves the `.nv→.js`
+half of the compile-time/runtime split. No contract change. `implementation-state.md` updated
+when the code lands.
