@@ -27,5 +27,11 @@ export type {
 
 export type { CompareResult } from './comparator.js'
 
-export { parseNvFile, preprocessMutationWrites } from './nv-parser.js'
-export type { NvComponentResult, NvDiagnostic, NvStyleInfo } from './nv-parser.js'
+export { parseNvFile, parseNvFileForEmit, preprocessMutationWrites } from './nv-parser.js'
+export type {
+  NvComponentResult,
+  NvDiagnostic,
+  NvEmitPayload,
+  NvStyleInfo,
+  ThunkSource,
+} from './nv-parser.js'
