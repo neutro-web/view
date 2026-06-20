@@ -156,8 +156,7 @@ console.log('-'.repeat(101))
 for (const [name, fn] of shapes) {
   const r = runShape(name, fn)
   // noise threshold: ±5% — within typical run-to-run variance
-  const verdict =
-    r.dPct < -5 ? 'FASTER' : r.dPct > 5 ? 'SLOWER' : '~same'
+  const verdict = r.dPct < -5 ? 'FASTER' : r.dPct > 5 ? 'SLOWER' : '~same'
   console.log(
     name.padEnd(42),
     r.bMs.toFixed(2).padStart(13),
@@ -169,4 +168,6 @@ for (const [name, fn] of shapes) {
 }
 
 console.log('\nPositive Δ = specialized arm SLOWER; negative Δ = faster.')
-console.log('mut-in-place SLOWER is expected and correct (propagation was wrongly suppressed in baseline).\n')
+console.log(
+  'mut-in-place SLOWER is expected and correct (propagation was wrongly suppressed in baseline).\n',
+)
