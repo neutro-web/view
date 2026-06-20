@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**; **Compiler back-end Phase 1 erasure design APPROVED, scope locked [2026-06-19]**; **PK = documentation only; GitHub authoritative for code [2026-06-19]**; **Phase 1a LANDED: read/write erasure analyzer placed, 235→250 tests, cross-pass seam confirmed [2026-06-19]**; **Phase 1b-1 LANDED: emitted-mount placer placed, 250→262 tests, all 5 §5 differential gate cases green against real interpreter [2026-06-19]**; **Phase 1b-2 LANDED: Child + Conditional added to emitter, 262→272 tests, all gate cases green, 1000-flip no-leak confirmed, direct-capture preserved [2026-06-19]**; **Phase 2 CLOSED: step-3 hook emission landed, 272→282 tests, FALSE-policy sites emit setCompilerEquals(fn, false), first specialization to reach compiled output; HC perturbation finding carried forward as createSignals tripwire companion [2026-06-19]**; **`.nv` front-end SCOPED: syntax + component model settled ($component/$script/$style/$render/holes); TS-API-delegation parser strategy; FE-equivalence seam carries all back-end proofs; renderer-session handoff pending §7 confirmations [2026-06-19]**; **`.nv` front-end scope APPROVED: all four §7 confirmations resolved (IR structural comparison, TS-API delegation + mutation-write rewrite ordering load-bearing, PoC binding set only); renderer-session handoff ready [2026-06-19]**; **`.nv` front-end IMPLEMENTED: nv-parser.ts ~770 lines, 48 FE-equivalence + 34 interpreter tests green, erasure sound (mutation-write RHS fix, compound desugaring, scope-aware shadowing closed); pending CC placement [2026-06-19]**; **`.nv` front-end PLACED: nv-parser.ts in-repo, 48 FE-equivalence tests live against real seam, 330/330 green, stale v0-limitations comment corrected [2026-06-19]**; **Real-browser gate PASSED (Chromium): 12/12, both halves, both flags settled (event dispatch + sentinel-strip); async scheduler confirmed lazy; Phase 0 ROADMAP CLOSED; cross-engine tripwire open [2026-06-19]**)_
+_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**; **Compiler back-end Phase 1 erasure design APPROVED, scope locked [2026-06-19]**; **PK = documentation only; GitHub authoritative for code [2026-06-19]**; **Phase 1a LANDED: read/write erasure analyzer placed, 235→250 tests, cross-pass seam confirmed [2026-06-19]**; **Phase 1b-1 LANDED: emitted-mount placer placed, 250→262 tests, all 5 §5 differential gate cases green against real interpreter [2026-06-19]**; **Phase 1b-2 LANDED: Child + Conditional added to emitter, 262→272 tests, all gate cases green, 1000-flip no-leak confirmed, direct-capture preserved [2026-06-19]**; **Phase 2 CLOSED: step-3 hook emission landed, 272→282 tests, FALSE-policy sites emit setCompilerEquals(fn, false), first specialization to reach compiled output; HC perturbation finding carried forward as createSignals tripwire companion [2026-06-19]**; **`.nv` front-end SCOPED: syntax + component model settled ($component/$script/$style/$render/holes); TS-API-delegation parser strategy; FE-equivalence seam carries all back-end proofs; renderer-session handoff pending §7 confirmations [2026-06-19]**; **`.nv` front-end scope APPROVED: all four §7 confirmations resolved (IR structural comparison, TS-API delegation + mutation-write rewrite ordering load-bearing, PoC binding set only); renderer-session handoff ready [2026-06-19]**; **`.nv` front-end IMPLEMENTED: nv-parser.ts ~770 lines, 48 FE-equivalence + 34 interpreter tests green, erasure sound (mutation-write RHS fix, compound desugaring, scope-aware shadowing closed); pending CC placement [2026-06-19]**; **`.nv` front-end PLACED: nv-parser.ts in-repo, 48 FE-equivalence tests live against real seam, 330/330 green, stale v0-limitations comment corrected [2026-06-19]**; **Real-browser gate PASSED (Chromium): 12/12, both halves, both flags settled (event dispatch + sentinel-strip); async scheduler confirmed lazy; Phase 0 ROADMAP CLOSED; cross-engine tripwire open [2026-06-19]**; **Row-churn tripwires RESOLVED [2026-06-20]: #1 createSignals CLEARED structural-accepted (derived-dilution refuted H — gap plateaus ~5x, persistent but minority of full-row cost; allocation-dominated, WeakMap-share not further isolable by sampling profiler, ablation deliberately not run); #2 FALSE-heavy CHARACTERIZED watch-item (+8.2%→+18.6%/row real-in-construction: HC-transition + read-pollution tax, contained at realistic 0–1 FALSE/row, reopen on real-app FALSE-heavy evidence with a steady-state-update harness); kind-split decline STRENGTHENED not fired; `_compilerEquals` null-preinit mitigation named-and-declined (§9 field-width locked); cross-engine tripwire still OPEN**)_
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state (Clean/Check/Dirty)
@@ -251,9 +251,16 @@ _Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified;
   `createComputations`/`molBench` tie. **Perf phase at a characterized stopping point — no
   further tuning queued.** Two remaining gaps are both proven **structural** and both trace
   to the single 29-field `ReactiveNode` width (= 3 cache lines vs alien's 1):
-  - **`createSignals` (6x)** — dominated by WeakMap.set + fn.set, not struct width; only
-    API redesign moves it (struct-shape spike 2026-06-18). List-churn tripwire: validate
-    under a realistic ListBinding churn harness before treating as permanently accepted.
+  - **`createSignals` (~5–7x)** — allocation-dominated construction (WeakMap
+    registration + rich struct + callable closure); only API redesign moves it.
+    **List-churn tripwire RESOLVED 2026-06-20: CLEARED structural-accepted.** A
+    realistic row-churn harness refuted the derived-dilution hypothesis (gap
+    plateaus ~5x at realistic derived counts, does not wash to tie) but confirmed
+    it is a minority of full-row cost (mount/render dominates). API-redesign lever
+    stays parked behind real-app evidence, never the synthetic gap. The companion
+    FALSE-heavy tripwire is now a characterized watch-item (HC-transition +
+    read-pollution tax, +8.2%→+18.6%/row, contained at 0–1 FALSE/row; reopen on
+    real-app FALSE-heavy evidence via a steady-state-update harness).
   - **Wide-graph `4-1000x12`/`25-1000x5` (1.47x/1.66x)** — field-count→cache-line cost in
     `fn`/`runRecompute`, not algorithmic (wide-graph spike 2026-06-18). The one in-stream
     candidate (field reorder) regressed +18/+27% by breaking an accidental BFS→DFS cache
@@ -262,6 +269,9 @@ _Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified;
   which is **noted, not approved**, gated behind a tripwire: opens only on real-app evidence
   that wide-graph or list-churn perf is user-facing, never on the synthetic gap alone. It is
   §9-contract-adjacent and cross-stream. **Spec #4 and #2 unblocked; field layout settled.**
+  The 2026-06-20 row-churn FALSE measurement (+18.6% from introducing one extra
+  node shape) **strengthens** this decline with a real polymorphism number; it
+  does not fire it (still gated on real-app wide-graph evidence).
 - Compiler specializations as optimization hypotheses, each of which must beat the
   unspecialized baseline on the benchmark before shipping.
   **Step 4 (`_compilerSources` oracle) measured 2026-06-19 (Spec #2): net-negative
@@ -2509,3 +2519,111 @@ separate `test/browser/` + Playwright config). New harness only.
 **Status.** Real-browser gate PASSED (Chromium). **Phase 0 ROADMAP closed.** Sole open follow-up:
 the cross-engine tripwire. Everything else (List/Sync, `$style` scoping, `.nv` build-pipeline,
 ComponentBinding, the two perf tripwires, step-4 reopen) remains deferred as previously scoped.
+
+### 2026-06-20 — Row-churn tripwires fired: #1 (createSignals) CLEARED structural-accepted; #2 (FALSE-heavy) characterized, watch-item
+
+**Resolves** the createSignals list-churn tripwire (2026-06-18) and the Phase-2
+HC-perturbation companion tripwire (2026-06-19). Synthetic-first per the
+fork decision; harness `bench/row-churn.mjs` (commits 1107574 → 7bce816). All
+numbers from CC (M2 Max, Node v20.19.0, alien-signals 3.1.2). Architect verified
+the harness by reading the placed file across three revisions before trusting any
+number (timer-split, bookkeeping-symmetry, and cell-isolation defects each caught
+on read and corrected).
+
+**Method note (carried).** Three harness corrections were required and each
+mattered: (a) Variant A originally timed construction+disposal as one number —
+split into separate create/dispose timers; the conflation was *hiding* the
+construction gap (combined ratio pulls toward 1 because disposal is ~1x). (b)
+Asymmetric leak-tracking bookkeeping (nv-side-only array pushes in the timed
+region) — symmetrized. (c) A-FALSE cells ran 0→1→all within a trial, so JIT
+warm-up across cells produced a spurious −22% — fixed to independent
+WARMUP+TRIALS per cell. Reaffirms: read the harness, not the green number.
+
+**Tripwire #1 — CLEARED (gap structural-and-accepted).**
+- N_DERIVEDS sweep (construction-only ratio, Variant A): 7.39x (0 der) → ~5x
+  (2 der) → 5.46x (4 der). Disposal ~1x at realistic derived counts (not where
+  the gap lives).
+- **Hypothesis H refuted.** Derived-dilution shaves the gap from ~7→~5 then
+  *plateaus*; it does NOT wash to the `createComputations` tie at realistic
+  derived counts. The gap is persistent.
+- But it is a *minority* of full-row churn cost: B/A is large (mount/render
+  dominates), even discounting JSDOM inflation. Signal construction is not the
+  row's dominant term.
+- **Driver: allocation-dominated construction.** Isolated `--prof` (PROF_A_ONLY)
+  is ~90% dark (fully-inlined Turbofan loop the sampler can't see through), but
+  GC is the largest *visible* cost and rises as the row is stripped leaner
+  (26.5% at 2 der → 42.2% at 0 der) — the signature of fixed-cost scope/registry
+  allocation. Attribution to WeakMap registration + rich struct + callable
+  closure is **inherited from the struct-shape spike (2026-06-18)**; the sampling
+  profiler cannot resolve the native WeakMap call into a named frame to isolate
+  its share further (validated in-sandbox: `--no-opt` does not surface
+  `WeakMapPrototypeSet` at any opt level — it folds into malloc/GC/node-binary).
+  An ablation A/B (construct with vs without the `fn→node` `WeakMap.set`) is the
+  only instrument that would isolate the share; deliberately **not run** — the
+  verdict does not depend on which allocation dominates (struct width, WeakMap
+  entry, and closure all imply the same thing: only an API redesign moves it).
+- **Correction to a prior-turn profile read.** The full-run `--prof` showed
+  `KeyedLoadIC_Megamorphic` at 13.4% (840 ticks); isolating Variant A
+  (PROF_A_ONLY) dropped it to 0.2% (2 ticks). That megamorphic IC was
+  parse5/JSDOM DOM work (the emitMount binding-path `childNodes[i]` walk over
+  megamorphic JSDOM nodes), **not** nv's reactive core. The "megamorphic IC on
+  reactive node reads" claim does not hold for the construction hot path.
+- **Outcome (spec §8):** clear/accept. No API-redesign pass. The redesign lever
+  (callable-signal rework / fn→node lookup avoiding the WeakMap) stays parked
+  behind real-app evidence of signal construction as a user-facing cost — never
+  the synthetic gap alone. This is a complete, valid structural-accepted result.
+
+**Tripwire #2 — characterized; real-in-construction, contained; WATCH-ITEM (not
+cleared, not firing action).**
+- Earlier JSDOM read ("+2%, within noise") was dilution against a ~171ms mount
+  denominator. The isolated, JIT-warmed, reactive-only measurement flips it:
+  realistic 1-FALSE cell is **+8.2% (0 der) → +18.6% (2 der)** per row. Real,
+  not noise.
+- **Decomposition (from the 0-der vs 2-der delta):**
+  - ~+8% **construction-transition cost** — `setCompilerEquals(fn, false)` writes
+    `_compilerEquals` + `equals`, adding a field → hidden-class transition per
+    FALSE signal (0-der cell isolates this; no reads occur).
+  - ~+10% **read-pollution tax** (the delta up to 2-der) — once deriveds pull
+    FALSE-shaped signals, nv's *shared internal* hot-path read sites
+    (`trackRead` / `updateIfNecessary` over the node struct) see two node shapes
+    → mono→poly IC. Confirmed by the step pattern: 0→1 FALSE is a large jump
+    (mono→poly), 1→all is small (+3.5pp; poly→poly, same two shapes). NB: the
+    pollution is at nv's generic-node read sites, not the user `src()` call site
+    (which stays monomorphic here).
+- **Contained today:** realistic rows carry 0–1 FALSE signals; the §2
+  skip-OBJECT_IS decision already confines emission to the FALSE minority. So the
+  cost is minor at realistic FALSE density. The read tax *scales with read
+  volume*, so steady-state updates would amplify it beyond this single-pull
+  construction number — magnitude unmeasured (this harness is create/destroy, not
+  update).
+- **Outcome:** carry as a characterized watch-item. **Reopen lever:** real-app
+  evidence of FALSE-heavy components. **Measurement-if-reopened:** a *steady-state
+  update* harness (not create/destroy churn), since the read tax lives in updates.
+
+**Architectural connection (logged; does not change any decision).** Tripwire #2
+is a live, small-scale instance of the exact multi-shape-on-hot-path polymorphism
+the **kind-split tripwire** (2026-06-18) is declined over: introducing one extra
+node shape cost +18.6%. This **strengthens** the standing kind-split decline with
+a real number; it does **not** fire or alter that tripwire (still gated on
+real-app wide-graph evidence).
+
+**Escalation-level mitigation — NAMED and DECLINED (do not pull in-stream).**
+Pre-initializing `_compilerEquals` to `null` in the base node constructor would
+make `setCompilerEquals` a value-write rather than a shape transition, killing
+both the transition cost and the shape pollution. But it adds a 30th
+always-present field to a struct whose width is **locked as cache-load-bearing**
+(§9; a field *reorder* already regressed wide-graph +18/+27% on 2026-06-18). The
+trade — remove a FALSE-minority cost vs. worsen wide-graph cache cost for *all*
+nodes — is almost certainly net-negative, which is itself why it stays unpulled.
+It touches §9, so it is architecture-level, not an in-stream change. Recorded so
+the lever and its rejection rationale exist in the log.
+
+**Cross-engine tripwire (2026-06-19): still OPEN, untouched by this work.**
+
+**Contract impact.** None. No version bump.
+
+**Status.** Both row-churn tripwires resolved: #1 cleared (structural-accepted);
+#2 characterized watch-item. No code change, no redesign triggered. Standing
+takeaway for the perf phase: signal construction is allocation-heavy by design
+(accepted trade for the callable-signal API + rich nodes); the dominant row cost
+is the mount/render path, not signal construction — optimize there.
