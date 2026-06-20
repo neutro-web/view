@@ -31,9 +31,9 @@
  *   - Compound assignment operators other than `op=` forms are not detected.
  *   - Shorthand property names `{ count }` are not bare-read erased (complex
  *     transformation required; write `{ count: count() }` explicitly).
- *   - Block-scoped shadowing (`const count = 0` inside an `if` block) is not
- *     tracked — only function-scope shadowing (parameters and function-body
- *     declarations). `var` hoisting is also handled at function scope.
+ *   - Block-scoped shadowing is tracked for `let`/`const` at the top level of
+ *     each block. `for (const x of ...)` loop variables are NOT tracked.
+ *     `var` hoisting is tracked at function scope.
  *
  * ── exprReadsSignal direction ────────────────────────────────────────────────
  *
