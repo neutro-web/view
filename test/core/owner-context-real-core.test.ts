@@ -194,7 +194,6 @@ test('§12.24c  runWithOwner(null) detaches: scope is unowned, survives surround
   ).toBe(1)
 
   // It must be disposed manually.
-  // biome-ignore lint/style/noNonNullAssertion: assigned synchronously in createRoot above
   detachedDispose!()
   expect(__test.observerCount(s), 'manual disposal severs the detached scope').toBe(0)
 })
