@@ -143,6 +143,15 @@ function buildAndMountRow(r, clsSig, labelSig, container, document, html) {
 // alien: wrapped in effectScope(fn); disposed via stop().
 // No bindings, no DOM — pure reactive construction + disposal cost.
 // Adversarial case: N_DERIVEDS=0 strips dilution and isolates bare-signal cost.
+//
+// Timer discipline: construction-loop and dispose-loop are timed SEPARATELY for
+// both sides. The construction-only ratio is the primary tripwire #1 number.
+// Disposal-only ratio is a real but separate cost. Combined is shown for reference
+// only and is explicitly labeled as conflated.
+//
+// Bookkeeping symmetry: both sides push N_SIGNALS + N_DERIVEDS refs per row to a
+// tracking array inside the timed region. This ensures array.push overhead is
+// identical on both sides and does not bias the construction ratio against nv.
 
 function runVariantA() {
   console.log('\n── Variant A: reactive-only, nv vs alien-signals ────────────────────────')
@@ -152,8 +161,10 @@ function runVariantA() {
     console.log('   [adversarial: 0 deriveds strips dilution — isolates bare-signal cost]')
   }
 
-  const nvSamples = []
-  const alienSamples = []
+  const nvCreateSamples = []
+  const nvDisposeSamples = []
+  const alCreateSamples = []
+  const alDisposeSamples = []
 
   for (let trial = 0; trial < WARMUP + TRIALS; trial++) {
     GC()
@@ -162,66 +173,103 @@ function runVariantA() {
     const nvFns = []
     const nvDisposes = []
 
-    const t0nv = performance.now()
+    const t0nvCreate = performance.now()
     for (let r = 0; r < N_ROWS; r++) {
       const dispose = createRoot((d) => {
         const sigs = []
         for (let si = 0; si < N_SIGNALS; si++) {
           const sig = signal(r * N_SIGNALS + si)
           sigs.push(sig)
-          nvFns.push(sig)
+          nvFns.push(sig) // N_SIGNALS pushes/row (symmetric with alien below)
         }
         for (let di = 0; di < N_DERIVEDS; di++) {
           const src = sigs[di % N_SIGNALS]
           const der = derived(() => src() + 1)
           der() // pull to CLEAN (initialize lazy derived)
-          nvFns.push(der)
+          nvFns.push(der) // N_DERIVEDS pushes/row (symmetric with alien below)
         }
         return d
       })
       nvDisposes.push(dispose)
     }
+    const t1nvCreate = performance.now()
+
+    const t0nvDispose = performance.now()
     for (let r = 0; r < N_ROWS; r++) nvDisposes[r]()
-    const t1nv = performance.now()
+    const t1nvDispose = performance.now()
 
     assertNoLeak(nvFns, 'variant-A-nv')
-    if (trial >= WARMUP) nvSamples.push(t1nv - t0nv)
+    if (trial >= WARMUP) {
+      nvCreateSamples.push(t1nvCreate - t0nvCreate)
+      nvDisposeSamples.push(t1nvDispose - t0nvDispose)
+    }
 
     // ── alien ─────────────────────────────────────────────────────────────────
+    // alienFns mirrors nvFns: N_SIGNALS + N_DERIVEDS pushes/row so both sides
+    // pay identical array.push overhead inside the timed region.
+    const alienFns = []
     const alienStops = []
 
-    const t0al = performance.now()
+    const t0alCreate = performance.now()
     for (let r = 0; r < N_ROWS; r++) {
+      const rowSigs = []
       const stop = effectScope(() => {
-        const sigs = []
         for (let si = 0; si < N_SIGNALS; si++) {
-          sigs.push(aSignal(r * N_SIGNALS + si))
+          const s = aSignal(r * N_SIGNALS + si)
+          rowSigs.push(s)
+          alienFns.push(s) // N_SIGNALS pushes/row (symmetric)
         }
         for (let di = 0; di < N_DERIVEDS; di++) {
-          const src = sigs[di % N_SIGNALS]
+          const src = rowSigs[di % N_SIGNALS]
           const comp = aComputed(() => src() + 1)
           comp() // initialize
+          alienFns.push(comp) // N_DERIVEDS pushes/row (symmetric)
         }
       })
       alienStops.push(stop)
     }
-    for (let r = 0; r < N_ROWS; r++) alienStops[r]()
-    const t1al = performance.now()
+    const t1alCreate = performance.now()
 
-    if (trial >= WARMUP) alienSamples.push(t1al - t0al)
+    const t0alDispose = performance.now()
+    for (let r = 0; r < N_ROWS; r++) alienStops[r]()
+    const t1alDispose = performance.now()
+
+    if (trial >= WARMUP) {
+      alCreateSamples.push(t1alCreate - t0alCreate)
+      alDisposeSamples.push(t1alDispose - t0alDispose)
+    }
   }
 
-  const nvS = stats(nvSamples)
-  const alS = stats(alienSamples)
-  const ratio = nvS.med / alS.med
+  const nvCrS = stats(nvCreateSamples)
+  const nvDiS = stats(nvDisposeSamples)
+  const alCrS = stats(alCreateSamples)
+  const alDiS = stats(alDisposeSamples)
 
-  fmtStats('nv  (createRoot+signal×N+derived×M+dispose)', nvS)
-  fmtStats('alien (effectScope+signal×N+computed×M+stop)', alS)
-  console.log(`  ${'ratio nv/alien (construction+disposal)'.padEnd(40)} ${ratio.toFixed(2)}x`)
-  console.log(`  ${'per-row nv'.padEnd(40)} ${fmt(nvS.med / N_ROWS)}/row`)
-  console.log(`  ${'per-row alien'.padEnd(40)} ${fmt(alS.med / N_ROWS)}/row`)
+  const createRatio = nvCrS.med / alCrS.med
+  const disposeRatio = nvDiS.med / alDiS.med
+  const combinedRatio = (nvCrS.med + nvDiS.med) / (alCrS.med + alDiS.med)
 
-  return { nvS, alS, ratio }
+  console.log('  construction (create-loop only):')
+  fmtStats('    nv  (createRoot+signal×N+derived×M)', nvCrS)
+  fmtStats('    alien (effectScope+signal×N+computed×M)', alCrS)
+  console.log(
+    `  ${'    ratio nv/alien [CONSTRUCTION — tripwire #1]'.padEnd(46)} ${createRatio.toFixed(2)}x`,
+  )
+  console.log(`  ${'    per-row nv'.padEnd(46)} ${fmt(nvCrS.med / N_ROWS)}/row`)
+  console.log(`  ${'    per-row alien'.padEnd(46)} ${fmt(alCrS.med / N_ROWS)}/row`)
+
+  console.log('  disposal (dispose-loop only):')
+  fmtStats('    nv  (dispose×N)', nvDiS)
+  fmtStats('    alien (stop×N)', alDiS)
+  console.log(
+    `  ${'    ratio nv/alien [DISPOSAL — separate cost]'.padEnd(46)} ${disposeRatio.toFixed(2)}x`,
+  )
+
+  console.log(
+    `  ${'  combined (ref only — construction+disposal)'.padEnd(46)} nv/alien=${combinedRatio.toFixed(2)}x`,
+  )
+
+  return { nvCrS, nvDiS, alCrS, alDiS, createRatio, disposeRatio, combinedRatio }
 }
 
 // ── Variant B — full nv row via real emitMount ────────────────────────────────
@@ -462,23 +510,31 @@ const _resC = runVariantC(resB.med)
 
 console.log('\n=== Summary ===')
 console.log(
-  `Variant A ratio nv/alien: ${resA.ratio.toFixed(2)}x` +
-    `  (med nv=${fmt(resA.nvS.med)} alien=${fmt(resA.alS.med)})`,
+  `Variant A construction ratio nv/alien: ${resA.createRatio.toFixed(2)}x` +
+    `  (nv=${fmt(resA.nvCrS.med)} alien=${fmt(resA.alCrS.med)})`,
 )
-console.log(`Variant B full-row med:   ${fmt(resB.med)}  (${fmt(resB.med / N_ROWS)}/row)`)
+console.log(
+  `Variant A disposal   ratio nv/alien: ${resA.disposeRatio.toFixed(2)}x` +
+    `  (nv=${fmt(resA.nvDiS.med)} alien=${fmt(resA.alDiS.med)})`,
+)
+console.log(
+  `Variant A combined   ratio (ref):    ${resA.combinedRatio.toFixed(2)}x  (construction+disposal conflated)`,
+)
+console.log(
+  `Variant B full-row med:               ${fmt(resB.med)}  (${fmt(resB.med / N_ROWS)}/row)`,
+)
+const baRatio = resB.med / resA.nvCrS.med
+console.log(`Variant B/A ratio (binding+mount vs reactive construction): ${baRatio.toFixed(0)}x`)
 console.log()
 console.log('Outcome routing (spec §8):')
-if (resA.ratio <= 1.5) {
-  console.log(
-    '  Tripwire #1: LIKELY CLEAR — ratio within tie-band. Confirm via profile attribution.',
-  )
-} else if (resA.ratio <= 3.0) {
-  console.log(
-    '  Tripwire #1: BORDERLINE — ratio elevated. Profile attribution required before verdict.',
-  )
-} else {
-  console.log(
-    '  Tripwire #1: MATERIAL GAP — ratio > 3x. Profile to confirm signal-construction attribution.',
-  )
-}
+console.log(
+  `  Tripwire #1: construction ratio = ${resA.createRatio.toFixed(2)}x  (hint: ≤1.5 likely clear; ≤3.0 borderline; >3.0 material gap — confirm via --prof)`,
+)
+console.log('  --prof required before verdict: construction wall-clock alone cannot distinguish')
+console.log(
+  '  WeakMap.set + fn.set cost from createRoot scope overhead, GC pressure, or JIT warm-up.',
+)
+console.log(
+  '  Run: node --prof bench/row-churn.mjs && node --prof-process isolate-*.log | head -80',
+)
 console.log('  Tripwire #2: inspect delta-vs-B in Variant C. The 1-FALSE cell drives the judgment.')
