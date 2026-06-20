@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**; **Compiler back-end Phase 1 erasure design APPROVED, scope locked [2026-06-19]**; **PK = documentation only; GitHub authoritative for code [2026-06-19]**; **Phase 1a LANDED: read/write erasure analyzer placed, 235→250 tests, cross-pass seam confirmed [2026-06-19]**; **Phase 1b-1 LANDED: emitted-mount placer placed, 250→262 tests, all 5 §5 differential gate cases green against real interpreter [2026-06-19]**; **Phase 1b-2 LANDED: Child + Conditional added to emitter, 262→272 tests, all gate cases green, 1000-flip no-leak confirmed, direct-capture preserved [2026-06-19]**; **Phase 2 CLOSED: step-3 hook emission landed, 272→282 tests, FALSE-policy sites emit setCompilerEquals(fn, false), first specialization to reach compiled output; HC perturbation finding carried forward as createSignals tripwire companion [2026-06-19]**; **`.nv` front-end SCOPED: syntax + component model settled ($component/$script/$style/$render/holes); TS-API-delegation parser strategy; FE-equivalence seam carries all back-end proofs; renderer-session handoff pending §7 confirmations [2026-06-19]**; **`.nv` front-end scope APPROVED: all four §7 confirmations resolved (IR structural comparison, TS-API delegation + mutation-write rewrite ordering load-bearing, PoC binding set only); renderer-session handoff ready [2026-06-19]**; **`.nv` front-end IMPLEMENTED: nv-parser.ts ~770 lines, 48 FE-equivalence + 34 interpreter tests green, erasure sound (mutation-write RHS fix, compound desugaring, scope-aware shadowing closed); pending CC placement [2026-06-19]**; **`.nv` front-end PLACED: nv-parser.ts in-repo, 48 FE-equivalence tests live against real seam, 330/330 green, stale v0-limitations comment corrected [2026-06-19]**; **Real-browser gate PASSED (Chromium): 12/12, both halves, both flags settled (event dispatch + sentinel-strip); async scheduler confirmed lazy; Phase 0 ROADMAP CLOSED; cross-engine tripwire open [2026-06-19]**; **Row-churn tripwires RESOLVED [2026-06-20]: #1 createSignals CLEARED structural-accepted (derived-dilution refuted H — gap plateaus ~5x, persistent but minority of full-row cost; allocation-dominated, WeakMap-share not further isolable by sampling profiler, ablation deliberately not run); #2 FALSE-heavy CHARACTERIZED watch-item (+8.2%→+18.6%/row real-in-construction: HC-transition + read-pollution tax, contained at realistic 0–1 FALSE/row, reopen on real-app FALSE-heavy evidence with a steady-state-update harness); kind-split decline STRENGTHENED not fired; `_compilerEquals` null-preinit mitigation named-and-declined (§9 field-width locked); cross-engine tripwire still OPEN**)_
+_Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified; compiler steps 1–4 closed; renderer interpreter complete [all 6 PoC bindings]; core DOM-lib strict defect resolved; PoC coherence gate closed [sandbox portion]; **3 pre-existing defects fixed during repo migration, cascade cap split into two budgets [§8.5.4]**; **wide-graph profiling spike closed: gap structural/accepted, field reorder attempted-and-reverted, escalation proposal noted [2026-06-18], architect-affirmed; kind-split tripwire set**; **Spec #4 CLOSED: `_compilerSources` oracle wired into real core, Gate A+B green [2026-06-19]**; **Spec #2 CLOSED: step-4 oracle measured, no wired benefit path, net-negative on all realistic workloads → SHELVED [2026-06-19]**; **Spec 3c CLOSED: import-extension convergence, nodenext config, test hygiene [2026-06-19]**; **Step-3 integration CLOSED: `_compilerEquals` wired into `equals` slot, Gate A+B green [2026-06-19]**; **Step-3 beats-baseline CLOSED: net-neutral on speed; `false` case is correctness-not-speed; compiler specialization layer (steps 1–4) fully measured [2026-06-19]**; **Compiler back-end Phase 1 erasure design APPROVED, scope locked [2026-06-19]**; **PK = documentation only; GitHub authoritative for code [2026-06-19]**; **Phase 1a LANDED: read/write erasure analyzer placed, 235→250 tests, cross-pass seam confirmed [2026-06-19]**; **Phase 1b-1 LANDED: emitted-mount placer placed, 250→262 tests, all 5 §5 differential gate cases green against real interpreter [2026-06-19]**; **Phase 1b-2 LANDED: Child + Conditional added to emitter, 262→272 tests, all gate cases green, 1000-flip no-leak confirmed, direct-capture preserved [2026-06-19]**; **Phase 2 CLOSED: step-3 hook emission landed, 272→282 tests, FALSE-policy sites emit setCompilerEquals(fn, false), first specialization to reach compiled output; HC perturbation finding carried forward as createSignals tripwire companion [2026-06-19]**; **`.nv` front-end SCOPED: syntax + component model settled ($component/$script/$style/$render/holes); TS-API-delegation parser strategy; FE-equivalence seam carries all back-end proofs; renderer-session handoff pending §7 confirmations [2026-06-19]**; **`.nv` front-end scope APPROVED: all four §7 confirmations resolved (IR structural comparison, TS-API delegation + mutation-write rewrite ordering load-bearing, PoC binding set only); renderer-session handoff ready [2026-06-19]**; **`.nv` front-end IMPLEMENTED: nv-parser.ts ~770 lines, 48 FE-equivalence + 34 interpreter tests green, erasure sound (mutation-write RHS fix, compound desugaring, scope-aware shadowing closed); pending CC placement [2026-06-19]**; **`.nv` front-end PLACED: nv-parser.ts in-repo, 48 FE-equivalence tests live against real seam, 330/330 green, stale v0-limitations comment corrected [2026-06-19]**; **Real-browser gate PASSED (Chromium): 12/12, both halves, both flags settled (event dispatch + sentinel-strip); async scheduler confirmed lazy; Phase 0 ROADMAP CLOSED; cross-engine tripwire open [2026-06-19]**; **Row-churn tripwires RESOLVED [2026-06-20]: #1 createSignals CLEARED structural-accepted (derived-dilution refuted H — gap plateaus ~5x, persistent but minority of full-row cost; allocation-dominated, WeakMap-share not further isolable by sampling profiler, ablation deliberately not run); #2 FALSE-heavy CHARACTERIZED watch-item (+8.2%→+18.6%/row real-in-construction: HC-transition + read-pollution tax, contained at realistic 0–1 FALSE/row, reopen on real-app FALSE-heavy evidence with a steady-state-update harness); kind-split decline STRENGTHENED not fired; `_compilerEquals` null-preinit mitigation named-and-declined (§9 field-width locked); cross-engine tripwire still OPEN**; **Cross-engine tripwire CLOSED [2026-06-20]: parse-divergence flag retired — sentinel-strip + event dispatch verified identical across Blink/Gecko/WebKit (36/36, zero skips, both back-ends), regex sentinel approach confirmed not parser-dependent. ALL THREE perf-validation-phase tripwires now resolved (#1 cleared, #2 characterized watch-item, #3 closed).**)_
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state (Clean/Check/Dirty)
@@ -243,6 +243,10 @@ _Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified;
 - **No composition bug surfaced** — all three streams composed cleanly at first
   integration. (The only adjustment was the import-style bridge above, a
   poc-tsconfig matter, not a stream defect.)
+- ~~**Parse-divergence flag (parse5 vs platform)**~~ — **CLOSED 2026-06-20.**
+  Cross-engine gate (Blink/Gecko/WebKit, 36/36, both back-ends) verified
+  `<template>.innerHTML` sentinel-strip and event dispatch identical across all
+  three parser families. Regex sentinel approach confirmed not parser-dependent.
 
 ### Genuine research problems (unknown answers, can fail)
 - Beating an alien-signals-class performance baseline. **Opt-A (2026-06-18) closed the two
@@ -272,6 +276,10 @@ _Last updated: 2026-06-19 (Contract **v0.4.1** — runtime correctness verified;
   The 2026-06-20 row-churn FALSE measurement (+18.6% from introducing one extra
   node shape) **strengthens** this decline with a real polymorphism number; it
   does not fire it (still gated on real-app wide-graph evidence).
+
+**Perf-validation phase: COMPLETE.** All three deferred tripwires fired and
+resolved — #1 createSignals (cleared, structural-accepted), #2 FALSE-heavy
+(characterized watch-item), #3 cross-engine (closed). No redesign triggered.
 - Compiler specializations as optimization hypotheses, each of which must beat the
   unspecialized baseline on the benchmark before shipping.
   **Step 4 (`_compilerSources` oracle) measured 2026-06-19 (Spec #2): net-negative
@@ -2627,3 +2635,51 @@ the lever and its rejection rationale exist in the log.
 takeaway for the perf phase: signal construction is allocation-heavy by design
 (accepted trade for the callable-signal API + rich nodes); the dominant row cost
 is the mount/render path, not signal construction — optimize there.
+
+### 2026-06-20 — Cross-engine tripwire CLOSED: parse-divergence flag resolved across Blink/Gecko/WebKit
+
+**Resolves** the cross-engine tripwire (2026-06-19) and closes the
+parse5-vs-platform parse-divergence flag (open since 2026-06-17). Config-only
+work as scoped; `playwright.config.ts` adds `webkit` + `firefox` projects
+alongside the existing `chromium`. Architect verified by reading the config and
+the raw `npx playwright test` run output (not the CC summary).
+
+**Engine choice.** All three major parser/engine families, not WebKit-only:
+Blink (Chromium, pre-existing), Gecko (Firefox), WebKit. No reason to settle the
+flag for two families and leave the third dangling when cost is config +
+one-time binary install only.
+
+**Result: 36/36, zero skips.** The full 12-test real-browser corpus
+(`test/browser/real-browser.spec.ts`) ran on each of the three projects, both
+back-ends (interpreter + emitter).
+- FLAG-2 (sentinel-strip — `html`` ` `shape.html` survives the real
+  `<template>.innerHTML` parse): green on all three engines.
+- FLAG-1 (`dispatchEvent` + Playwright `.click()` fire handlers, downstream DOM
+  updates): green on all three.
+- TC-01…TC-08 interpreter-vs-emitter structural equality, TC-09 error-route, and
+  the lazy-scheduler test: green on all three.
+
+**Verification (against the scope's stated false-close failure modes).**
+- *Config structurally cannot silent-skip an engine:* top-level `testMatch`, no
+  per-project `testMatch`/`grep`/`grepInvert` override; every project runs the
+  same corpus.
+- *Tests genuinely executed per engine:* raw output numbers tests 1–36
+  contiguously across the three prefixes (12 each); final tally `36 passed` with
+  **no `skipped`**.
+- *FLAG-2 assertion actually ran per engine:* spec line 47:1 appears under all
+  three prefixes at 311ms (chromium) / 907ms (firefox) / 849ms (webkit) — not
+  the `0ms`/dash a skipped or empty test produces.
+- *No engine guards:* spec contains no `browserName` conditions or `test.skip`.
+
+**Finding.** The regex sentinel-strip approach is **not parser-dependent** —
+`<template>.innerHTML` parse and event dispatch are identical across Blink,
+Gecko, and WebKit, both back-ends. This was the actual open risk; it is now
+retired engine-agnostically (Chromium scope → cross-engine scope).
+
+**Contract impact.** None. No version bump.
+
+**Status.** Cross-engine tripwire closed. With the earlier 2026-06-20 entry
+(row-churn tripwires #1 cleared / #2 characterized), **all three
+perf-validation-phase tripwires are now resolved.** The phase's deferred bets are
+fired and logged; no redesign triggered, no code change beyond the harness and
+the Playwright project config.
