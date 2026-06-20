@@ -80,6 +80,11 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
 
 ## Known gaps / stubs / v0 limitations (named, not hidden)
 
+- **`roots[0] as Node` in list wire (both back-ends).** The single-root guard throws before
+  this line, so the cast is safe. `as Node` was used over `!` to satisfy biome's
+  `noNonNullAssertion` rule, but `!` would be the more future-safe form (type-checker catches
+  it if the guard is removed; `as Node` launders silently). Low-priority cleanup: replace with
+  `biome-ignore` + justification comment. No runtime impact.
 - **Build pipeline executable-module gate — CLOSED (2026-06-20).** EX-01..03 in
   `nv-emitter-exec.test.ts` write the emitted `.js` to disk, bundle via esbuild (alias
   `@neutro/view/*` → `src/`), `import()` the bundle, mount, and assert DOM. Conditional
