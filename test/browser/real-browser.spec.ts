@@ -1103,6 +1103,14 @@ test('TC-10: ListBinding — reorder, both back-ends', async ({ page }) => {
     emitMount(makeIR(sigsE)).mountFn(pE, document)
     flushSync()
 
+    // Snapshot before — label → element maps for per-key identity check
+    const beforeI = new Map(
+      Array.from(pI.querySelectorAll('li')).map((li) => [li.textContent, li] as const),
+    )
+    const beforeE = new Map(
+      Array.from(pE.querySelectorAll('li')).map((li) => [li.textContent, li] as const),
+    )
+
     // Reorder to [C, A, B]
     sigsI.set([
       { id: 3, label: 'C' },
@@ -1116,14 +1124,27 @@ test('TC-10: ListBinding — reorder, both back-ends', async ({ page }) => {
     ])
     flushSync()
 
+    const afterI = Array.from(pI.querySelectorAll('li'))
+    const afterE = Array.from(pE.querySelectorAll('li'))
+
     return {
-      iTexts: Array.from(pI.querySelectorAll('li')).map((li) => li.textContent),
-      eTexts: Array.from(pE.querySelectorAll('li')).map((li) => li.textContent),
+      iTexts: afterI.map((li) => li.textContent),
+      eTexts: afterE.map((li) => li.textContent),
+      // Per-key object identity: every element must be the exact same node as before
+      iIdentity: afterI.every((li) => li === beforeI.get(li.textContent)),
+      eIdentity: afterE.every((li) => li === beforeE.get(li.textContent)),
     }
   })
 
   expect(result.iTexts, 'interpreter reordered').toEqual(['C', 'A', 'B'])
   expect(result.eTexts, 'emitter reordered').toEqual(['C', 'A', 'B'])
+  expect(
+    result.iIdentity,
+    'interpreter: reorder must reuse every element (move, not rebuild)',
+  ).toBe(true)
+  expect(result.eIdentity, 'emitter: reorder must reuse every element (move, not rebuild)').toBe(
+    true,
+  )
 })
 
 test('TC-10: ListBinding — key collision → error-route, both back-ends', async ({ page }) => {

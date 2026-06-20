@@ -206,7 +206,7 @@ test('TC-02c  false/null removes the attribute', () => {
   flushSync()
   // false → removeAttribute
   const elAfterFalse = parent.querySelector('button') as HTMLButtonElement
-  expect(!elAfterFalse.hasAttribute('disabled'), 'disabled should be absent for false').toBe(true)
+  expect(elAfterFalse.hasAttribute('disabled'), 'disabled should be absent for false').toBe(false)
 
   disabled.set(true)
   flushSync()
@@ -218,7 +218,7 @@ test('TC-02c  false/null removes the attribute', () => {
   disabled.set(null)
   flushSync()
   const elAfterNull = parent.querySelector('button') as HTMLButtonElement
-  expect(!elAfterNull.hasAttribute('disabled'), 'disabled should be absent for null').toBe(true)
+  expect(elAfterNull.hasAttribute('disabled'), 'disabled should be absent for null').toBe(false)
 
   dispose()
   rmParent(parent)
@@ -1344,12 +1344,13 @@ test('TC-10g  reorder: DOM order matches new array, roots persist, index reactiv
   expect(lisAfter[1]!.textContent, 'A now second').toBe('A#1')
   expect(lisAfter[2]!.textContent, 'B now third').toBe('B#2')
 
-  // Node identity: same <li> elements in new positions (roots persisted, not rebuilt)
-  // The <li> that was C (index 2 before) should now be at position 0.
-  // We can verify by checking if any before-node matches an after-node.
+  // Node identity: every <li> is the exact same object before and after reorder.
+  // wireList uses insertBefore on the existing rec.rootEl — no new elements for kept keys.
+  // Build a label→element map from before, then check per-key object identity.
+  const beforeByLabel = new Map(lisBefore.map((li) => [li.textContent, li] as const))
   expect(
-    lisAfter.some((li) => lisBefore.includes(li)),
-    'same li nodes reused',
+    lisAfter.every((li) => li === beforeByLabel.get(li.textContent)),
+    'all li nodes reused on reorder (move, not rebuild)',
   ).toBe(true)
 
   dispose()

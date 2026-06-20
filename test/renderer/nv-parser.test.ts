@@ -227,8 +227,8 @@ const C = $component(() => {
   const frag = parseShape(nvIR.shape.html)
   const inputEl = frag.querySelector('input')
   expect(inputEl !== null, 'input element present').toBe(true)
-  expect(!inputEl!.hasAttribute('value'), '.value not in shape HTML').toBe(true)
-  expect(!inputEl!.hasAttribute('.value'), '.value not in shape HTML').toBe(true)
+  expect(inputEl!.hasAttribute('value'), '.value not in shape HTML').toBe(false)
+  expect(inputEl!.hasAttribute('.value'), '.value not in shape HTML').toBe(false)
 })
 
 test('FE-03c  PropBinding path targets the element', () => {
@@ -267,7 +267,7 @@ const C = $component(() => {
   const frag = parseShape(nvIR.shape.html)
   const btn = frag.querySelector('button')
   expect(btn !== null, 'button present').toBe(true)
-  expect(!btn!.hasAttribute('@click'), '@click not in shape').toBe(true)
+  expect(btn!.hasAttribute('@click'), '@click not in shape').toBe(false)
   expect(btn!.textContent).toBe('go')
 })
 
@@ -486,7 +486,7 @@ const C = $component(() => {
   const processed = preprocessMutationWrites(source, 'test.nv')
 
   expect(processed.includes('count.set(5)'), `Expected count.set(5), got: ${processed}`).toBe(true)
-  expect(!processed.includes('count = 5'), 'Original mutation-write should be gone').toBe(true)
+  expect(processed.includes('count = 5'), 'Original mutation-write should be gone').toBe(false)
 })
 
 test('FE-09b  RHS bare-read is erased: count = count + 1 → count.set(count() + 1)', () => {
@@ -504,7 +504,7 @@ const C = $component(() => {
     processed.includes('count.set(count() + 1)'),
     `Expected count.set(count() + 1), got: ${processed}`,
   ).toBe(true)
-  expect(!processed.includes('count.set(count + 1)'), 'Unerased RHS should not appear').toBe(true)
+  expect(processed.includes('count.set(count + 1)'), 'Unerased RHS should not appear').toBe(false)
 })
 
 test('FE-09c  multiple mutation-writes: all rewritten', () => {
@@ -537,7 +537,7 @@ const C = $component(() => {
   const processed = preprocessMutationWrites(source, 'test.nv')
 
   expect(processed.includes('x = 5'), 'non-signal assignment unchanged').toBe(true)
-  expect(!processed.includes('x.set'), 'non-signal should not become .set()').toBe(true)
+  expect(processed.includes('x.set'), 'non-signal should not become .set()').toBe(false)
 })
 
 test('FE-09e  mutation-write outside $script is NOT rewritten', () => {
@@ -600,9 +600,9 @@ const C = $component(() => {
     processed.includes('count.set(count() + 1)'),
     `Expected count.set(count() + 1) in: ${processed}`,
   ).toBe(true)
-  expect(!processed.includes('count() +='), 'Must not emit count() += (invalid JS)').toBe(true)
-  expect(!processed.includes('count +='), 'Compound assignment must not survive unmodified').toBe(
-    true,
+  expect(processed.includes('count() +='), 'Must not emit count() += (invalid JS)').toBe(false)
+  expect(processed.includes('count +='), 'Compound assignment must not survive unmodified').toBe(
+    false,
   )
 })
 
@@ -696,7 +696,7 @@ const C = $component(() => {
 
   expect(processed.includes('count.set(99)'), 'Outer signal mutation still rewritten').toBe(true)
   expect(processed.includes('count = 10'), 'Inner local assignment preserved').toBe(true)
-  expect(!processed.includes('count.set(10)'), 'Inner local not treated as signal').toBe(true)
+  expect(processed.includes('count.set(10)'), 'Inner local not treated as signal').toBe(false)
 })
 
 test('FE-09k  destructured parameter shadows signal → inner assignment not rewritten', () => {
@@ -737,7 +737,7 @@ const C = $component(() => {
   const processed = preprocessMutationWrites(source, 'test.nv')
 
   expect(processed.includes('count.set(42)'), 'Outer signal mutation still rewritten').toBe(true)
-  expect(!processed.includes('count.set(1)'), 'Destructured param write not rewritten').toBe(true)
+  expect(processed.includes('count.set(1)'), 'Destructured param write not rewritten').toBe(false)
 })
 
 test('FE-09l  nested block let shadows signal → inner assignment not rewritten', () => {
@@ -787,8 +787,8 @@ const C = $component(() => {
   )
   expect(processed.includes('count.set(2)'), 'Signal write before block rewritten').toBe(true)
   expect(processed.includes('count.set(3)'), 'Signal write after block rewritten').toBe(true)
-  expect(!processed.includes('count.set(10)'), 'Block-local let count = 10 not rewritten').toBe(
-    true,
+  expect(processed.includes('count.set(10)'), 'Block-local let count = 10 not rewritten').toBe(
+    false,
   )
   expect(processed.includes('count = 10'), 'Block-local assignment preserved').toBe(true)
 })
