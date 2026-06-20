@@ -1,6 +1,5 @@
 .DS_Store
 **/.DS_Store
-PK/
 dist/
 node_modules/
 test/browser/dist/
