@@ -5,6 +5,7 @@
 
 import type { EmitResult } from '../../src/compiler/emitted-mount.js'
 import type { DerivedAccessor, SignalAccessor } from '../../src/core/core.js'
+import type { Owner } from '../../src/core/core.js'
 import type { CompareResult } from '../../src/renderer/comparator.js'
 import type { TemplateIR } from '../../src/renderer/ir.js'
 
@@ -14,6 +15,7 @@ interface NvBundle {
   effect: (fn: () => void) => () => void
   flushSync: () => void
   createRoot: <T>(fn: (dispose: () => void) => T) => T
+  errorBoundary: (handler: (e: unknown) => void, fn: () => void) => void
   mount: (ir: TemplateIR, parent: Element, doc: Document) => () => void
   createHtmlTag: (
     doc: Document,

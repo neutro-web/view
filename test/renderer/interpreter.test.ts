@@ -22,7 +22,13 @@
 
 import { JSDOM } from 'jsdom'
 import { expect, test } from 'vitest'
-import { __test, flushSync, signal } from '../../src/core/core.js'
+import {
+  __test,
+  createRoot as coreCreateRoot,
+  errorBoundary,
+  flushSync,
+  signal,
+} from '../../src/core/core.js'
 import { structurallyEqual } from '../../src/renderer/comparator.js'
 import { createHtmlTag } from '../../src/renderer/html-tag.js'
 import { mount } from '../../src/renderer/interpreter.js'
@@ -30,9 +36,11 @@ import type {
   ChildBinding,
   ConditionalBinding,
   EventBinding,
+  ListBinding,
   PropBinding,
   TemplateIR,
   TextBinding,
+  WritableSignal,
 } from '../../src/renderer/ir.js'
 
 // ── jsdom setup ───────────────────────────────────────────────────────────────
@@ -1063,5 +1071,438 @@ test('TC-06h  parent region dispose while branch mounted: full cleanup', () => {
 
   // DOM removed
   expect(parent.children.length, 'outer div removed').toBe(0)
+  rmParent(parent)
+})
+
+// ── TC-10: ListBinding ─────────────────────────────────────────────────────────
+//
+// Spec §8: 8 test obligations.
+// Pattern mirrors TC-06 (ConditionalBinding): build IR helpers, test both
+// structural DOM correctness and no-leak invariants.
+//
+// Item structure used throughout: { id: number; label: string }
+
+type Item = { id: number; label: string }
+
+/** Outer template whose single binding is a ListBinding. */
+function makeListIR(
+  items: () => readonly Item[],
+  makeItem: (vs: WritableSignal<unknown>, is: WritableSignal<number>) => TemplateIR,
+): TemplateIR {
+  return {
+    id: 'list-test',
+    shape: {
+      // The anchor comment is at frag[0]=ul, ul[0]=comment
+      html: '<ul><!--nv-0--></ul>',
+      bindingPaths: [[0, 0]],
+    },
+    bindings: [
+      {
+        kind: 'list',
+        pathIndex: 0,
+        items: items as () => readonly unknown[],
+        key: (item) => (item as Item).id,
+        itemTemplate: makeItem,
+      } satisfies ListBinding,
+    ],
+  }
+}
+
+/** Item template: <li> with text bound to valueSig().label */
+function liTextTemplate(vs: WritableSignal<unknown>, _is: WritableSignal<number>): TemplateIR {
+  return {
+    id: 'li-text',
+    shape: { html: '<li><!--nv-0--></li>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'text',
+        pathIndex: 0,
+        expr: () => (vs() as Item).label,
+      } satisfies TextBinding,
+    ],
+  }
+}
+
+/** Item template: <li> with text bound to valueSig().label + " #" + indexSig() */
+function liIndexTemplate(vs: WritableSignal<unknown>, is: WritableSignal<number>): TemplateIR {
+  return {
+    id: 'li-index',
+    shape: { html: '<li><!--nv-0--></li>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'text',
+        pathIndex: 0,
+        expr: () => `${(vs() as Item).label}#${is()}`,
+      } satisfies TextBinding,
+    ],
+  }
+}
+
+// §8 obligation 1: Initial render — N items, correct order + content
+test('TC-10a  initial render: N items correct order and content', () => {
+  const items = signal<Item[]>([
+    { id: 1, label: 'A' },
+    { id: 2, label: 'B' },
+    { id: 3, label: 'C' },
+  ])
+  const ir = makeListIR(() => items(), liTextTemplate)
+  const parent = mkParent()
+  const dispose = mount(ir, parent, document)
+  flushSync()
+
+  const ul = parent.querySelector('ul')!
+  const lis = ul.querySelectorAll('li')
+  expect(lis.length, '3 items').toBe(3)
+  expect(lis[0]!.textContent, 'first item').toBe('A')
+  expect(lis[1]!.textContent, 'second item').toBe('B')
+  expect(lis[2]!.textContent, 'third item').toBe('C')
+
+  dispose()
+  rmParent(parent)
+})
+
+// §8 obligation 2: Append / prepend / insert-middle — new roots, correct DOM position
+test('TC-10b  append: new item added at end', () => {
+  const items = signal<Item[]>([{ id: 1, label: 'A' }])
+  const ir = makeListIR(() => items(), liTextTemplate)
+  const parent = mkParent()
+  const dispose = mount(ir, parent, document)
+  flushSync()
+
+  items.set([
+    { id: 1, label: 'A' },
+    { id: 2, label: 'B' },
+  ])
+  flushSync()
+
+  const lis = parent.querySelectorAll('li')
+  expect(lis.length, '2 items after append').toBe(2)
+  expect(lis[0]!.textContent, 'first still A').toBe('A')
+  expect(lis[1]!.textContent, 'appended B').toBe('B')
+
+  dispose()
+  rmParent(parent)
+})
+
+test('TC-10c  prepend: new item added at beginning', () => {
+  const items = signal<Item[]>([{ id: 2, label: 'B' }])
+  const ir = makeListIR(() => items(), liTextTemplate)
+  const parent = mkParent()
+  const dispose = mount(ir, parent, document)
+  flushSync()
+
+  items.set([
+    { id: 1, label: 'A' },
+    { id: 2, label: 'B' },
+  ])
+  flushSync()
+
+  const lis = parent.querySelectorAll('li')
+  expect(lis.length, '2 items after prepend').toBe(2)
+  expect(lis[0]!.textContent, 'prepended A first').toBe('A')
+  expect(lis[1]!.textContent, 'B still second').toBe('B')
+
+  dispose()
+  rmParent(parent)
+})
+
+test('TC-10d  insert-middle: item inserted between existing items', () => {
+  const items = signal<Item[]>([
+    { id: 1, label: 'A' },
+    { id: 3, label: 'C' },
+  ])
+  const ir = makeListIR(() => items(), liTextTemplate)
+  const parent = mkParent()
+  const dispose = mount(ir, parent, document)
+  flushSync()
+
+  items.set([
+    { id: 1, label: 'A' },
+    { id: 2, label: 'B' },
+    { id: 3, label: 'C' },
+  ])
+  flushSync()
+
+  const lis = parent.querySelectorAll('li')
+  expect(lis.length, '3 items after insert').toBe(3)
+  expect(lis[0]!.textContent).toBe('A')
+  expect(lis[1]!.textContent).toBe('B')
+  expect(lis[2]!.textContent).toBe('C')
+
+  dispose()
+  rmParent(parent)
+})
+
+// §8 obligation 3: Remove — root disposed, DOM gone, no-leak
+test('TC-10e  remove: item DOM removed, reactive edges severed', () => {
+  const items = signal<Item[]>([
+    { id: 1, label: 'A' },
+    { id: 2, label: 'B' },
+  ])
+  const ir = makeListIR(() => items(), liTextTemplate)
+  const parent = mkParent()
+
+  // Track a signal that the removed item reads, to verify observer is severed.
+  const labelSig = signal('B-dynamic')
+  let removedVsSig: WritableSignal<unknown> | null = null
+
+  const irWithSpy = makeListIR(
+    () => items(),
+    (vs, is) => {
+      if ((vs() as Item).id === 2) removedVsSig = vs
+      return liTextTemplate(vs, is)
+    },
+  )
+
+  const dispose = mount(irWithSpy, parent, document)
+  flushSync()
+
+  expect(parent.querySelectorAll('li').length, '2 items before remove').toBe(2)
+
+  // Remove item id=2
+  items.set([{ id: 1, label: 'A' }])
+  flushSync()
+
+  const lis = parent.querySelectorAll('li')
+  expect(lis.length, '1 item after remove').toBe(1)
+  expect(lis[0]!.textContent, 'remaining item').toBe('A')
+
+  // The removed item's valueSig should have 0 observers (root disposed, edges severed)
+  if (removedVsSig !== null) {
+    expect(__test.observerCount(removedVsSig), 'removed item signal has 0 observers').toBe(0)
+  }
+
+  dispose()
+  rmParent(parent)
+})
+
+// §8 obligation 4: Value change at kept key — item DOM updates, root PERSISTS
+test('TC-10f  value change at kept key: DOM updates, item DOM node identity preserved', () => {
+  const items = signal<Item[]>([
+    { id: 1, label: 'A' },
+    { id: 2, label: 'B' },
+  ])
+  const ir = makeListIR(() => items(), liTextTemplate)
+  const parent = mkParent()
+  const dispose = mount(ir, parent, document)
+  flushSync()
+
+  const lisBefore = parent.querySelectorAll('li')
+  const firstLiBefore = lisBefore[0]!
+  const secondLiBefore = lisBefore[1]!
+
+  // Change item id=1's label — new object reference (immutable-item contract)
+  items.set([
+    { id: 1, label: 'A-updated' },
+    { id: 2, label: 'B' },
+  ])
+  flushSync()
+
+  const lisAfter = parent.querySelectorAll('li')
+  expect(lisAfter.length, 'still 2 items').toBe(2)
+  expect(lisAfter[0]!.textContent, 'first item updated').toBe('A-updated')
+  expect(lisAfter[1]!.textContent, 'second unchanged').toBe('B')
+
+  // NODE IDENTITY: same <li> elements — proves reactive-item (update), not rebuild (create/destroy)
+  expect(lisAfter[0]!, 'first li node identity preserved').toBe(firstLiBefore)
+  expect(lisAfter[1]!, 'second li node identity preserved').toBe(secondLiBefore)
+
+  dispose()
+  rmParent(parent)
+})
+
+// §8 obligation 5: Reorder — DOM order matches, roots persist, index accessor updates
+test('TC-10g  reorder: DOM order matches new array, roots persist, index reactive', () => {
+  const items = signal<Item[]>([
+    { id: 1, label: 'A' },
+    { id: 2, label: 'B' },
+    { id: 3, label: 'C' },
+  ])
+  // Use index template so we can verify the index signal updates
+  const ir = makeListIR(() => items(), liIndexTemplate)
+  const parent = mkParent()
+  const dispose = mount(ir, parent, document)
+  flushSync()
+
+  const lisBefore = Array.from(parent.querySelectorAll('li'))
+  // Initial: A#0, B#1, C#2
+  expect(lisBefore[0]!.textContent).toBe('A#0')
+  expect(lisBefore[1]!.textContent).toBe('B#1')
+  expect(lisBefore[2]!.textContent).toBe('C#2')
+
+  // Reorder to [C, A, B]
+  items.set([
+    { id: 3, label: 'C' },
+    { id: 1, label: 'A' },
+    { id: 2, label: 'B' },
+  ])
+  flushSync()
+
+  const lisAfter = Array.from(parent.querySelectorAll('li'))
+  expect(lisAfter.length, '3 items after reorder').toBe(3)
+  expect(lisAfter[0]!.textContent, 'C now first').toBe('C#0')
+  expect(lisAfter[1]!.textContent, 'A now second').toBe('A#1')
+  expect(lisAfter[2]!.textContent, 'B now third').toBe('B#2')
+
+  // Node identity: same <li> elements in new positions (roots persisted, not rebuilt)
+  // The <li> that was C (index 2 before) should now be at position 0.
+  // We can verify by checking if any before-node matches an after-node.
+  expect(
+    lisAfter.some((li) => lisBefore.includes(li)),
+    'same li nodes reused',
+  ).toBe(true)
+
+  dispose()
+  rmParent(parent)
+})
+
+// §8 obligation 6: Key collision → error-route (not last-wins, not throw-through)
+test('TC-10h  key collision: duplicate key in snapshot → error-route', () => {
+  const items = signal<Item[]>([{ id: 1, label: 'A' }])
+  const ir = makeListIR(() => items(), liTextTemplate)
+  const parent = mkParent()
+
+  let caughtError: unknown = null
+
+  // Mount inside an error boundary to catch the throw from the reconcile effect
+  const dispose = coreCreateRoot((d) => {
+    errorBoundary(
+      (e) => {
+        caughtError = e
+      },
+      () => {
+        mount(ir, parent, document)
+      },
+    )
+    return d
+  })
+  flushSync()
+
+  // Trigger a duplicate key
+  items.set([
+    { id: 1, label: 'A' },
+    { id: 1, label: 'A-dup' }, // duplicate id=1
+  ])
+  flushSync()
+
+  expect(caughtError, 'error caught by boundary').not.toBeNull()
+  expect(String(caughtError), 'error mentions duplicate key').toMatch(/duplicate key/)
+
+  dispose()
+  rmParent(parent)
+})
+
+// §8 obligation 7: List unmount — all item roots disposed, no-leak
+test('TC-10i  list unmount: all item roots disposed, no reactive leaks', () => {
+  const labelA = signal('A')
+  const labelB = signal('B')
+
+  const items = signal<Item[]>([
+    { id: 1, label: 'A' },
+    { id: 2, label: 'B' },
+  ])
+
+  // Use templates that close over the external signals, so we can observe observer counts
+  const ir = makeListIR(
+    () => items(),
+    (vs, _is) => ({
+      id: 'li-ext',
+      shape: { html: '<li><!--nv-0--></li>', bindingPaths: [[0, 0]] },
+      bindings: [
+        {
+          kind: 'text',
+          pathIndex: 0,
+          expr: () => ((vs() as Item).id === 1 ? labelA() : labelB()),
+        } satisfies TextBinding,
+      ],
+    }),
+  )
+
+  const parent = mkParent()
+  const dispose = mount(ir, parent, document)
+  flushSync()
+
+  expect(__test.observerCount(labelA) >= 1, 'labelA observed while mounted').toBe(true)
+  expect(__test.observerCount(labelB) >= 1, 'labelB observed while mounted').toBe(true)
+
+  dispose()
+
+  expect(__test.observerCount(labelA), 'labelA has 0 observers after list unmount').toBe(0)
+  expect(__test.observerCount(labelB), 'labelB has 0 observers after list unmount').toBe(0)
+  expect(__test.observerCount(items), 'items signal has 0 observers after list unmount').toBe(0)
+
+  expect(parent.querySelectorAll('li').length, 'no li elements after unmount').toBe(0)
+
+  rmParent(parent)
+})
+
+// §8 obligation 8: Nested ListBinding — disposal cascades correctly
+test('TC-10j  nested ListBinding: disposal cascades to inner list', () => {
+  type Group = { id: number; label: string; children: Item[] }
+  const groups = signal<Group[]>([
+    {
+      id: 1,
+      label: 'G1',
+      children: [
+        { id: 11, label: 'A' },
+        { id: 12, label: 'B' },
+      ],
+    },
+  ])
+
+  const outerLabel = signal('outer')
+
+  const innerItems = (vs: WritableSignal<unknown>) => (vs() as Group).children as readonly unknown[]
+
+  const innerIR = (vs: WritableSignal<unknown>): TemplateIR => ({
+    id: 'inner-list',
+    shape: { html: '<ul><!--nv-0--></ul>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'list',
+        pathIndex: 0,
+        items: () => innerItems(vs),
+        key: (item) => (item as Item).id,
+        itemTemplate: (childVs, _childIs) => ({
+          id: 'inner-li',
+          shape: { html: '<li><!--nv-0--></li>', bindingPaths: [[0, 0]] },
+          bindings: [
+            {
+              kind: 'text',
+              pathIndex: 0,
+              expr: () => (childVs() as Item).label,
+            } satisfies TextBinding,
+          ],
+        }),
+      } satisfies ListBinding,
+    ],
+  })
+
+  const outerIR: TemplateIR = {
+    id: 'outer-list',
+    shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'list',
+        pathIndex: 0,
+        items: () => groups() as readonly unknown[],
+        key: (g) => (g as Group).id,
+        itemTemplate: (vs, _is) => innerIR(vs),
+      } satisfies ListBinding,
+    ],
+  }
+
+  const parent = mkParent()
+  const dispose = mount(outerIR, parent, document)
+  flushSync()
+
+  expect(parent.querySelectorAll('li').length, '2 inner items initially').toBe(2)
+  expect(__test.observerCount(groups) >= 1, 'groups observed').toBe(true)
+
+  dispose()
+
+  expect(parent.querySelectorAll('li').length, '0 li after dispose').toBe(0)
+  expect(__test.observerCount(groups), 'groups has 0 observers after dispose').toBe(0)
+
   rmParent(parent)
 })

@@ -150,14 +150,28 @@ export type ConditionalBinding = BaseBinding & {
   alternate: TemplateIR | null
 }
 
-// ── Designed, deferred ────────────────────────────────────────────────────────
+// ── Designed, now in scope ────────────────────────────────────────────────────
 
-/** Keyed list reconciliation. DESIGNED, NOT IN PoC SCOPE. */
+/**
+ * Minimal writable-signal interface. Structurally compatible with core's
+ * SignalAccessor<T>; defined here so the IR stays DOM-free and core-free.
+ */
+export interface WritableSignal<T> {
+  (): T
+  set(v: T): void
+}
+
+/**
+ * Keyed list reconciliation. One reconcile effect + per-item createRoot (§6).
+ * itemTemplate is a factory called per item: receives per-item valueSig and
+ * indexSig; returns a TemplateIR whose expressions close over those signals.
+ * The renderer supplies the signals; the compiler emits references to them.
+ */
 export type ListBinding = BaseBinding & {
   kind: 'list'
   items: ReactiveExpr<readonly unknown[]>
   key: (item: unknown, index: number) => string | number
-  itemTemplate: TemplateIR
+  itemTemplate: (valueSig: WritableSignal<unknown>, indexSig: WritableSignal<number>) => TemplateIR
 }
 
 /**

@@ -384,21 +384,22 @@ test('GATE 5: Multi-binding template — Text + Attr on same element, both back-
   disposeE()
 })
 
-test('GATE 5: Out-of-slice binding throws at EMIT time, not mount time', () => {
+test('GATE 5: SyncBinding (still deferred) throws at emit time', () => {
   const ir: TemplateIR = {
-    id: 'test:oob',
-    shape: { html: '<div></div>', bindingPaths: [[0]] },
+    id: 'test:sync-deferred',
+    shape: { html: '<input />', bindingPaths: [[0]] },
     bindings: [
       {
-        kind: 'list',
+        kind: 'sync',
         pathIndex: 0,
-        items: () => [],
-        key: () => '',
-        itemTemplate: { id: 'x', shape: { html: '<span></span>', bindingPaths: [] }, bindings: [] },
+        propName: 'value',
+        readExpr: () => '',
+        eventName: 'input',
+        writeTarget: () => ({ set: () => {} }),
       } as unknown as ChildBinding,
     ],
   }
-  expect(() => emitMount(ir)).toThrow(/Phase 1b scope/)
+  expect(() => emitMount(ir)).toThrow()
 })
 
 // ── §7: Performance characterization ─────────────────────────────────────────

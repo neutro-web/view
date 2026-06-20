@@ -27,6 +27,7 @@ import { join } from 'node:path'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { type Page, expect, test } from '@playwright/test'
+import type { TemplateIR, WritableSignal } from '../../src/renderer/ir.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const BUNDLE = join(__dirname, 'dist', 'nv-bundle.js')
@@ -781,4 +782,473 @@ test('scheduler: signal writes batch until flushSync in real browser event loop'
     'scheduler: write must be pending (duringBatch should still be "before") — if "after", scheduler is not batching in the real event loop',
   ).toBe('before')
   expect(result.afterFlush, 'flushSync must drain the pending write').toBe('after')
+})
+
+// ── TC-10: ListBinding — interpreter vs emitter, both back-ends ───────────────
+
+function makeListPage(
+  itemsArr: Array<{ id: number; label: string }>,
+  backEnd: 'interpreter' | 'emitter',
+) {
+  // Returns JS source that constructs and mounts a ListBinding IR, then returns
+  // a snapshot function. Executed via page.evaluate().
+  // Note: page.evaluate serialises the function source — no closure capture.
+  return `(function() {
+    const { signal, flushSync, mount, emitMount } = window.__nv;
+
+    const items = signal(${JSON.stringify(itemsArr)});
+
+    const makeItemTemplate = (vs, is) => ({
+      id: 'li-item',
+      shape: { html: '<li><!--nv-0--></li>', bindingPaths: [[0, 0]] },
+      bindings: [{ kind: 'text', pathIndex: 0, expr: () => vs().label }]
+    });
+
+    const listIR = {
+      id: 'list-tc10',
+      shape: { html: '<ul><!--nv-0--></ul>', bindingPaths: [[0, 0]] },
+      bindings: [{
+        kind: 'list' as const,
+        pathIndex: 0,
+        items: () => items(),
+        key: (item) => item.id,
+        itemTemplate: makeItemTemplate,
+      }]
+    };
+
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+
+    const dispose = ${backEnd === 'interpreter' ? 'mount(listIR, parent, document)' : 'emitMount(listIR).mountFn(parent, document)'};
+    flushSync();
+
+    return { items, parent, dispose };
+  })()`
+}
+
+test('TC-10: ListBinding — initial render, both back-ends', async ({ page }) => {
+  await loadNv(page)
+
+  const result = await page.evaluate(() => {
+    const { signal, flushSync, mount, emitMount } = window.__nv
+
+    const makeIR = () => ({
+      id: 'list-tc10-init',
+      shape: { html: '<ul><!--nv-0--></ul>', bindingPaths: [[0, 0]] },
+      bindings: [
+        {
+          kind: 'list' as const,
+          pathIndex: 0,
+          items: () => [
+            { id: 1, label: 'A' },
+            { id: 2, label: 'B' },
+            { id: 3, label: 'C' },
+          ],
+          key: (item: unknown) => (item as { id: number }).id,
+          itemTemplate: (vs: WritableSignal<unknown>) =>
+            ({
+              id: 'li',
+              shape: { html: '<li><!--nv-0--></li>', bindingPaths: [[0, 0]] },
+              bindings: [
+                {
+                  kind: 'text' as const,
+                  pathIndex: 0,
+                  expr: () => (vs() as { label: string }).label,
+                },
+              ],
+            }) as TemplateIR,
+        },
+      ],
+    })
+
+    // Interpreter
+    const pI = document.createElement('div')
+    document.body.appendChild(pI)
+    mount(makeIR(), pI, document)
+    flushSync()
+
+    // Emitter
+    const pE = document.createElement('div')
+    document.body.appendChild(pE)
+    emitMount(makeIR()).mountFn(pE, document)
+    flushSync()
+
+    const iTexts = Array.from(pI.querySelectorAll('li')).map((li) => li.textContent)
+    const eTexts = Array.from(pE.querySelectorAll('li')).map((li) => li.textContent)
+
+    return { iTexts, eTexts }
+  })
+
+  expect(result.iTexts, 'interpreter initial render').toEqual(['A', 'B', 'C'])
+  expect(result.eTexts, 'emitter initial render').toEqual(['A', 'B', 'C'])
+})
+
+test('TC-10: ListBinding — append + remove, both back-ends', async ({ page }) => {
+  await loadNv(page)
+
+  const result = await page.evaluate(() => {
+    const { signal, flushSync, mount, emitMount } = window.__nv
+    type Item = { id: number; label: string }
+
+    function makeIR(itemsSig: { (): Item[]; set: (v: Item[]) => void }) {
+      return {
+        id: 'list-tc10-append',
+        shape: { html: '<ul><!--nv-0--></ul>', bindingPaths: [[0, 0]] },
+        bindings: [
+          {
+            kind: 'list' as const,
+            pathIndex: 0,
+            items: () => itemsSig(),
+            key: (item: unknown) => (item as { id: number }).id,
+            itemTemplate: (vs: WritableSignal<unknown>) =>
+              ({
+                id: 'li',
+                shape: { html: '<li><!--nv-0--></li>', bindingPaths: [[0, 0]] },
+                bindings: [
+                  {
+                    kind: 'text' as const,
+                    pathIndex: 0,
+                    expr: () => (vs() as { label: string }).label,
+                  },
+                ],
+              }) as TemplateIR,
+          },
+        ],
+      }
+    }
+
+    const sigsI = signal<Item[]>([{ id: 1, label: 'A' }])
+    const pI = document.createElement('div')
+    document.body.appendChild(pI)
+    mount(makeIR(sigsI), pI, document)
+    flushSync()
+
+    const sigsE = signal<Item[]>([{ id: 1, label: 'A' }])
+    const pE = document.createElement('div')
+    document.body.appendChild(pE)
+    emitMount(makeIR(sigsE)).mountFn(pE, document)
+    flushSync()
+
+    // Append
+    sigsI.set([
+      { id: 1, label: 'A' },
+      { id: 2, label: 'B' },
+    ])
+    sigsE.set([
+      { id: 1, label: 'A' },
+      { id: 2, label: 'B' },
+    ])
+    flushSync()
+
+    const afterAppend = {
+      i: Array.from(pI.querySelectorAll('li')).map((li) => li.textContent),
+      e: Array.from(pE.querySelectorAll('li')).map((li) => li.textContent),
+    }
+
+    // Remove
+    sigsI.set([{ id: 2, label: 'B' }])
+    sigsE.set([{ id: 2, label: 'B' }])
+    flushSync()
+
+    const afterRemove = {
+      i: Array.from(pI.querySelectorAll('li')).map((li) => li.textContent),
+      e: Array.from(pE.querySelectorAll('li')).map((li) => li.textContent),
+    }
+
+    return { afterAppend, afterRemove }
+  })
+
+  expect(result.afterAppend.i, 'interpreter after append').toEqual(['A', 'B'])
+  expect(result.afterAppend.e, 'emitter after append').toEqual(['A', 'B'])
+  expect(result.afterRemove.i, 'interpreter after remove').toEqual(['B'])
+  expect(result.afterRemove.e, 'emitter after remove').toEqual(['B'])
+})
+
+test('TC-10: ListBinding — value change at kept key (node identity), both back-ends', async ({
+  page,
+}) => {
+  await loadNv(page)
+
+  const result = await page.evaluate(() => {
+    const { signal, flushSync, mount, emitMount } = window.__nv
+    type Item = { id: number; label: string }
+
+    function makeIR(itemsSig: { (): Item[]; set: (v: Item[]) => void }) {
+      return {
+        id: 'list-tc10-val',
+        shape: { html: '<ul><!--nv-0--></ul>', bindingPaths: [[0, 0]] },
+        bindings: [
+          {
+            kind: 'list' as const,
+            pathIndex: 0,
+            items: () => itemsSig(),
+            key: (item: unknown) => (item as { id: number }).id,
+            itemTemplate: (vs: WritableSignal<unknown>) =>
+              ({
+                id: 'li',
+                shape: { html: '<li><!--nv-0--></li>', bindingPaths: [[0, 0]] },
+                bindings: [
+                  {
+                    kind: 'text' as const,
+                    pathIndex: 0,
+                    expr: () => (vs() as { label: string }).label,
+                  },
+                ],
+              }) as TemplateIR,
+          },
+        ],
+      }
+    }
+
+    const sigsI = signal<Item[]>([
+      { id: 1, label: 'A' },
+      { id: 2, label: 'B' },
+    ])
+    const pI = document.createElement('div')
+    document.body.appendChild(pI)
+    mount(makeIR(sigsI), pI, document)
+    flushSync()
+    const liBeforeI = Array.from(pI.querySelectorAll('li'))
+
+    const sigsE = signal<Item[]>([
+      { id: 1, label: 'A' },
+      { id: 2, label: 'B' },
+    ])
+    const pE = document.createElement('div')
+    document.body.appendChild(pE)
+    emitMount(makeIR(sigsE)).mountFn(pE, document)
+    flushSync()
+    const liBeforeE = Array.from(pE.querySelectorAll('li'))
+
+    // Value change (new reference, same id)
+    sigsI.set([
+      { id: 1, label: 'A-updated' },
+      { id: 2, label: 'B' },
+    ])
+    sigsE.set([
+      { id: 1, label: 'A-updated' },
+      { id: 2, label: 'B' },
+    ])
+    flushSync()
+
+    const liAfterI = Array.from(pI.querySelectorAll('li'))
+    const liAfterE = Array.from(pE.querySelectorAll('li'))
+
+    return {
+      iText: liAfterI.map((li) => li.textContent),
+      eText: liAfterE.map((li) => li.textContent),
+      // Node identity: same objects after update?
+      iIdentity: liAfterI[0] === liBeforeI[0] && liAfterI[1] === liBeforeI[1],
+      eIdentity: liAfterE[0] === liBeforeE[0] && liAfterE[1] === liBeforeE[1],
+    }
+  })
+
+  expect(result.iText, 'interpreter text updated').toEqual(['A-updated', 'B'])
+  expect(result.eText, 'emitter text updated').toEqual(['A-updated', 'B'])
+  expect(result.iIdentity, 'interpreter: same li nodes (reactive-item, not rebuild)').toBe(true)
+  expect(result.eIdentity, 'emitter: same li nodes (reactive-item, not rebuild)').toBe(true)
+})
+
+test('TC-10: ListBinding — reorder, both back-ends', async ({ page }) => {
+  await loadNv(page)
+
+  const result = await page.evaluate(() => {
+    const { signal, flushSync, mount, emitMount } = window.__nv
+    type Item = { id: number; label: string }
+
+    function makeIR(itemsSig: { (): Item[]; set: (v: Item[]) => void }) {
+      return {
+        id: 'list-tc10-reorder',
+        shape: { html: '<ul><!--nv-0--></ul>', bindingPaths: [[0, 0]] },
+        bindings: [
+          {
+            kind: 'list' as const,
+            pathIndex: 0,
+            items: () => itemsSig(),
+            key: (item: unknown) => (item as { id: number }).id,
+            itemTemplate: (vs: WritableSignal<unknown>) =>
+              ({
+                id: 'li',
+                shape: { html: '<li><!--nv-0--></li>', bindingPaths: [[0, 0]] },
+                bindings: [
+                  {
+                    kind: 'text' as const,
+                    pathIndex: 0,
+                    expr: () => (vs() as { label: string }).label,
+                  },
+                ],
+              }) as TemplateIR,
+          },
+        ],
+      }
+    }
+
+    const sigsI = signal<Item[]>([
+      { id: 1, label: 'A' },
+      { id: 2, label: 'B' },
+      { id: 3, label: 'C' },
+    ])
+    const pI = document.createElement('div')
+    document.body.appendChild(pI)
+    mount(makeIR(sigsI), pI, document)
+    flushSync()
+
+    const sigsE = signal<Item[]>([
+      { id: 1, label: 'A' },
+      { id: 2, label: 'B' },
+      { id: 3, label: 'C' },
+    ])
+    const pE = document.createElement('div')
+    document.body.appendChild(pE)
+    emitMount(makeIR(sigsE)).mountFn(pE, document)
+    flushSync()
+
+    // Reorder to [C, A, B]
+    sigsI.set([
+      { id: 3, label: 'C' },
+      { id: 1, label: 'A' },
+      { id: 2, label: 'B' },
+    ])
+    sigsE.set([
+      { id: 3, label: 'C' },
+      { id: 1, label: 'A' },
+      { id: 2, label: 'B' },
+    ])
+    flushSync()
+
+    return {
+      iTexts: Array.from(pI.querySelectorAll('li')).map((li) => li.textContent),
+      eTexts: Array.from(pE.querySelectorAll('li')).map((li) => li.textContent),
+    }
+  })
+
+  expect(result.iTexts, 'interpreter reordered').toEqual(['C', 'A', 'B'])
+  expect(result.eTexts, 'emitter reordered').toEqual(['C', 'A', 'B'])
+})
+
+test('TC-10: ListBinding — key collision → error-route, both back-ends', async ({ page }) => {
+  await loadNv(page)
+
+  const result = await page.evaluate(() => {
+    const { signal, flushSync, mount, errorBoundary, createRoot } = window.__nv
+    type Item = { id: number; label: string }
+
+    const items = signal<Item[]>([{ id: 1, label: 'A' }])
+    const listIR = {
+      id: 'list-tc10-dup',
+      shape: { html: '<ul><!--nv-0--></ul>', bindingPaths: [[0, 0]] },
+      bindings: [
+        {
+          kind: 'list' as const,
+          pathIndex: 0,
+          items: () => items(),
+          key: (item: unknown) => (item as { id: number }).id,
+          itemTemplate: (vs: WritableSignal<unknown>) =>
+            ({
+              id: 'li',
+              shape: { html: '<li><!--nv-0--></li>', bindingPaths: [[0, 0]] },
+              bindings: [
+                {
+                  kind: 'text' as const,
+                  pathIndex: 0,
+                  expr: () => (vs() as { label: string }).label,
+                },
+              ],
+            }) as TemplateIR,
+        },
+      ],
+    }
+
+    const p = document.createElement('div')
+    document.body.appendChild(p)
+    let caughtError: string | null = null
+
+    const dispose = createRoot((d: () => void) => {
+      errorBoundary(
+        (e: unknown) => {
+          caughtError = String(e)
+        },
+        () => {
+          mount(listIR, p, document)
+        },
+      )
+      return d
+    })
+
+    flushSync()
+
+    // Trigger duplicate key
+    items.set([
+      { id: 1, label: 'A' },
+      { id: 1, label: 'A-dup' },
+    ])
+    flushSync()
+
+    dispose()
+
+    return { caughtError }
+  })
+
+  expect(result.caughtError, 'error caught').not.toBeNull()
+  expect(result.caughtError, 'error mentions duplicate key').toMatch(/duplicate key/)
+})
+
+test('TC-10: ListBinding — list unmount (no-leak), both back-ends', async ({ page }) => {
+  await loadNv(page)
+
+  const result = await page.evaluate(() => {
+    const { signal, flushSync, mount, emitMount } = window.__nv
+    type Item = { id: number; label: string }
+
+    const items = signal<Item[]>([
+      { id: 1, label: 'A' },
+      { id: 2, label: 'B' },
+    ])
+    const makeIR = () => ({
+      id: 'list-tc10-unmount',
+      shape: { html: '<ul><!--nv-0--></ul>', bindingPaths: [[0, 0]] },
+      bindings: [
+        {
+          kind: 'list' as const,
+          pathIndex: 0,
+          items: () => items(),
+          key: (item: unknown) => (item as { id: number }).id,
+          itemTemplate: (vs: WritableSignal<unknown>) =>
+            ({
+              id: 'li',
+              shape: { html: '<li><!--nv-0--></li>', bindingPaths: [[0, 0]] },
+              bindings: [
+                {
+                  kind: 'text' as const,
+                  pathIndex: 0,
+                  expr: () => (vs() as { label: string }).label,
+                },
+              ],
+            }) as TemplateIR,
+        },
+      ],
+    })
+
+    const pI = document.createElement('div')
+    document.body.appendChild(pI)
+    const disposeI = mount(makeIR(), pI, document)
+    flushSync()
+
+    const pE = document.createElement('div')
+    document.body.appendChild(pE)
+    const disposeE = emitMount(makeIR()).mountFn(pE, document)
+    flushSync()
+
+    const liCountBefore = pI.querySelectorAll('li').length + pE.querySelectorAll('li').length
+
+    disposeI()
+    disposeE()
+
+    const liCountAfter = pI.querySelectorAll('li').length + pE.querySelectorAll('li').length
+
+    return { liCountBefore, liCountAfter }
+  })
+
+  expect(result.liCountBefore, '4 li before unmount (2 per back-end)').toBe(4)
+  expect(result.liCountAfter, '0 li after unmount').toBe(0)
 })

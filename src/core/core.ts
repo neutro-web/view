@@ -1159,6 +1159,43 @@ export function untrack<T>(fn: () => T): T {
   return doUntrack(fn)
 }
 
+// ── Owner capture / restore ───────────────────────────────────────────────────
+
+/**
+ * Opaque ownership scope handle. Capture with getOwner(); pass to runWithOwner().
+ * Enables spawning reactive child scopes (createRoot / effect / onCleanup) into a
+ * specific owner context from code that runs in a different reactive context — the
+ * key primitive for list reconcilers that must create per-item roots as siblings
+ * of the reconcile effect, not children of it.
+ *
+ * Intentionally opaque: callers hold an Owner but cannot inspect its internals.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: opaque — callers must not inspect
+export type Owner = { readonly _nv_owner_brand: any }
+
+/** Returns the current owner scope, or null if called outside any reactive scope. */
+export function getOwner(): Owner | null {
+  return currentOwner as unknown as Owner | null
+}
+
+/**
+ * Run `fn` in the given owner's scope without changing the current observer
+ * (tracking context). Any createRoot / effect / onCleanup calls inside `fn`
+ * will be owned by `owner`, not by the caller's current reactive context.
+ *
+ * Calling with owner=null detaches from all ownership (side effects created
+ * inside will be unowned and must be disposed manually).
+ */
+export function runWithOwner<T>(owner: Owner | null, fn: () => T): T {
+  const prev = currentOwner
+  currentOwner = owner as unknown as ReactiveNode | null
+  try {
+    return fn()
+  } finally {
+    currentOwner = prev
+  }
+}
+
 // ── createRoot ───────────────────────────────────────────────────────────────
 
 export function createRoot<T>(fn: (dispose: () => void) => T): T {

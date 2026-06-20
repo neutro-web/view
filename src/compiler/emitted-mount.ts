@@ -32,7 +32,7 @@
  *   - List/Sync bindings: throw at emit time.
  */
 
-import { createRoot, effect, onCleanup } from '../core/core.js'
+import { createRoot, effect, getOwner, onCleanup, runWithOwner, signal } from '../core/core.js'
 import type { Binding, NodePath, TemplateIR } from '../renderer/ir.js'
 import type { BindingErasureVerdict } from './types.js'
 
@@ -318,10 +318,127 @@ function emitSetup(
         break
       }
 
+      case 'list': {
+        // Direct-capture: items, key, itemTemplate factory captured at emit time.
+        const items = binding.items
+        const keyFn = binding.key
+        const makeItemTemplate = binding.itemTemplate
+        // Item templates are emitted dynamically per item (per-item signals aren't
+        // known at emit time), so pass empty verdicts to the per-item emitSetup call.
+        const listEmptyVerdicts = new Map<number, BindingErasureVerdict>()
+
+        wireSpecs.push({
+          accessor,
+          wire(anchorNode, doc) {
+            const parent = anchorNode.parentNode
+            if (parent === null) throw new Error('[nv/emit] ListBinding: anchor has no parent')
+
+            const listOwner = getOwner()
+
+            type EmitItemRecord = {
+              valueSig: ReturnType<typeof signal<unknown>>
+              indexSig: ReturnType<typeof signal<number>>
+              lastValue: unknown
+              lastIndex: number
+              rootEl: Node
+              dispose: () => void
+            }
+            const records = new Map<string | number, EmitItemRecord>()
+
+            effect(() => {
+              const next = items()
+
+              const nextKeys = new Map<string | number, number>()
+              for (let i = 0; i < next.length; i++) {
+                // biome-ignore lint/style/noNonNullAssertion: bounded by next.length
+                const item = next[i]!
+                const k = keyFn(item, i)
+                if (nextKeys.has(k)) {
+                  throw new Error(
+                    `[nv/emit] ListBinding: duplicate key "${String(k)}" at index ${i}`,
+                  )
+                }
+                nextKeys.set(k, i)
+              }
+
+              for (const [k, rec] of records) {
+                if (!nextKeys.has(k)) {
+                  rec.dispose()
+                  records.delete(k)
+                }
+              }
+
+              for (let i = 0; i < next.length; i++) {
+                // biome-ignore lint/style/noNonNullAssertion: bounded by next.length
+                const item = next[i]!
+                const k = keyFn(item, i)
+                const existing = records.get(k)
+
+                if (existing === undefined) {
+                  const valueSig = signal<unknown>(item)
+                  const indexSig = signal<number>(i)
+                  let mountedRoot!: Node
+
+                  const dispose = runWithOwner(listOwner, () =>
+                    createRoot((d) => {
+                      const itemIR = makeItemTemplate(valueSig, indexSig)
+                      const { setup } = emitSetup(itemIR, listEmptyVerdicts)
+                      const { rootEl } = setup(parent, doc, anchorNode)
+                      mountedRoot = rootEl
+                      onCleanup(() => {
+                        if (mountedRoot.parentNode !== null)
+                          mountedRoot.parentNode.removeChild(mountedRoot)
+                      })
+                      return d
+                    }),
+                  )
+
+                  records.set(k, {
+                    valueSig,
+                    indexSig,
+                    lastValue: item,
+                    lastIndex: i,
+                    rootEl: mountedRoot,
+                    dispose,
+                  })
+                } else {
+                  if (!Object.is(existing.lastValue, item)) {
+                    existing.valueSig.set(item)
+                    existing.lastValue = item
+                  }
+                  if (existing.lastIndex !== i) {
+                    existing.indexSig.set(i)
+                    existing.lastIndex = i
+                  }
+                }
+              }
+
+              let ref: Node = anchorNode
+              for (let i = next.length - 1; i >= 0; i--) {
+                // biome-ignore lint/style/noNonNullAssertion: bounded by next.length
+                const k = keyFn(next[i]!, i)
+                // biome-ignore lint/style/noNonNullAssertion: key inserted/existed above
+                const rec = records.get(k)!
+                if (rec.rootEl.nextSibling !== ref) {
+                  parent.insertBefore(rec.rootEl, ref)
+                }
+                ref = rec.rootEl
+              }
+            })
+
+            onCleanup(() => {
+              for (const rec of records.values()) rec.dispose()
+              records.clear()
+            })
+          },
+        })
+        break
+      }
+
       default: {
         const kind = (binding as Binding).kind
         throw new Error(
-          `[nv/emit] Binding kind '${kind}' is not in Phase 1b scope. ListBinding/SyncBinding are deferred.`,
+          `[nv/emit] Binding kind '${kind}' is not implemented. SyncBinding is deferred.`,
         )
       }
     }

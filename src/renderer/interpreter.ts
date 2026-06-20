@@ -40,17 +40,19 @@
  *   - Flag if jsdom diverges from real browsers on any of these.
  */
 
-import { createRoot, effect, onCleanup } from '../core/core.js'
+import { createRoot, effect, getOwner, onCleanup, runWithOwner, signal } from '../core/core.js'
 import type {
   AttrBinding,
   Binding,
   ChildBinding,
   ConditionalBinding,
   EventBinding,
+  ListBinding,
   NodePath,
   PropBinding,
   TemplateIR,
   TextBinding,
+  WritableSignal,
 } from './ir.js'
 
 // ── DOM utilities ─────────────────────────────────────────────────────────────
@@ -115,7 +117,10 @@ function wireBinding(binding: Binding, targetNode: Node, doc: Document): void {
       wireConditional(binding, targetNode, doc)
       break
     }
-    case 'list':
+    case 'list': {
+      wireList(binding, targetNode, doc)
+      break
+    }
     case 'sync': {
       throw new Error(
         `[nv/interpreter] v0: '${binding.kind}' binding is designed but not yet implemented in the interpreter. Deferred per IR §9.2.`,
@@ -236,6 +241,130 @@ function wireChild(binding: ChildBinding, anchorNode: Node, doc: Document): void
       )
     }
     textNode.data = v == null ? '' : String(v)
+  })
+}
+
+// ── ListBinding ───────────────────────────────────────────────────────────────
+
+type ItemRecord = {
+  valueSig: WritableSignal<unknown>
+  indexSig: WritableSignal<number>
+  lastValue: unknown
+  lastIndex: number
+  rootEl: Node
+  dispose: () => void
+}
+
+function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
+  // Anchor is a Comment node; items are inserted before it (same pattern as ChildBinding).
+  const parent = anchorNode.parentNode
+  if (parent === null) {
+    throw new Error('[nv/interpreter] ListBinding: anchor has no parent')
+  }
+
+  const records = new Map<string | number, ItemRecord>()
+
+  // Capture the outer owner (the mount region's createRoot scope) so item roots can be
+  // created as its CHILDREN rather than as children of the reconcile effect. If item
+  // roots were children of the reconcile effect, preRunCleanup would dispose them on every
+  // re-run, destroying per-item reactive signals before op 3/4 could update them.
+  const listOwner = getOwner()
+
+  effect(() => {
+    const next = binding.items() // the only tracked read in this effect
+
+    // Key collision detection: duplicate key in one snapshot → error-route (§4.4)
+    const nextKeys = new Map<string | number, number>()
+    for (let i = 0; i < next.length; i++) {
+      // biome-ignore lint/style/noNonNullAssertion: bounded by next.length
+      const item = next[i]!
+      const k = binding.key(item, i)
+      if (nextKeys.has(k)) {
+        throw new Error(`[nv/interpreter] ListBinding: duplicate key "${String(k)}" at index ${i}`)
+      }
+      nextKeys.set(k, i)
+    }
+
+    // Op 2: remove stale records (key absent from next snapshot)
+    for (const [k, rec] of records) {
+      if (!nextKeys.has(k)) {
+        rec.dispose()
+        records.delete(k)
+      }
+    }
+
+    // Ops 1/3/4: create new items; update value/index for kept items
+    for (let i = 0; i < next.length; i++) {
+      // biome-ignore lint/style/noNonNullAssertion: bounded by next.length
+      const item = next[i]!
+      const k = binding.key(item, i)
+      const existing = records.get(k)
+
+      if (existing === undefined) {
+        // Op 1: new key — create per-item signals and a dedicated root scope.
+        // runWithOwner(listOwner) ensures the item root is a sibling of the reconcile
+        // effect (child of the outer mount scope), not a child of the reconcile effect.
+        // This prevents preRunCleanup from disposing item roots on every reconcile re-run.
+        const valueSig = signal<unknown>(item)
+        const indexSig = signal<number>(i)
+        let mountedRoot!: Node
+
+        const dispose = runWithOwner(listOwner, () =>
+          createRoot((d) => {
+            const itemIR = binding.itemTemplate(valueSig, indexSig)
+            const { rootEl } = mountFragment(itemIR, parent, doc, anchorNode)
+            mountedRoot = rootEl
+            onCleanup(() => {
+              if (mountedRoot.parentNode !== null) mountedRoot.parentNode.removeChild(mountedRoot)
+            })
+            return d
+          }),
+        )
+
+        records.set(k, {
+          valueSig,
+          indexSig,
+          lastValue: item,
+          lastIndex: i,
+          rootEl: mountedRoot,
+          dispose,
+        })
+      } else {
+        // Op 3: value changed (immutable-item contract; compare by reference, not valueSig() read)
+        // NOT reading valueSig() here — that would subscribe the reconcile effect to per-item
+        // signals, creating a dependency that re-runs reconcile on every item value change.
+        if (!Object.is(existing.lastValue, item)) {
+          existing.valueSig.set(item)
+          existing.lastValue = item
+        }
+        // Op 4: index changed — update indexSig and record
+        if (existing.lastIndex !== i) {
+          existing.indexSig.set(i)
+          existing.lastIndex = i
+        }
+      }
+    }
+
+    // DOM ordering: walk next in reverse, insertBefore to enforce sequence.
+    // Each item's rootEl is the single-root element (e.g. <li>) of its mounted fragment.
+    // O(N) moves worst-case; correct for add/remove/reorder (LIS-Ivi move-minimization deferred).
+    let ref: Node = anchorNode
+    for (let i = next.length - 1; i >= 0; i--) {
+      // biome-ignore lint/style/noNonNullAssertion: bounded by next.length
+      const k = binding.key(next[i]!, i)
+      // biome-ignore lint/style/noNonNullAssertion: key was just set above (op1) or existed
+      const rec = records.get(k)!
+      if (rec.rootEl.nextSibling !== ref) {
+        parent.insertBefore(rec.rootEl, ref)
+      }
+      ref = rec.rootEl
+    }
+  })
+
+  // Parent teardown: dispose all item roots when the list region unmounts (§6 cascade)
+  onCleanup(() => {
+    for (const rec of records.values()) rec.dispose()
+    records.clear()
   })
 }
 
