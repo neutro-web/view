@@ -42,8 +42,15 @@ Legend: **REAL** = production-complete & verified · **PARTIAL** = works for a s
 | `ir.ts` | REAL | IR types, matches Template-IR v0.2 exactly. 8 binding kinds (6 PoC + List landed + Sync deferred). |
 | `interpreter.ts` | REAL | Back-end / **semantic ground truth**. Exports `mount(ir, parent, doc): () => void` and `walkPath`. `mount` **creates its own `createRoot`**; effects enqueued, run on first flush. `mountFragment(ir,parent,doc,before?)` is **internal (not exported)** — there is **no setup-without-root primitive**. Handles all 6 PoC kinds + list; sync throws. Nested roots (conditional/list) are bridged manually via `onCleanup`. |
 | `html-tag.ts` | **PARTIAL** | Tagged-template front-end (`createHtmlTag(doc)`). **Handles `text` + `attr` ONLY.** No prop/event/child/conditional/list. All holes must be thunks (`() => …`); non-function throws. Produces **real** (live-closure) thunks. |
-| `nv-parser.ts` | **PARTIAL / structural-only** | `.nv` front-end. `parseNvFile(src, fileName, doc)` calls `preprocessMutationWrites` **internally** (call once). Produces real `shape.html` / `bindingPaths` / kinds / names / ACCEPT-PLAIN verdicts, **but all binding thunks are STUBS** (`const stubExpr = (() => undefined)`; FE tests do not compare thunks). Produces kinds: **text, attr, prop, event, conditional**. **Does NOT produce child or list** (no `.nv` syntax). **Discards** `$script` body, module imports, and non-`$component` top-level code (keeps signal/derived *names* only). |
+| `nv-parser.ts` | PARTIAL → **REAL for the build path** | Adds `parseNvFileForEmit` + `eraseHandlerExpr` + `computeThunksForTemplate`/`computeThunkSource` + `extractScriptBodySource`/`extractModuleScope`. `parseNvFile` (structural-only, stub thunks) unchanged and still used by FE-equivalence tests. `parseNvFileForEmit` returns the real `emit` payload: erased `scriptBody`, index-aligned `bindingThunks` (recursive for conditional), `moduleScope`. |
+| `nv-emitter.ts` | **REAL** | `emitModule(results) → ES module text`. IR object literal; nested-root factory with `onCleanup(disposeMount)` bridge; minimal imports via word-boundary detection; throws on error diagnostics. Spec §5. |
+| `nv-esbuild-plugin.ts` | **REAL** | `nvPlugin()`: `onLoad(/\.nv$/)` → jsdom doc → `parseNvFileForEmit` → `emitModule` → `{ contents, loader: 'js' }`. Thin I/O glue. |
+| build pipeline (overall) | **PARTIAL** | Transform + erasure layer REAL and verified. **Executable-module gate still OPEN** — see Known gaps. |
 | `comparator.ts` | REAL | Structural DOM comparison (`structurallyEqual`) for the differential suite. |
+
+**Published surface note.** `@neutro/view/renderer` barrel now also exports `parseNvFileForEmit`
+and types `NvEmitPayload` / `ThunkSource` — intended, the build tool is an external consumer.
+`@neutro/view/core` (`src/core/index.ts`) unchanged.
 
 ### `test/`, `integration/`
 Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Playwright gate
@@ -59,11 +66,12 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
   another reactive scope (conditional, list, and the build pipeline's `$script` wrapper) must
   bridge the inner `createRoot`'s disposer via `onCleanup` — `createRoot` does **not**
   auto-attach to the parent owner.
-- **Erasure regions.** `preprocessMutationWrites` erases bare-reads + mutation-writes inside
-  `$script` blocks. **`parseNvFileForEmit` additionally erases render-template holes** (bare-read
-  everywhere; mutation-write in event handler bodies via `eraseHandlerExpr`). Known gap:
-  destructuring assignment targets in handlers fall through to bare-read only (fails safe; see
-  Known gaps).
+- **Erasure regions: `$script` (via `preprocessMutationWrites`) AND render holes (via
+  `parseNvFileForEmit`).** Render-hole erasure: bare-read on every hole; **bare-read +
+  mutation-write on event handlers** (`eraseHandlerExpr`, handles arrow block-body *and*
+  arrow-expression-body assignments; reuses the `$script` shadow helpers — no duplicated
+  logic). `parseNvFile` (the non-emit path) still does not erase render holes; only
+  `parseNvFileForEmit` does.
 - **SignalId derivation** must use the same `signalSymbolId` across compiler steps 1–2/4 and
   any renderer write-back (SyncBinding `writeTargetId`).
 - **`core.ts` is never modified by the compiler** (standing constraint). Field order locked.
@@ -72,17 +80,24 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
 
 ## Known gaps / stubs / v0 limitations (named, not hidden)
 
-- **Render-hole erasure built (build pipeline landed).** `eraseHandlerExpr` handles simple +
-  compound assignment in handler arrow bodies (bare-read + mutation-write). **Known gap:
-  destructuring assignment targets** (`[a, b] = ...`, `({ x } = ...)`) are not detected as
-  signal writes — they fall through to bare-read erasure only (fails safe, no false-positive
-  `.set()`). Document at the authoring surface; no v1 fix planned.
-- **Executable-module gate open** — round-trip suite verifies erased thunk sources (via
-  `new Function` + real primitives → `mount` → DOM); does **not** execute `emitModule`'s
-  emitted string. Close by `import()`-ing an emitted module with `@neutro/view/*` mapped to
-  `src/` and asserting its mounted DOM. (2026-06-20)
-- **`.nv` parser thunks are stubs** — only structural form is real; runnable thunks must be
-  generated by the consumer from erased hole source.
+- **Build pipeline executable-module gate — OPEN.** The round-trip suite
+  (`nv-emitter.test.ts` EM-01..12) verifies the **erased thunk sources** by `eval`-ing
+  `emit.bindingThunks` via `new Function` + real primitives → mount → DOM. It does **not**
+  execute `emitModule`'s emitted string; module string-assembly (esp. the conditional
+  literal in `emitThunkSource`/`emitIrLiteral`, imports, `bindingPaths` rendering) is
+  covered only by `toContain` smoke checks (EM-11). Close by writing one emitted module to
+  a temp file and `import()`-ing it with `@neutro/view/*` mapped to `src/` (import map /
+  esbuild alias / vite-node), then mounting that output and asserting DOM. Until then, the
+  pipeline is verified for transform/erasure but **not** for emitted-module execution.
+- **Handler destructuring-write gap.** `eraseHandlerExpr` does not detect destructuring
+  assignment targets (`[a,b] = …`, `({x} = …)`) as signal writes — falls through to
+  bare-read only, no false-positive `.set()` (fails safe). A destructuring write to a
+  signal needs explicit `.set()` in v1. Documented, not a soundness hole.
+- **`extractModuleScope` edge:** passes top-level imports + non-`$component` statements
+  through verbatim; verify non-`const` component forms and `$component` helper functions
+  behave as intended (low risk).
+- **`parseNvFile` thunks are stubs** — structural form is real; thunks are `(() => undefined)`.
+  Use `parseNvFileForEmit` for the build path (returns real erased thunk sources).
 - **Child & List not `.nv`-reachable** — interpreter supports them via hand-authored IR only.
 - **`html-tag.ts` covers text/attr only** — prop/event/conditional require manual IR or the
   `.nv` path.
