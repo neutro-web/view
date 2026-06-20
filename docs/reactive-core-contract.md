@@ -904,6 +904,15 @@ A conforming core MUST pass at minimum:
 23. **Hook-off equivalence** — with all compiler hooks unset, behavior is identical
     to the pure-runtime semantics above (so the baseline is well defined for
     specialization benchmarking). (§10.)
+24. **Owner-context capture / redirection** — `getOwner()` + `runWithOwner(owner, fn)`
+    redirect *ownership* without affecting *tracking*. A scope created via
+    `runWithOwner(capturedOwner, () => createRoot(...))` inside a running effect is
+    owned by `capturedOwner`, not the effect: it survives that effect re-running
+    (the effect's pre-run disposal does not reach it) and is disposed only when
+    `capturedOwner` is disposed. A tracked read performed inside `runWithOwner`
+    still registers against the *current observer* (the owner swap leaves
+    `currentObserver` untouched). `runWithOwner(null, …)` detaches — the created
+    scope is unowned and must be disposed manually. (§6.1.)
 
 ---
 
