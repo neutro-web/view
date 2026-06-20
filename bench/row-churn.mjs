@@ -495,18 +495,120 @@ function runVariantC(variantBMedian) {
   return s
 }
 
+// ── Variant A-FALSE — reactive-only FALSE sweep, no emitMount/JSDOM ──────────
+// Same shape as Variant A but applies __test.setCompilerEquals(sig, false) to the
+// first falseN signals in each row. Runs FALSE=0 / FALSE=1 / FALSE=all in sequence,
+// each with its own full WARMUP+TRIALS loop so the JIT is independently warm for
+// every cell. Interleaving within a single trial loop biases later cells (cell 1, 2)
+// with JIT that the baseline (cell 0) didn't get — this structure avoids that.
+//
+// Purpose: isolate the HC-transition cost of FALSE annotation against a clean
+// reactive-only baseline, killing the JSDOM-dilution caveat that contaminated the
+// Variant B/C measurements. If the HC transition has measurable construction cost
+// it will show here; if it doesn't, the Variant C JSDOM result is confirmed noise.
+//
+// Does NOT run alien (not relevant — alien has no equivalent annotation).
+// Does NOT run disposal (not the question; disposal was shown ~1x across A sweep).
+
+function runVariantAFalse() {
+  console.log('\n── Variant A-FALSE: reactive-only FALSE sweep (no emitMount, no JSDOM) ──')
+  console.log(`   N=${N_ROWS} rows/cycle  signals/row=${N_SIGNALS}  deriveds/row=${N_DERIVEDS}`)
+  console.log(`   Warmup=${WARMUP}  Trials=${TRIALS}  (each cell runs its own full warm-up)`)
+  console.log('   FALSE cells: 0 (baseline) / 1 (judgment) / all (bracket)')
+  console.log('   Timer: construction-loop only (create, no dispose)')
+
+  const falseCells = [0, 1, N_SIGNALS] // 0=baseline, 1=realistic, N_SIGNALS=all
+
+  const cellSamples = [[], [], []] // one sample array per FALSE cell
+
+  for (let ci = 0; ci < falseCells.length; ci++) {
+    const falseN = falseCells[ci]
+
+    // Each cell gets its own full WARMUP+TRIALS loop so the JIT is warm independently.
+    for (let trial = 0; trial < WARMUP + TRIALS; trial++) {
+      GC()
+
+      const nvFns = []
+      const nvDisposes = []
+
+      const t0 = performance.now()
+      for (let r = 0; r < N_ROWS; r++) {
+        const dispose = createRoot((d) => {
+          const sigs = []
+          for (let si = 0; si < N_SIGNALS; si++) {
+            const sig = signal(r * N_SIGNALS + si)
+            if (si < falseN) __test.setCompilerEquals(sig, false)
+            sigs.push(sig)
+            nvFns.push(sig)
+          }
+          for (let di = 0; di < N_DERIVEDS; di++) {
+            const src = sigs[di % N_SIGNALS]
+            const der = derived(() => src() + 1)
+            der()
+            nvFns.push(der)
+          }
+          return d
+        })
+        nvDisposes.push(dispose)
+      }
+      const t1 = performance.now()
+
+      // Dispose outside timer — matching Variant A split.
+      for (let r = 0; r < N_ROWS; r++) nvDisposes[r]()
+      assertNoLeak(nvFns, `variant-A-FALSE-${falseN}`)
+
+      if (trial >= WARMUP) cellSamples[ci].push(t1 - t0)
+    }
+  }
+
+  const results = falseCells.map((falseN, ci) => ({ falseN, s: stats(cellSamples[ci]) }))
+  const baseline = results[0].s.med
+
+  for (const { falseN, s } of results) {
+    const label =
+      falseN === 0
+        ? 'FALSE=0 (baseline)'
+        : falseN === N_SIGNALS
+          ? `FALSE=all (${falseN}/${N_SIGNALS}) [bracket]`
+          : `FALSE=${falseN}/${N_SIGNALS} [judgment cell]`
+    fmtStats(`  nv construction ${label}`, s)
+    const delta = ((s.med - baseline) / baseline) * 100
+    if (falseN !== 0) {
+      console.log(
+        `  ${'    delta vs FALSE=0'.padEnd(42)} ${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%` +
+          `  (${fmt(s.med)} vs ${fmt(baseline)})`,
+      )
+    }
+  }
+
+  return results
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
+// PROF_A_ONLY=1: run Variant A + A-FALSE only — B and C (which use JSDOM) are
+// disabled so --prof ticks are not polluted by parse5 / JSDOM DOM work.
+// Use for --prof attribution runs: the signal in Variant A's profile is clean;
+// mixing in B/C buries it under JSDOM overhead.
+
+const PROF_A_ONLY = Boolean(process.env.PROF_A_ONLY)
 
 console.log('=== Row-Churn Harness (perf tripwires #1 + #2) ===')
 console.log(`alien-signals 3.1.2  |  Node ${process.version}`)
 console.log(
   `N_ROWS=${N_ROWS}  N_SIGNALS=${N_SIGNALS}  N_DERIVEDS=${N_DERIVEDS}  FALSE_COUNT=${FALSE_COUNT}`,
 )
+if (PROF_A_ONLY) console.log('PROF_A_ONLY=1 — Variants B and C disabled')
 console.log('Sweep one dimension at a time; re-run for each §6 cell.')
 
 const resA = runVariantA()
-const resB = runVariantB()
-const _resC = runVariantC(resB.med)
+const resAF = runVariantAFalse()
+
+let resB
+let _resC
+if (!PROF_A_ONLY) {
+  resB = runVariantB()
+  _resC = runVariantC(resB.med)
+}
 
 console.log('\n=== Summary ===')
 console.log(
@@ -520,21 +622,37 @@ console.log(
 console.log(
   `Variant A combined   ratio (ref):    ${resA.combinedRatio.toFixed(2)}x  (construction+disposal conflated)`,
 )
-console.log(
-  `Variant B full-row med:               ${fmt(resB.med)}  (${fmt(resB.med / N_ROWS)}/row)`,
-)
-const baRatio = resB.med / resA.nvCrS.med
-console.log(`Variant B/A ratio (binding+mount vs reactive construction): ${baRatio.toFixed(0)}x`)
+if (resB) {
+  console.log(
+    `Variant B full-row med:               ${fmt(resB.med)}  (${fmt(resB.med / N_ROWS)}/row)`,
+  )
+  const baRatio = resB.med / resA.nvCrS.med
+  console.log(`Variant B/A ratio (binding+mount vs reactive construction): ${baRatio.toFixed(0)}x`)
+}
+const afBaseline = resAF[0].s.med
+for (const { falseN, s } of resAF) {
+  const tag =
+    falseN === 0 ? '(baseline)' : falseN === N_SIGNALS ? '(all — bracket)' : '(judgment cell)'
+  const delta = ((s.med - afBaseline) / afBaseline) * 100
+  const deltaTxt = falseN === 0 ? '' : `  Δ${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%`
+  console.log(
+    `Variant A-FALSE=${falseN === N_SIGNALS ? 'all' : falseN} ${tag}:` +
+      `  ${fmt(s.med)}${deltaTxt}`,
+  )
+}
 console.log()
 console.log('Outcome routing (spec §8):')
 console.log(
   `  Tripwire #1: construction ratio = ${resA.createRatio.toFixed(2)}x  (hint: ≤1.5 likely clear; ≤3.0 borderline; >3.0 material gap — confirm via --prof)`,
 )
-console.log('  --prof required before verdict: construction wall-clock alone cannot distinguish')
-console.log(
-  '  WeakMap.set + fn.set cost from createRoot scope overhead, GC pressure, or JIT warm-up.',
-)
-console.log(
-  '  Run: node --prof bench/row-churn.mjs && node --prof-process isolate-*.log | head -80',
-)
-console.log('  Tripwire #2: inspect delta-vs-B in Variant C. The 1-FALSE cell drives the judgment.')
+if (PROF_A_ONLY) {
+  console.log('  [PROF_A_ONLY run — use --prof-process on the isolate-*.log for attribution]')
+} else {
+  console.log('  --prof required: run PROF_A_ONLY=1 node --prof bench/row-churn.mjs')
+}
+if (resB) {
+  console.log(
+    '  Tripwire #2: inspect delta-vs-B in Variant C. The 1-FALSE cell drives the judgment.',
+  )
+}
+console.log('  Tripwire #2 (clean): see Variant A-FALSE judgment cell delta above.')
