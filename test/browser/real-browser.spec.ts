@@ -223,7 +223,7 @@ test('TC-03: PropBinding — interpreter vs emitter, initial + update', async ({
     const ir = {
       id: 'prop-tc03',
       shape: { html: '<input>', bindingPaths: [[0]] },
-      bindings: [{ kind: 'prop', pathIndex: 0, name: 'value', expr: () => val() }],
+      bindings: [{ kind: 'prop' as const, pathIndex: 0, name: 'value', expr: () => val() }],
     }
 
     const parentA = document.createElement('div')
@@ -292,13 +292,13 @@ test('TC-04 + FLAG-1: EventBinding — real click fires handler, downstream DOM 
       },
       bindings: [
         {
-          kind: 'event',
+          kind: 'event' as const,
           pathIndex: 0,
           eventName: 'click',
           handler: () => handler,
-          handlerKind: 'reactive',
+          handlerKind: 'reactive' as const,
         },
-        { kind: 'text', pathIndex: 1, expr: () => String(clicks()) },
+        { kind: 'text' as const, pathIndex: 1, expr: () => String(clicks()) },
       ],
     }
 
@@ -365,13 +365,13 @@ test('TC-04: real Playwright .click() fires handler + DOM updates (true real int
       },
       bindings: [
         {
-          kind: 'event',
+          kind: 'event' as const,
           pathIndex: 0,
           eventName: 'click',
           handler: () => handler,
-          handlerKind: 'reactive',
+          handlerKind: 'reactive' as const,
         },
-        { kind: 'text', pathIndex: 1, expr: () => String(count()) },
+        { kind: 'text' as const, pathIndex: 1, expr: () => String(count()) },
       ],
     }
     mount(ir, document.body, document)
@@ -406,7 +406,7 @@ test('TC-05: ChildBinding — interpreter vs emitter, primitive text', async ({ 
     const ir = {
       id: 'child-tc05',
       shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0, 0]] },
-      bindings: [{ kind: 'child', pathIndex: 0, expr: () => content() }],
+      bindings: [{ kind: 'child' as const, pathIndex: 0, expr: () => content() }],
     }
 
     const parentA = document.createElement('div')
@@ -478,7 +478,7 @@ test('TC-06: ConditionalBinding — interpreter vs emitter, flip + no accumulate
       shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0, 0]] },
       bindings: [
         {
-          kind: 'conditional',
+          kind: 'conditional' as const,
           pathIndex: 0,
           condition: () => show(),
           consequent,
@@ -555,7 +555,7 @@ test('TC-07: Disposal — DOM removed, writes no longer update (real browser)', 
     const ir = {
       id: 'dispose-tc07',
       shape: { html: '<span></span>', bindingPaths: [[0]] },
-      bindings: [{ kind: 'text', pathIndex: 0, expr: () => String(count()) }],
+      bindings: [{ kind: 'text' as const, pathIndex: 0, expr: () => String(count()) }],
     }
 
     const parentA = document.createElement('div')
@@ -661,7 +661,9 @@ test('TC-09: ChildBinding non-primitive → runtime error thrown in real browser
     const ir = {
       id: 'child-reject-tc09',
       shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0, 0]] },
-      bindings: [{ kind: 'child', pathIndex: 0, expr: () => domNode }],
+      bindings: [
+        { kind: 'child' as const, pathIndex: 0, expr: () => domNode as unknown as string },
+      ],
     }
 
     const parent = document.createElement('div')
@@ -711,7 +713,7 @@ test('scheduler: flushSync drains synchronously in real browser event loop', asy
     const ir = {
       id: 'scheduler-drain',
       shape: { html: '<span><!--nv-0--></span>', bindingPaths: [[0, 0]] },
-      bindings: [{ kind: 'text', pathIndex: 0, expr: () => val() }],
+      bindings: [{ kind: 'text' as const, pathIndex: 0, expr: () => val() }],
     }
 
     const parent = document.createElement('div')
