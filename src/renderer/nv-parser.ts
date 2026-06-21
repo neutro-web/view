@@ -1134,7 +1134,7 @@ export function parseNvFile(source: string, fileName: string, doc: Document): Nv
         scriptSignals: [...symbols.writable, ...symbols.readonly],
         style: extractStyleInfo(componentFn),
         verdicts: renderResult.verdicts,
-        diagnostics: [...diagnostics],
+        diagnostics: [...diagnostics, ...renderResult.diagnostics],
       })
     }
   })
@@ -1544,7 +1544,7 @@ export function parseNvFileForEmit(
         }
       }
 
-      const allDiagnostics = [...diagnostics, ...emitDiagnostics]
+      const allDiagnostics = [...diagnostics, ...emitDiagnostics, ...renderResult.diagnostics]
 
       results.push({
         name,

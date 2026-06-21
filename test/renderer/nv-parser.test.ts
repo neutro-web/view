@@ -1191,3 +1191,38 @@ describe('nv-parser — component element detection', () => {
     expect(scriptBody).toContain('props.label()')
   })
 })
+
+describe('TC-slot-warning: slot content in component element emits warning diagnostic', () => {
+  it('warns when component element has child content', () => {
+    // Template needs a hole so the DFS walk runs (no-substitution templates return early).
+    const nvSource = [
+      'export const App = $component(() => {',
+      '  $script(() => { const n = signal(0) })',
+      '  $render(() => html`<div><Card .title="${n}"><p>hello</p></Card></div>`)',
+      '})',
+    ].join('\n')
+    const results = parseNvFile(nvSource, 'app.nv', document)
+    const diags = results[0]?.diagnostics ?? []
+    expect(
+      diags.some(
+        (d) => d.kind === 'warning' && d.message.includes('slot content is not yet supported'),
+      ),
+    ).toBe(true)
+  })
+
+  it('no warning when component element has no children', () => {
+    const nvSource = [
+      'export const App = $component(() => {',
+      '  $script(() => { const n = signal(0) })',
+      '  $render(() => html`<div><Counter .count="${n}"/></div>`)',
+      '})',
+    ].join('\n')
+    const results = parseNvFile(nvSource, 'app.nv', document)
+    const diags = results[0]?.diagnostics ?? []
+    expect(
+      diags.some(
+        (d) => d.kind === 'warning' && d.message.includes('slot content is not yet supported'),
+      ),
+    ).toBe(false)
+  })
+})
