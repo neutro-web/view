@@ -192,6 +192,26 @@ export type SyncBinding = BaseBinding & {
   transform?: (eventValue: unknown, current: unknown) => unknown
 }
 
+// ── ComponentBinding (v0.3) ───────────────────────────────────────────────────
+
+/** Local structural type — DOM-free and core-free (per ir.ts header discipline). */
+export type PropsObject = { readonly [name: string]: ReactiveExpr }
+/** Local structural type — slot content keyed by name. */
+export type SlotFns = { readonly [name: string]: TemplateIR }
+/** Factory the back-end calls: receives live props + slot IRs, returns child TemplateIR. */
+export type ComponentRef = (props: PropsObject, slots: SlotFns) => TemplateIR
+
+export type PropEntry = { name: string; expr: ReactiveExpr }
+export type SlotEntry = { name: string; content: TemplateIR }
+
+export type ComponentBinding = BaseBinding & {
+  kind: 'component'
+  component: ComponentRef
+  props: readonly PropEntry[]
+  propNames: readonly string[]
+  slots: readonly SlotEntry[]
+}
+
 export type Binding =
   | TextBinding
   | AttrBinding
@@ -201,3 +221,4 @@ export type Binding =
   | ConditionalBinding
   | ListBinding
   | SyncBinding
+  | ComponentBinding
