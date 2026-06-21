@@ -102,7 +102,11 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
 - **`html-tag.ts` covers text/attr only** — prop/event/conditional require manual IR or the
   `.nv` path.
 - **Component API undesigned** — props/slots/identity/ComponentBinding is the next design gate
-  (IR §9.3, *open*). No public component-invocation contract exists.
+  (IR §9.3, *open*). No public component-invocation contract exists. **Props-erasure mechanics
+  designed + verified** (spike, 2026-06-20, 74/74 — erasure mechanics 39/39 + liveness 35/35
+  against real core.ts); feeds component-api-spec §3. ComponentBinding/props/slots still
+  unbuilt. Handler destructuring-write gap scheduled to close via the shared destructuring
+  analyzer (D3) when the component API lands.
 - **Equality hook inert; step 4 shelved** — neither specialization is wired to save work.
 - **SyncBinding** throws at both back-ends.
 - **Multi-root mount/dispose — FIXED (v0.2.1).** Both back-ends now snapshot all fragment
