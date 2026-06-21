@@ -43,7 +43,7 @@ Legend: **REAL** = production-complete & verified · **PARTIAL** = works for a s
 | `interpreter.ts` | REAL | Back-end / **semantic ground truth**. Exports `mount(ir, parent, doc): () => void` and `walkPath`. `mount` **creates its own `createRoot`**; effects enqueued, run on first flush. `mountFragment(ir,parent,doc,before?)` is **internal (not exported)**. Handles all 6 PoC kinds + list + component (`wireComponent`); sync throws. Nested roots (conditional/list/component) bridged via `onCleanup`. |
 | `html-tag.ts` | **PARTIAL** | Tagged-template front-end (`createHtmlTag(doc)`). Handles `text`, `attr`, `prop` (`.name=`), `event` (`@name=`), and **`component`** (capitalized tag detection, `data-nv-component` sentinel). Static inter-tag slot content captured as default-slot IR. Dynamic/nested-component slot content fires a warning (deferred). All holes thunks; non-function throws. |
 | `nv-parser.ts` | PARTIAL → **REAL for the build path** | Adds `parseNvFileForEmit` + `eraseHandlerExpr` + `computeThunksForTemplate`/`computeThunkSource` + `extractScriptBodySource`/`extractModuleScope`. `parseNvFile` (structural-only, stub thunks) unchanged. `parseNvFileForEmit` returns the real `emit` payload: erased `scriptBody`, index-aligned `bindingThunks` (recursive for conditional + component), `moduleScope`. Component detection: `processHtmlTemplate` DFS walk detects capitalized tags via `data-nv-component` sentinel, builds `ComponentBinding` with throwing stub factory, captures propEntries via `buildPropsAccessorMap`, captures static default-slot IR. `buildPropsAccessorMap` is the shared props-destructure analyzer used in `eraseScriptBlock`, `eraseHandlerExpr`, and `computeThunkSource`. |
-| `nv-emitter.ts` | **REAL** | `emitModule(results) → ES module text`. IR object literal; nested-root factory with `onCleanup(disposeMount)` bridge; minimal imports via word-boundary detection; throws on error diagnostics. Spec §5. |
+| `nv-emitter.ts` | **REAL** | `emitModule(results) → ES module text`. A2 shape: `(props, slots) => TemplateIR` ComponentRef + `Name.mount` sugar. Imports: only $script-referenced primitives + `mount`. No forced `createRoot`/`onCleanup`. Composition gap CLOSED. Spec §5. |
 | `nv-esbuild-plugin.ts` | **REAL** | `nvPlugin()`: `onLoad(/\.nv$/)` → jsdom doc → `parseNvFileForEmit` → `emitModule` → `{ contents, loader: 'js' }`. Thin I/O glue. |
 | build pipeline (overall) | **REAL** | Transform + erasure layer verified. Executable-module gate CLOSED (EX-01..03, dynamic import, esbuild alias). Multi-root dispose fixed. |
 | `comparator.ts` | REAL | Structural DOM comparison (`structurallyEqual`) for the differential suite. |
@@ -121,6 +121,6 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
 ---
 
 ## Not built at all (forward queue)
-`$style` scoping, SyncBinding, emitter factory shape convergence (emitted component as child),
+`$style` scoping, SyncBinding,
 LIS list move-minimization (parked), kind-split (parked behind real-app evidence),
 `roots[0] as Node` biome-laundering cleanup (replace with `biome-ignore` + `!`; no runtime impact).
