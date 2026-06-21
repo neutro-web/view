@@ -665,9 +665,10 @@ const C = $component(() => {
     const results = parseNvFileForEmit(source, 'test.nv', document)
     const js = emitModule(results)
     expect(js).toContain("from '@neutro/view/core'")
-    expect(js).toContain('createRoot')
-    expect(js).toContain('onCleanup')
     expect(js).toContain('signal')
+    // createRoot and onCleanup are no longer force-included; only signal (from $script) appears
+    expect(js).not.toContain('createRoot')
+    expect(js).not.toContain('onCleanup')
   })
 
   test('EM-11c  emitted string imports mount from @neutro/view/renderer', () => {
@@ -690,9 +691,12 @@ const C = $component(() => {
 })`
     const results = parseNvFileForEmit(source, 'test.nv', document)
     const js = emitModule(results)
-    expect(js).toContain('__ir')
+    // No __ir intermediate — IR literal is returned directly
+    expect(js).not.toContain('__ir')
     expect(js).toContain('shape')
     expect(js).toContain('bindings')
+    // .mount sugar is emitted
+    expect(js).toContain('.mount =')
   })
 
   test('EM-11e  counter fixture: full emitted .js smoke check', () => {
@@ -711,10 +715,13 @@ const Counter = $component(() => {
     expect(js).toContain('count()')
     // Factory
     expect(js).toContain('export function Counter(')
-    // mount call
-    expect(js).toContain('mount(__ir, parent, doc)')
-    // onCleanup bridge
-    expect(js).toContain('onCleanup(disposeMount)')
+    // IR returned directly, not via __ir intermediate
+    expect(js).not.toContain('__ir')
+    // .mount sugar
+    expect(js).toContain('Counter.mount =')
+    expect(js).toContain('mount(Counter(props, slots), parent, doc)')
+    // No onCleanup in the factory body
+    expect(js).not.toContain('onCleanup(disposeMount)')
   })
 })
 
@@ -902,45 +909,4 @@ const App = $component(() => {
   expect(propSrc).toBe('n()') // not 'n'
 })
 
-// ── TC-C16: ComponentRef shape — no mount method on instance ─────────────────
-
-describe('TC-C16  emitted factory returns ComponentRef, not { mount }', () => {
-  test('TC-C16a  Counter(props, slots) returns object with shape + bindings, no .mount', () => {
-    const source = `
-const Counter = $component((props) => {
-  $script(() => { const { count } = props })
-  $render(() => html\`<span>\${count}</span>\`)
-})`
-    const results = parseNvFileForEmit(source, 'counter.nv', document)
-    const js = emitModule(results)
-    // Evaluate the factory with real primitives
-    const scope = { signal, derived, effect, createRoot, onCleanup, flushSync, mount }
-    const fn = new Function(...Object.keys(scope), `${js}\nreturn Counter`)
-    const Counter = fn(...Object.values(scope)) as (
-      props: Record<string, unknown>,
-      slots: Record<string, unknown>,
-    ) => unknown
-    const ir = Counter({}, {})
-    // Must be a plain object with shape/bindings
-    expect(ir).toBeDefined()
-    expect(typeof ir).toBe('object')
-    expect((ir as Record<string, unknown>).shape).toBeDefined()
-    expect((ir as Record<string, unknown>).bindings).toBeDefined()
-    // Must NOT have a .mount method on the returned IR
-    expect((ir as Record<string, unknown>).mount).toBeUndefined()
-  })
-
-  test('TC-C16b  Counter.mount is a function (sugar on the factory)', () => {
-    const source = `
-const Counter = $component((props) => {
-  $script(() => { const { count } = props })
-  $render(() => html\`<span>\${count}</span>\`)
-})`
-    const results = parseNvFileForEmit(source, 'counter.nv', document)
-    const js = emitModule(results)
-    const scope = { signal, derived, effect, createRoot, onCleanup, flushSync, mount }
-    const fn = new Function(...Object.keys(scope), `${js}\nreturn Counter`)
-    const Counter = fn(...Object.values(scope)) as { mount?: unknown }
-    expect(typeof Counter.mount).toBe('function')
-  })
-})
+// TC-C16 moved to nv-emitter-exec.test.ts (uses esbuild bundling; new Function cannot eval ESM imports)

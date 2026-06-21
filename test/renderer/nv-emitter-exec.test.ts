@@ -896,6 +896,43 @@ export { flushSync, signal } from '@neutro/view/core'
   })
 })
 
+// ── TC-C16: ComponentRef shape — no mount method on instance ─────────────────
+
+describe('TC-C16  emitted factory returns ComponentRef, not { mount }', () => {
+  const tc16Source = `
+const Counter = $component((props) => {
+  $script(() => { const { count } = props })
+  $render(() => html\`<span>\${count}</span>\`)
+})`
+
+  test('TC-C16a  Counter(props, slots) returns object with shape + bindings, no .mount', async () => {
+    const results = parseNvFileForEmit(tc16Source, 'counter.nv', sharedDoc)
+    const js = emitModule(results)
+    const bundlePath = await bundleEmittedJs(js)
+    const mod = (await import(bundlePath)) as BundleModule & {
+      Counter: (props: Record<string, unknown>, slots: Record<string, unknown>) => unknown
+    }
+    const ir = mod.Counter({}, {})
+    // Must be a plain object with shape/bindings
+    expect(ir).toBeDefined()
+    expect(typeof ir).toBe('object')
+    expect((ir as Record<string, unknown>).shape).toBeDefined()
+    expect((ir as Record<string, unknown>).bindings).toBeDefined()
+    // Must NOT have a .mount method on the returned IR
+    expect((ir as Record<string, unknown>).mount).toBeUndefined()
+  })
+
+  test('TC-C16b  Counter.mount is a function (sugar on the factory)', async () => {
+    const results = parseNvFileForEmit(tc16Source, 'counter.nv', sharedDoc)
+    const js = emitModule(results)
+    const bundlePath = await bundleEmittedJs(js)
+    const mod = (await import(bundlePath)) as BundleModule & {
+      Counter: { mount?: unknown }
+    }
+    expect(typeof mod.Counter.mount).toBe('function')
+  })
+})
+
 describe('TC-C15-parity  differential: interpreter vs emitted-mount produce identical DOM for nested component', () => {
   test('parity  same nested-component IR via interpreter mount vs emitted-mount → structurallyEqual DOM', async () => {
     // This test uses the round-trip approach: build IR directly via nv-parser,
