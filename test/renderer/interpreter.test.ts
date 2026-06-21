@@ -1955,3 +1955,132 @@ test('TC-C10  wireComponent: 1000-flip no-leak — component inside conditional'
   expect(parent.childElementCount).toBe(0)
   rmParent(parent)
 })
+
+// ── TC-C03: wireComponent — multi-prop, each updates independently ────────────
+
+test('TC-C03  wireComponent: multi-prop — each updates independently', () => {
+  const countSig = signal(0)
+  const labelSig = signal('Hits')
+  const parent = mkParent()
+  let countRuns = 0
+  let labelRuns = 0
+
+  const CounterFactory = (
+    props: { count: () => number; label: () => string },
+    _slots: unknown,
+  ): TemplateIR => ({
+    id: 'ctr',
+    shape: {
+      html: '<span><!--nv-0-->: <!--nv-1--></span>',
+      bindingPaths: [
+        [0, 0],
+        [0, 2],
+      ],
+    },
+    bindings: [
+      {
+        kind: 'text',
+        pathIndex: 0,
+        expr: () => {
+          countRuns++
+          return String(props.count())
+        },
+      },
+      {
+        kind: 'text',
+        pathIndex: 1,
+        expr: () => {
+          labelRuns++
+          return props.label()
+        },
+      },
+    ],
+  })
+
+  const parentIR: TemplateIR = {
+    id: 'p',
+    shape: { html: '<div><!--nv-comp-0--></div>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'component',
+        pathIndex: 0,
+        component: CounterFactory as ComponentBinding['component'],
+        props: [
+          { name: 'count', expr: () => countSig() },
+          { name: 'label', expr: () => labelSig() },
+        ],
+        propNames: ['count', 'label'],
+        slots: [],
+      } satisfies ComponentBinding,
+    ],
+  }
+
+  const dispose = mount(parentIR, parent, document)
+  flushSync()
+  const initCount = countRuns
+  const initLabel = labelRuns
+
+  countSig.set(1)
+  flushSync()
+  expect(countRuns).toBe(initCount + 1)
+  expect(labelRuns).toBe(initLabel) // label did NOT re-run
+
+  labelSig.set('Goals')
+  flushSync()
+  expect(labelRuns).toBe(initLabel + 1)
+
+  dispose()
+  rmParent(parent)
+})
+
+// ── TC-C12: wireComponent — component inside list item ────────────────────────
+
+test('TC-C12  wireComponent: component inside list item — per-item owner', () => {
+  const itemsSig = signal<unknown>(['a', 'b'])
+  const parent = mkParent()
+
+  const ItemFactory = (props: { label: () => unknown }, _slots: unknown): TemplateIR => ({
+    id: 'item',
+    shape: { html: '<li><!--nv-0--></li>', bindingPaths: [[0, 0]] },
+    bindings: [{ kind: 'text', pathIndex: 0, expr: () => String(props.label()) }],
+  })
+
+  const parentIR: TemplateIR = {
+    id: 'list',
+    shape: { html: '<ul><!--nv-0--></ul>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'list',
+        pathIndex: 0,
+        items: () => itemsSig() as unknown[],
+        key: (item) => item as string,
+        itemTemplate: (valueSig) => ({
+          id: 'li',
+          shape: { html: '<div><!--nv-comp-0--></div>', bindingPaths: [[0, 0]] },
+          bindings: [
+            {
+              kind: 'component',
+              pathIndex: 0,
+              component: ItemFactory as ComponentBinding['component'],
+              props: [{ name: 'label', expr: () => valueSig() }],
+              propNames: ['label'],
+              slots: [],
+            } satisfies ComponentBinding,
+          ],
+        }),
+      },
+    ],
+  }
+
+  const dispose = mount(parentIR, parent, document)
+  flushSync()
+  expect(parent.querySelectorAll('li').length).toBe(2)
+
+  itemsSig.set(['a'])
+  flushSync()
+  expect(parent.querySelectorAll('li').length).toBe(1)
+
+  dispose()
+  expect(parent.querySelectorAll('li').length).toBe(0)
+  rmParent(parent)
+})

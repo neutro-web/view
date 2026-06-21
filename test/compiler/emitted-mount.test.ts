@@ -1224,3 +1224,254 @@ test('TC-C10 emitted-mount: 1000-flip no-leak — component inside conditional',
   dispose()
   expect(container.childElementCount).toBe(0)
 })
+
+// ── TC-C02 (emitted-mount): static prop — constant accessor ──────────────────
+
+test('TC-C02 emitted-mount: static prop — constant accessor', () => {
+  const { document } = new JSDOM('<!DOCTYPE html><body></body>').window
+
+  const LabelFactory = (props: { label: () => string }): TemplateIR => ({
+    id: 'label',
+    shape: { html: '<span><!--nv-0--></span>', bindingPaths: [[0, 0]] },
+    bindings: [{ kind: 'text', pathIndex: 0, expr: () => props.label() }],
+  })
+
+  const parentIR: TemplateIR = {
+    id: 'parent',
+    shape: { html: '<div><!--nv-comp-0--></div>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'component',
+        pathIndex: 0,
+        component: LabelFactory as unknown as ComponentBinding['component'],
+        props: [{ name: 'label', expr: () => 'hello' }],
+        propNames: ['label'],
+        slots: [],
+      } satisfies ComponentBinding,
+    ],
+  }
+
+  const { mountFn } = emitMount(parentIR)
+  const dispose = mountFn(document.body as unknown as Element, document as unknown as Document)
+  flushSync()
+  expect(document.body.querySelector('span')?.textContent).toBe('hello')
+  dispose()
+  expect(document.body.querySelector('span')).toBeNull()
+})
+
+// ── TC-C03 (emitted-mount): multi-prop — each updates independently ───────────
+
+test('TC-C03 emitted-mount: multi-prop — each updates independently', () => {
+  const { document } = new JSDOM('<!DOCTYPE html><body></body>').window
+  const countSig = signal(0)
+  const labelSig = signal('Hits')
+  let countRuns = 0
+  let labelRuns = 0
+
+  const CounterFactory = (props: { count: () => number; label: () => string }): TemplateIR => ({
+    id: 'ctr',
+    shape: {
+      html: '<span><!--nv-0-->: <!--nv-1--></span>',
+      bindingPaths: [
+        [0, 0],
+        [0, 2],
+      ],
+    },
+    bindings: [
+      {
+        kind: 'text',
+        pathIndex: 0,
+        expr: () => {
+          countRuns++
+          return String(props.count())
+        },
+      },
+      {
+        kind: 'text',
+        pathIndex: 1,
+        expr: () => {
+          labelRuns++
+          return props.label()
+        },
+      },
+    ],
+  })
+
+  const parentIR: TemplateIR = {
+    id: 'p',
+    shape: { html: '<div><!--nv-comp-0--></div>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'component',
+        pathIndex: 0,
+        component: CounterFactory as unknown as ComponentBinding['component'],
+        props: [
+          { name: 'count', expr: () => countSig() },
+          { name: 'label', expr: () => labelSig() },
+        ],
+        propNames: ['count', 'label'],
+        slots: [],
+      } satisfies ComponentBinding,
+    ],
+  }
+
+  const { mountFn } = emitMount(parentIR)
+  const dispose = mountFn(document.body as unknown as Element, document as unknown as Document)
+  flushSync()
+  const initCount = countRuns
+  const initLabel = labelRuns
+
+  countSig.set(1)
+  flushSync()
+  expect(countRuns).toBe(initCount + 1)
+  expect(labelRuns).toBe(initLabel) // label did NOT re-run
+
+  labelSig.set('Goals')
+  flushSync()
+  expect(labelRuns).toBe(initLabel + 1)
+
+  dispose()
+})
+
+// ── TC-C08 (emitted-mount): default slot content mounts in child slot position ─
+
+test('TC-C08 emitted-mount: default slot content mounts in child slot position', () => {
+  const { document } = new JSDOM('<!DOCTYPE html><body></body>').window
+
+  const CardFactory = (_props: unknown, slots: { default?: TemplateIR }): TemplateIR => {
+    const slotIR = slots.default
+    return {
+      id: 'card',
+      shape: { html: '<div class="card"><!--nv-comp-0--></div>', bindingPaths: [[0, 0]] },
+      bindings: slotIR
+        ? [
+            {
+              kind: 'component',
+              pathIndex: 0,
+              component: () => slotIR,
+              props: [],
+              propNames: [],
+              slots: [],
+            } satisfies ComponentBinding,
+          ]
+        : [],
+    }
+  }
+
+  const slotContent: TemplateIR = {
+    id: 'slot-content',
+    shape: { html: '<p>hello slot</p>', bindingPaths: [] },
+    bindings: [],
+  }
+
+  const parentIR: TemplateIR = {
+    id: 'parent',
+    shape: { html: '<div><!--nv-comp-0--></div>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'component',
+        pathIndex: 0,
+        component: CardFactory as unknown as ComponentBinding['component'],
+        props: [],
+        propNames: [],
+        slots: [{ name: 'default', content: slotContent }],
+      } satisfies ComponentBinding,
+    ],
+  }
+
+  const { mountFn } = emitMount(parentIR)
+  const dispose = mountFn(document.body as unknown as Element, document as unknown as Document)
+  flushSync()
+  expect(document.body.querySelector('p')?.textContent).toBe('hello slot')
+  dispose()
+  expect(document.body.querySelector('p')).toBeNull()
+})
+
+// ── TC-C09 (emitted-mount): multi-root child — all roots cleaned up on dispose ─
+
+test('TC-C09 emitted-mount: multi-root child — all roots cleaned up on dispose', () => {
+  const { document } = new JSDOM('<!DOCTYPE html><body></body>').window
+
+  const MultiFactory = (_props: unknown, _slots: unknown): TemplateIR => ({
+    id: 'multi',
+    shape: { html: '<span>a</span><span>b</span>', bindingPaths: [] },
+    bindings: [],
+  })
+
+  const parentIR: TemplateIR = {
+    id: 'parent',
+    shape: { html: '<div><!--nv-comp-0--></div>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'component',
+        pathIndex: 0,
+        component: MultiFactory as unknown as ComponentBinding['component'],
+        props: [],
+        propNames: [],
+        slots: [],
+      } satisfies ComponentBinding,
+    ],
+  }
+
+  const { mountFn } = emitMount(parentIR)
+  const dispose = mountFn(document.body as unknown as Element, document as unknown as Document)
+  flushSync()
+  expect(document.body.querySelectorAll('span').length).toBe(2)
+  dispose()
+  expect(document.body.querySelectorAll('span').length).toBe(0)
+})
+
+// ── TC-C12 (emitted-mount): component inside list item — per-item owner ───────
+
+test('TC-C12 emitted-mount: component inside list item — per-item owner', () => {
+  const { document } = new JSDOM('<!DOCTYPE html><body></body>').window
+  const itemsSig = signal<unknown>(['a', 'b'])
+
+  const ItemFactory = (props: { label: () => unknown }): TemplateIR => ({
+    id: 'item',
+    shape: { html: '<li><!--nv-0--></li>', bindingPaths: [[0, 0]] },
+    bindings: [{ kind: 'text', pathIndex: 0, expr: () => String(props.label()) }],
+  })
+
+  const parentIR: TemplateIR = {
+    id: 'list',
+    shape: { html: '<ul><!--nv-0--></ul>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'list',
+        pathIndex: 0,
+        items: () => itemsSig() as unknown[],
+        key: (item) => item as string,
+        itemTemplate: (valueSig) => ({
+          id: 'li',
+          shape: { html: '<div><!--nv-comp-0--></div>', bindingPaths: [[0, 0]] },
+          bindings: [
+            {
+              kind: 'component',
+              pathIndex: 0,
+              component: ItemFactory as unknown as ComponentBinding['component'],
+              props: [{ name: 'label', expr: () => valueSig() }],
+              propNames: ['label'],
+              slots: [],
+            } satisfies ComponentBinding,
+          ],
+        }),
+      },
+    ],
+  }
+
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+
+  const { mountFn } = emitMount(parentIR)
+  const dispose = mountFn(container as unknown as Element, document as unknown as Document)
+  flushSync()
+  expect(container.querySelectorAll('li').length).toBe(2)
+
+  itemsSig.set(['a'])
+  flushSync()
+  expect(container.querySelectorAll('li').length).toBe(1)
+
+  dispose()
+  expect(container.querySelectorAll('li').length).toBe(0)
+})

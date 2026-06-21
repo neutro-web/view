@@ -958,13 +958,24 @@ function eraseScriptBlock(
       const accessor = propsAccessors.get(node.text) ?? ''
       const p = node.parent
       if (ts.isCallExpression(p) && p.expression === node) return
-      if (ts.isPropertyAccessExpression(p) && (p.expression === node || p.name === node)) return
       if (ts.isVariableDeclaration(p) && p.name === node) return
       if (ts.isParameter(p) && p.name === node) return
       if (ts.isShorthandPropertyAssignment(p)) return
       if (ts.isPropertyAssignment(p) && p.name === node) return
       if (ts.isImportSpecifier(p) || ts.isImportClause(p)) return
       if (ts.isLabeledStatement(p) && p.label === node) return
+      // REST binding: `rest.propKey` → `props.propKey()`
+      if (
+        accessor.startsWith('REST:') &&
+        ts.isPropertyAccessExpression(p) &&
+        p.expression === node &&
+        ts.isIdentifier(p.name)
+      ) {
+        const propKey = p.name.text
+        out.push({ start: p.getStart(), end: p.getEnd(), replacement: `props.${propKey}()` })
+        return
+      }
+      if (ts.isPropertyAccessExpression(p) && (p.expression === node || p.name === node)) return
       out.push({ start: node.getStart(), end: node.getEnd(), replacement: accessor })
       return
     }

@@ -46,6 +46,7 @@ import type {
 import {
   buildPropsAccessorMap,
   parseNvFile,
+  parseNvFileForEmit,
   preprocessMutationWrites,
 } from '../../src/renderer/nv-parser.js'
 import type { NvDiagnostic } from '../../src/renderer/nv-parser.js'
@@ -1157,5 +1158,36 @@ describe('nv-parser — component element detection', () => {
     preprocessMutationWrites(nvSource, 'test.nv', diags)
     expect(diags.length).toBeGreaterThan(0)
     expect(diags[0]?.message).toContain('read-only')
+  })
+
+  it('TC-C11-parser: nested prop destructure — D1 diagnostic', () => {
+    const nvSource = [
+      'export const Child = $component((props) => {',
+      '  $script(() => {',
+      '    const { user: { name } } = props',
+      '  })',
+      '  $render(() => html`<span></span>`)',
+      '})',
+    ].join('\n')
+    const results = parseNvFile(nvSource, 'child.nv', document)
+    const diags = results[0]?.diagnostics ?? []
+    expect(
+      diags.some((d) => d.kind === 'error' && d.message.toLowerCase().includes('nested')),
+    ).toBe(true)
+  })
+
+  it('TC-C06-parser: rest member access liveness — rest.label reads as props.label()', () => {
+    const nvSource = [
+      'export const Child = $component((props) => {',
+      '  $script(() => {',
+      '    const { count, ...rest } = props',
+      '    const x = rest.label',
+      '  })',
+      '  $render(() => html`<span></span>`)',
+      '})',
+    ].join('\n')
+    const results = parseNvFileForEmit(nvSource, 'child.nv', document)
+    const scriptBody = results[0]?.emit?.scriptBody ?? ''
+    expect(scriptBody).toContain('props.label()')
   })
 })
