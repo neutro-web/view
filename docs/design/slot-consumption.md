@@ -96,7 +96,10 @@ onCleanup(() => { for (const d of slotDisposers) d(); });  // bridges child tear
 Key points the gate must pin:
 - `capturedParentOwner` is captured at the parent call site, not inside the child root. If captured inside, slot effects would be owned by the child and disposed on child teardown while the parent still holds the signals — the exact hazard D-slot-1 avoids.
 - Slot content disposal is bridged both ways: parent disposal tears down the parent owner (which owns slot effects); child disposal runs the `onCleanup` above (which removes slot DOM + disposes the slot roots). Both must leave zero leaks.
-- An unfilled named slot renders nothing in v1 (fallback content is deferred).
+- An unfilled named slot renders nothing in v1 — specifically, no element and no
+  meaningful text. The outlet's anchor `Comment` remains in the DOM (same as
+  `child`/`conditional`/`component` anchors); it is inert. Fallback content is
+  deferred (forward queue).
 
 ## 6. IR / contract impact
 

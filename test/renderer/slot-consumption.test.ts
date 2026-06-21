@@ -11,6 +11,7 @@ import { createHtmlTag } from '../../src/renderer/html-tag.js'
 import { mount } from '../../src/renderer/interpreter.js'
 import type { ComponentBinding, TemplateIR } from '../../src/renderer/ir.js'
 import { parseNvFile } from '../../src/renderer/nv-parser.js'
+import { irStructurallyEqual } from './ir-equivalence.js'
 
 // ── Test infrastructure ────────────────────────────────────────────────────────
 
@@ -51,12 +52,9 @@ function mountC(ir: TemplateIR): () => void {
   return dispose
 }
 
-// ── G3.1 — FE-equivalence ─────────────────────────────────────────────────────
-
-describe('G3.1 — FE-equivalence: html-tag vs nv-parser produce identical slot sub-IRs', () => {
-  it('static default slot: both front-ends produce same slot sub-IR shape', () => {
-    // html-tag front-end: component with a static default slot child
-    // Use a prop hole so the template has expressions (enables component detection in nv-parser)
+// ── G3.1 — FE-equivalence (TIGHTENED: structural-comparator oracle) ───────────
+describe('G3.1 — FE-equivalence: html-tag vs nv-parser slot sub-IRs are structurally identical', () => {
+  it('static default slot: slot sub-IRs structurally identical across front-ends', () => {
     const html = createHtmlTag(doc)
     const label = 'test'
     const htmlIR = html`<div><Card .title="${() => label}"><p>Hello world</p></Card></div>`
@@ -66,19 +64,14 @@ describe('G3.1 — FE-equivalence: html-tag vs nv-parser produce identical slot 
     expect(htmlComp).toBeDefined()
     const htmlSlot = htmlComp!.slots.find((s) => s.name === 'default')
     expect(htmlSlot).toBeDefined()
-    expect(htmlSlot!.content.shape.html).toContain('<p>Hello world</p>')
-    expect(htmlSlot!.content.bindings.length).toBe(0)
 
-    // nv-parser front-end — template must have at least one hole so nv-parser runs the
-    // full sentinel-injection path (a NoSubstitutionTemplateLiteral short-circuits to no-bindings)
     const nvSrc = [
       'export const Parent = $component(() => {',
       '  $script(() => { const label = signal("test") })',
       '  $render(() => html`<Card .title="${label}"><p>Hello world</p></Card>`)',
       '})',
     ].join('\n')
-    const results = parseNvFile(nvSrc, 'test.nv', doc)
-    const nvIR = results[0]?.ir
+    const nvIR = parseNvFile(nvSrc, 'test.nv', doc)[0]?.ir
     expect(nvIR).toBeDefined()
     const nvComp = nvIR!.bindings.find((b) => b.kind === 'component') as
       | ComponentBinding
@@ -86,16 +79,12 @@ describe('G3.1 — FE-equivalence: html-tag vs nv-parser produce identical slot 
     expect(nvComp).toBeDefined()
     const nvSlot = nvComp!.slots.find((s) => s.name === 'default')
     expect(nvSlot).toBeDefined()
-    expect(nvSlot!.content.shape.html).toContain('<p>Hello world</p>')
-    expect(nvSlot!.content.bindings.length).toBe(0)
 
-    // Both front-ends produce same slot structure
-    expect(htmlSlot!.name).toBe(nvSlot!.name)
-    expect(htmlSlot!.content.bindings.length).toBe(nvSlot!.content.bindings.length)
+    const r = irStructurallyEqual(doc, htmlSlot!.content, nvSlot!.content)
+    expect(r.equal, `default-slot sub-IR divergence: ${r.reason}`).toBe(true)
   })
 
-  it('named slot: both front-ends capture slot name and reactive binding', () => {
-    // html-tag front-end: named slot via <slot name="header"> child
+  it('named slot with reactive hole: slot sub-IRs structurally identical across front-ends', () => {
     const html = createHtmlTag(doc)
     const sig = signal(0)
     const htmlIR = html`<div><Card><slot name="header">${() => sig()}</slot></Card></div>`
@@ -105,19 +94,14 @@ describe('G3.1 — FE-equivalence: html-tag vs nv-parser produce identical slot 
     expect(htmlComp).toBeDefined()
     const htmlHeader = htmlComp!.slots.find((s) => s.name === 'header')
     expect(htmlHeader).toBeDefined()
-    expect(htmlHeader!.name).toBe('header')
-    expect(htmlHeader!.content.bindings.length).toBeGreaterThan(0)
-    expect(htmlHeader!.content.bindings[0]!.kind).toBe('text')
 
-    // nv-parser front-end: named slot via <slot name="header">
     const nvSrc = [
       'export const Parent = $component(() => {',
       '  $script(() => { const count = signal(0) })',
       '  $render(() => html`<Card><slot name="header">${count}</slot></Card>`)',
       '})',
     ].join('\n')
-    const nvResults = parseNvFile(nvSrc, 'test.nv', doc)
-    const nvIR = nvResults[0]?.ir
+    const nvIR = parseNvFile(nvSrc, 'test.nv', doc)[0]?.ir
     expect(nvIR).toBeDefined()
     const nvComp = nvIR!.bindings.find((b) => b.kind === 'component') as
       | ComponentBinding
@@ -125,13 +109,11 @@ describe('G3.1 — FE-equivalence: html-tag vs nv-parser produce identical slot 
     expect(nvComp).toBeDefined()
     const nvHeader = nvComp!.slots.find((s) => s.name === 'header')
     expect(nvHeader).toBeDefined()
-    expect(nvHeader!.name).toBe('header')
+
+    const r = irStructurallyEqual(doc, htmlHeader!.content, nvHeader!.content)
+    expect(r.equal, `named-slot sub-IR divergence: ${r.reason}`).toBe(true)
     expect(nvHeader!.content.bindings.length).toBeGreaterThan(0)
     expect(nvHeader!.content.bindings[0]!.kind).toBe('text')
-
-    // Structural equivalence
-    expect(htmlHeader!.name).toBe(nvHeader!.name)
-    expect(htmlHeader!.content.bindings[0]!.kind).toBe(nvHeader!.content.bindings[0]!.kind)
   })
 })
 
