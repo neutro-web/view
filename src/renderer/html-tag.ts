@@ -30,7 +30,10 @@
 import type {
   AttrBinding,
   Binding,
+  EventBinding,
+  HandlerExpr,
   NodePath,
+  PropBinding,
   ReactiveExpr,
   TemplateIR,
   TemplateShape,
@@ -39,7 +42,11 @@ import type {
 
 // ── Hole classification ───────────────────────────────────────────────────────
 
-type HoleKind = { kind: 'text' } | { kind: 'attr'; name: string }
+type HoleKind =
+  | { kind: 'text' }
+  | { kind: 'attr'; name: string }
+  | { kind: 'event'; name: string }
+  | { kind: 'prop'; name: string }
 
 /**
  * Determine the binding kind for the hole between strings[i] and strings[i+1].
@@ -55,8 +62,22 @@ type HoleKind = { kind: 'text' } | { kind: 'attr'; name: string }
  * producing incorrect output. Add support when required.
  */
 function classifyHole(prevString: string, nextString: string): HoleKind {
+  const closingQuote = nextString.startsWith('"') || nextString.startsWith("'")
+  // Event hole: @eventName="
+  const evtMatch = prevString.match(/\s@([\w:-]+)=["']$/)
+  if (evtMatch !== null && closingQuote) {
+    // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
+    return { kind: 'event', name: evtMatch[1]! }
+  }
+  // Prop hole: .propName="
+  const propMatch = prevString.match(/\s\.([\w:-]+)=["']$/)
+  if (propMatch !== null && closingQuote) {
+    // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
+    return { kind: 'prop', name: propMatch[1]! }
+  }
+  // Attr hole: attrName="
   const m = prevString.match(/\s([\w:-]+)=["']$/)
-  if (m !== null && (nextString.startsWith('"') || nextString.startsWith("'"))) {
+  if (m !== null && closingQuote) {
     // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
     return { kind: 'attr', name: m[1]! }
   }
@@ -129,7 +150,7 @@ function buildHtmlStrings(
       const hole = holes[i]!
       if (hole.kind === 'text') {
         sentinelHtml += `${raw}<!--nv-${i}-->`
-      } else {
+      } else if (hole.kind === 'attr') {
         // Attr hole: strip ` attrName="` from end, add data sentinel on the element.
         const m = raw.match(/(\s+)([\w:-]+)=["']$/)
         if (m === null) {
@@ -142,6 +163,19 @@ function buildHtmlStrings(
         sentinelHtml += `${stripped} data-nv-attr-${i}="${hole.name}"`
         // Mark the NEXT string to have its leading closing-quote consumed.
         quoteConsumedAt.add(i + 1)
+      } else {
+        // Event or prop hole: strip ` @eventName="` / ` .propName="` from end.
+        const prefix = hole.kind === 'event' ? '@' : '.'
+        const m = raw.match(new RegExp(`(\\s+)\\${prefix}([\\w:-]+)=["']$`))
+        if (m === null) {
+          throw new Error(
+            `[nv/html] Internal: ${hole.kind} hole ${i} but no ${prefix}attrName pattern at end of string "${raw}"`,
+          )
+        }
+        // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
+        const stripped = raw.slice(0, raw.length - m[0]!.length)
+        sentinelHtml += `${stripped} data-nv-${hole.kind}-${i}="${hole.name}"`
+        quoteConsumedAt.add(i + 1)
       }
     } else {
       sentinelHtml += raw
@@ -149,7 +183,7 @@ function buildHtmlStrings(
   }
 
   // shapeHtml: remove data-nv-attr-N sentinel attributes.
-  const shapeHtml = sentinelHtml.replace(/\s+data-nv-attr-\d+="[^"]*"/g, '')
+  const shapeHtml = sentinelHtml.replace(/\s+data-nv-(?:attr|event|prop)-\d+="[^"]*"/g, '')
 
   return { sentinelHtml, shapeHtml }
 }
@@ -213,6 +247,16 @@ export function createHtmlTag(document: Document) {
             bindingPaths[k] = computePath(el, frag)
             el.removeAttribute(`data-nv-attr-${k}`)
           }
+          const evtVal = el.getAttribute(`data-nv-event-${k}`)
+          if (evtVal !== null) {
+            bindingPaths[k] = computePath(el, frag)
+            el.removeAttribute(`data-nv-event-${k}`)
+          }
+          const propVal = el.getAttribute(`data-nv-prop-${k}`)
+          if (propVal !== null) {
+            bindingPaths[k] = computePath(el, frag)
+            el.removeAttribute(`data-nv-prop-${k}`)
+          }
         }
       }
       let child = node.firstChild
@@ -248,8 +292,20 @@ export function createHtmlTag(document: Document) {
       if (hole.kind === 'text') {
         const b: TextBinding = { kind: 'text', pathIndex: i, expr }
         bindings.push(b)
-      } else {
+      } else if (hole.kind === 'attr') {
         const b: AttrBinding = { kind: 'attr', pathIndex: i, name: hole.name, expr }
+        bindings.push(b)
+      } else if (hole.kind === 'event') {
+        const b: EventBinding = {
+          kind: 'event',
+          pathIndex: i,
+          eventName: hole.name,
+          handler: expr as unknown as HandlerExpr,
+          handlerKind: 'reactive',
+        }
+        bindings.push(b)
+      } else if (hole.kind === 'prop') {
+        const b: PropBinding = { kind: 'prop', pathIndex: i, name: hole.name, expr }
         bindings.push(b)
       }
     }
