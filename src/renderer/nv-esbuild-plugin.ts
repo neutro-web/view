@@ -24,6 +24,8 @@ import { parseNvFileForEmit } from './nv-parser.js'
  * Matches `from '..path.nv'` and `from "..path.nv"` and rewrites to .js.
  * Example: `import { Counter } from './counter.nv'` → `import { Counter } from './counter.js'`
  *
+ * Note: regex-based; does not skip comment lines. Avoid commenting out `.nv` imports.
+ *
  * @param src  ES module source text (output of emitModule)
  * @returns    Source with .nv specifiers rewritten to .js
  */
