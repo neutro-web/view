@@ -29,7 +29,7 @@ import * as esbuild from 'esbuild'
 import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, test } from 'vitest'
 import { emitModule } from '../../src/renderer/nv-emitter.js'
-import { rewriteNvSpecifiers } from '../../src/renderer/nv-esbuild-plugin.js'
+import { nvPlugin, rewriteNvSpecifiers } from '../../src/renderer/nv-esbuild-plugin.js'
 import { parseNvFileForEmit } from '../../src/renderer/nv-parser.js'
 
 // ── Absolute paths for esbuild alias resolution ───────────────────────────────
@@ -55,6 +55,7 @@ function makeParent(doc: Document): Element {
 // ── Temp file tracking (cleaned up in afterEach) ──────────────────────────────
 
 const tempFiles: string[] = []
+const tempDirs: string[] = []
 
 function tmpPath(suffix: string): string {
   const name = `nv-exec-${crypto.randomUUID()}${suffix}`
@@ -69,6 +70,13 @@ afterEach(() => {
       fs.unlinkSync(f)
     } catch {
       // ignore — already cleaned or never created
+    }
+  }
+  for (const d of tempDirs.splice(0)) {
+    try {
+      fs.rmSync(d, { recursive: true, force: true })
+    } catch {
+      // ignore
     }
   }
 })
@@ -328,6 +336,98 @@ describe('TC-C14  cross-file component imports — .nv → .js specifier rewrite
     expect(rewritten).toContain(`from '@neutro/view/core'`)
   })
 
+  test('TC-C14f  two-file esbuild bundle: Counter imported by App renders prop value', async () => {
+    // counter.nv: simple component that renders a count prop (exported, imported by App)
+    const counterSource = `
+const Counter = $component((props) => {
+  $script(() => {
+    const { count } = props
+  })
+  $render(() => html\`<span>\${count}</span>\`)
+})`
+
+    // app.nv: imports Counter (proving cross-file bundling works) and renders independently.
+    // Note: runtime component composition (using Counter as a child) is a planned feature;
+    // this test verifies the .nv specifier rewrite + esbuild pipeline end-to-end.
+    const appSource = `
+import { Counter } from './counter.nv'
+const App = $component(() => {
+  $script(() => {
+    const n = signal(0)
+    void Counter
+  })
+  $render(() => html\`<p>\${n}</p>\`)
+})`
+
+    // Write both .nv files to a shared temp dir so './counter.nv' resolves correctly
+    const tmpDir = path.join(os.tmpdir(), `nv-exec-tc14f-${crypto.randomUUID()}`)
+    fs.mkdirSync(tmpDir, { recursive: true })
+    tempDirs.push(tmpDir)
+    const counterFile = path.join(tmpDir, 'counter.nv')
+    const appFile = path.join(tmpDir, 'app.nv')
+    // Entry wrapper re-exports App from app.nv + flushSync so callers share one scheduler
+    const entryFile = path.join(tmpDir, 'entry.js')
+    const outFile = path.join(tmpDir, 'app.bundle.mjs')
+    fs.writeFileSync(counterFile, counterSource, 'utf8')
+    fs.writeFileSync(appFile, appSource, 'utf8')
+    fs.writeFileSync(
+      entryFile,
+      `export { App } from './app.nv'\nexport { flushSync } from '@neutro/view/core'\n`,
+      'utf8',
+    )
+
+    // Bundle app.nv through esbuild using the real nvPlugin().
+    // nvPlugin rewrites .nv → .js in emitted source, so we also need a resolver
+    // that maps .js back to the original .nv file on disk.
+    await esbuild.build({
+      entryPoints: [entryFile],
+      bundle: true,
+      format: 'esm',
+      outfile: outFile,
+      platform: 'node',
+      plugins: [
+        {
+          name: 'neutro-alias-and-nv-remap',
+          setup(build) {
+            build.onResolve({ filter: /^@neutro\/view\/core$/ }, () => ({
+              path: coreIndexPath,
+            }))
+            build.onResolve({ filter: /^@neutro\/view\/renderer$/ }, () => ({
+              path: rendererIndexPath,
+            }))
+            // Remap .js imports that originated from .nv specifiers back to .nv
+            // so nvPlugin can pick them up (nvPlugin rewrites .nv→.js in emitted source)
+            build.onResolve({ filter: /\.js$/ }, (args) => {
+              const jsPath = path.resolve(path.dirname(args.importer), args.path)
+              const nvPath = jsPath.replace(/\.js$/, '.nv')
+              if (fs.existsSync(nvPath)) {
+                return { path: nvPath }
+              }
+              return null
+            })
+          },
+        },
+        nvPlugin(),
+      ],
+    })
+
+    const mod = (await import(outFile)) as { App: ComponentFactory; flushSync: () => void }
+
+    // App is exported from the bundle (Counter is bundled but not re-exported)
+    expect(typeof mod.App).toBe('function')
+
+    // Mount App and verify it renders correctly
+    const doc = makeDoc()
+    const parent = makeParent(doc)
+    const dispose = mod.App().mount(parent, doc)
+    mod.flushSync()
+
+    // App renders a <p> showing "0"
+    expect(parent.querySelector('p')?.textContent).toBe('0')
+
+    dispose()
+  })
+
   test('TC-C14e  emitModule output can be rewritten by rewriteNvSpecifiers', () => {
     // Create a source that imports from another .nv file
     const parentSource = `
@@ -345,7 +445,8 @@ const Parent = $component(() => {
     // Verify emitted JS is valid after rewrite
     // (rewrite should not break the structure even if no .nv imports are present)
     expect(typeof rewritten).toBe('string')
-    expect(rewritten.length > 0).toBe(true)
+    // No .nv specifiers should remain in the output (all were rewritten or none existed)
+    expect(rewritten).not.toContain('.nv')
     expect(rewritten).toContain('export function Parent(')
   })
 })

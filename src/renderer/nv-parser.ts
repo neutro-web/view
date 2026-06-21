@@ -427,7 +427,14 @@ function processHtmlTemplate(
         const anchor = doc.createComment(`nv-comp-${compIndex}`)
         el.parentNode?.replaceChild(anchor, el)
         const anchorPath = computePath(anchor, frag)
-        pendingComponents.push({ anchorPath, tagName, propEntries, propNames, reactiveHoles, slots })
+        pendingComponents.push({
+          anchorPath,
+          tagName,
+          propEntries,
+          propNames,
+          reactiveHoles,
+          slots,
+        })
         return // don't recurse into component children
       }
 
@@ -602,6 +609,41 @@ function collectScriptSymbols(blocks: ts.Block[]): ScriptSymbols {
   return { writable: ws, readonly: rs, all: new Set([...writable, ...readonly_]) }
 }
 
+/**
+ * Scan $script blocks of a component for `const { ... } = propsParamName` destructures
+ * and return a map from local name → accessor expression (e.g. `props.count()`).
+ */
+function extractPropsAccessors(
+  componentFn: ts.ArrowFunction,
+  propsParamName: string,
+  diagnostics: NvDiagnostic[],
+): Map<string, string> {
+  const map = new Map<string, string>()
+  if (!ts.isBlock(componentFn.body)) return map
+  for (const stmt of componentFn.body.statements) {
+    if (!ts.isExpressionStatement(stmt)) continue
+    const call = stmt.expression
+    if (!ts.isCallExpression(call) || !isNvConstruct(call, '$script')) continue
+    const fn = call.arguments[0]
+    if (!fn || !ts.isArrowFunction(fn) || !ts.isBlock(fn.body)) continue
+    for (const s of fn.body.statements) {
+      if (!ts.isVariableStatement(s)) continue
+      for (const decl of s.declarationList.declarations) {
+        if (
+          ts.isObjectBindingPattern(decl.name) &&
+          decl.initializer &&
+          ts.isIdentifier(decl.initializer) &&
+          decl.initializer.text === propsParamName
+        ) {
+          const accessorMap = buildPropsAccessorMap(decl.name, [], diagnostics)
+          for (const [local, accessor] of accessorMap) map.set(local, accessor)
+        }
+      }
+    }
+  }
+  return map
+}
+
 function extractScriptSymbols(componentFn: ts.ArrowFunction): ScriptSymbols {
   const blocks: ts.Block[] = []
   if (ts.isBlock(componentFn.body)) {
@@ -692,23 +734,34 @@ function extractStyleInfo(componentFn: ts.ArrowFunction): NvStyleInfo | null {
  * Skips: call-expression callees, property-access objects, declaration names,
  * parameter names, shorthand property names, import specifiers, label names.
  */
-function eraseSignalReadsInNode(node: ts.Node, reactive: ReadonlySet<string>): string {
-  if (reactive.size === 0) return node.getText()
+function eraseSignalReadsInNode(
+  node: ts.Node,
+  reactive: ReadonlySet<string>,
+  propsAccessors?: ReadonlyMap<string, string>,
+): string {
+  if (reactive.size === 0 && (!propsAccessors || propsAccessors.size === 0)) return node.getText()
   const rewrites: Rewrite[] = []
   const nodeStart = node.getStart()
   ;(function walk(n: ts.Node): void {
-    if (ts.isIdentifier(n) && reactive.has(n.text)) {
-      const p = n.parent
-      if (ts.isCallExpression(p) && p.expression === n) return
-      if (ts.isPropertyAccessExpression(p) && (p.expression === n || p.name === n)) return
-      if (ts.isVariableDeclaration(p) && p.name === n) return
-      if (ts.isParameter(p) && p.name === n) return
-      if (ts.isShorthandPropertyAssignment(p)) return
-      if (ts.isPropertyAssignment(p) && p.name === n) return
-      if (ts.isImportSpecifier(p) || ts.isImportClause(p)) return
-      if (ts.isLabeledStatement(p) && p.label === n) return
-      rewrites.push({ start: n.getStart(), end: n.getEnd(), replacement: `${n.text}()` })
-      return
+    if (ts.isIdentifier(n)) {
+      const accessor = propsAccessors?.get(n.text)
+      if (accessor !== undefined || reactive.has(n.text)) {
+        const p = n.parent
+        if (ts.isCallExpression(p) && p.expression === n) return
+        if (ts.isPropertyAccessExpression(p) && (p.expression === n || p.name === n)) return
+        if (ts.isVariableDeclaration(p) && p.name === n) return
+        if (ts.isParameter(p) && p.name === n) return
+        if (ts.isShorthandPropertyAssignment(p)) return
+        if (ts.isPropertyAssignment(p) && p.name === n) return
+        if (ts.isImportSpecifier(p) || ts.isImportClause(p)) return
+        if (ts.isLabeledStatement(p) && p.label === n) return
+        rewrites.push({
+          start: n.getStart(),
+          end: n.getEnd(),
+          replacement: accessor !== undefined ? accessor : `${n.text}()`,
+        })
+        return
+      }
     }
     ts.forEachChild(n, walk)
   })(node)
@@ -1190,6 +1243,7 @@ function eraseHandlerExpr(
   handlerExpr: ts.Expression,
   symbols: ScriptSymbols,
   diagnostics: NvDiagnostic[],
+  propsParamName?: string,
 ): string {
   if (!ts.isArrowFunction(handlerExpr)) {
     // Non-arrow handler (e.g., bare identifier): just erase bare reads
@@ -1200,10 +1254,33 @@ function eraseHandlerExpr(
   const rewrites: Rewrite[] = []
   const nodeStart = fn.getStart()
 
+  // Build props accessor map for `const { ... } = props` inside handler body
+  const handlerPropsAccessors = new Map<string, string>()
+
   // Gather function-level shadows (parameters + var hoisting in body)
   const fnShadowed = gatherFunctionShadows(fn, new Set<string>(), symbols.all)
 
   function walkHandlerNode(node: ts.Node, shadowed: ReadonlySet<string>): void {
+    // Props destructuring detection: `const { count } = props` inside handler body
+    if (propsParamName !== undefined && ts.isVariableStatement(node)) {
+      for (const decl of node.declarationList.declarations) {
+        if (
+          ts.isObjectBindingPattern(decl.name) &&
+          decl.initializer &&
+          ts.isIdentifier(decl.initializer) &&
+          decl.initializer.text === propsParamName
+        ) {
+          const accessorMap = buildPropsAccessorMap(decl.name, [], diagnostics)
+          for (const [local, accessor] of accessorMap) {
+            handlerPropsAccessors.set(local, accessor)
+          }
+          // Erase the destructure statement itself
+          rewrites.push({ start: node.getFullStart(), end: node.getEnd(), replacement: '' })
+          return
+        }
+      }
+    }
+
     // Scope entry: nested function
     if (
       ts.isArrowFunction(node) ||
@@ -1266,7 +1343,10 @@ function eraseHandlerExpr(
       let binaryExpr: ts.BinaryExpression | null = null
       if (ts.isBinaryExpression(node.expression)) {
         binaryExpr = node.expression
-      } else if (ts.isParenthesizedExpression(node.expression) && ts.isBinaryExpression(node.expression.expression)) {
+      } else if (
+        ts.isParenthesizedExpression(node.expression) &&
+        ts.isBinaryExpression(node.expression.expression)
+      ) {
         binaryExpr = node.expression.expression
       }
       if (binaryExpr !== null && binaryExpr.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
@@ -1276,7 +1356,8 @@ function eraseHandlerExpr(
           if (ts.isObjectLiteralExpression(lhs)) {
             for (const prop of lhs.properties) {
               if (ts.isShorthandPropertyAssignment(prop)) names.push(prop.name.text)
-              else if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.initializer)) names.push(prop.initializer.text)
+              else if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.initializer))
+                names.push(prop.initializer.text)
             }
           } else {
             for (const el of lhs.elements) {
@@ -1333,7 +1414,8 @@ function eraseHandlerExpr(
         if (ts.isObjectLiteralExpression(lhs)) {
           for (const prop of lhs.properties) {
             if (ts.isShorthandPropertyAssignment(prop)) names.push(prop.name.text)
-            else if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.initializer)) names.push(prop.initializer.text)
+            else if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.initializer))
+              names.push(prop.initializer.text)
           }
         } else {
           for (const el of lhs.elements) {
@@ -1352,6 +1434,23 @@ function eraseHandlerExpr(
         }
         return
       }
+    }
+
+    // Props accessor bare read: identifier destructured from props inside this handler
+    if (ts.isIdentifier(node) && handlerPropsAccessors.has(node.text) && !shadowed.has(node.text)) {
+      const p = node.parent
+      if (ts.isCallExpression(p) && p.expression === node) return
+      if (ts.isPropertyAccessExpression(p) && (p.expression === node || p.name === node)) return
+      if (ts.isVariableDeclaration(p) && p.name === node) return
+      if (ts.isParameter(p) && p.name === node) return
+      if (ts.isShorthandPropertyAssignment(p)) return
+      if (ts.isPropertyAssignment(p) && p.name === node) return
+      if (ts.isImportSpecifier(p) || ts.isImportClause(p)) return
+      if (ts.isLabeledStatement(p) && p.label === node) return
+      const accessor = handlerPropsAccessors.get(node.text)
+      if (accessor === undefined) return
+      rewrites.push({ start: node.getStart(), end: node.getEnd(), replacement: accessor })
+      return
     }
 
     // Bare read: reactive identifier in a value position, not shadowed
@@ -1403,6 +1502,8 @@ function computeThunkSource(
   doc: Document,
   symbols: ScriptSymbols,
   diagnostics: NvDiagnostic[],
+  propsParamName?: string,
+  propsAccessors?: ReadonlyMap<string, string>,
 ): ThunkSource {
   if (pos.kind === 'text') {
     // May be a ConditionalBinding (ternary with html`` branches)
@@ -1414,13 +1515,29 @@ function computeThunkSource(
         e.kind === ts.SyntaxKind.NullKeyword ||
         (ts.isIdentifier(e) && (e.text === 'null' || e.text === 'undefined'))
       if (isHtmlTTE(whenTrue) && (isHtmlTTE(whenFalse) || isNullish(whenFalse))) {
-        const conditionSrc = eraseSignalReadsInNode(condition, symbols.all)
+        const conditionSrc = eraseSignalReadsInNode(condition, symbols.all, propsAccessors)
         // Recursively compute thunks for branch bindings
         const consequentResult = processHtmlTemplate(whenTrue, doc, symbols.all)
-        const consequentThunks = computeThunksForTemplate(whenTrue, doc, symbols, diagnostics)
+        const consequentThunks = computeThunksForTemplate(
+          whenTrue,
+          doc,
+          symbols,
+          diagnostics,
+          new Set(),
+          propsParamName,
+          propsAccessors,
+        )
         void consequentResult
         const alternateSrc = isHtmlTTE(whenFalse)
-          ? computeThunksForTemplate(whenFalse, doc, symbols, diagnostics)
+          ? computeThunksForTemplate(
+              whenFalse,
+              doc,
+              symbols,
+              diagnostics,
+              new Set(),
+              propsParamName,
+              propsAccessors,
+            )
           : null
         return {
           kind: 'conditional',
@@ -1431,16 +1548,19 @@ function computeThunkSource(
       }
     }
     // Regular text binding
-    return { kind: 'text', exprSrc: eraseSignalReadsInNode(holeExpr, symbols.all) }
+    return { kind: 'text', exprSrc: eraseSignalReadsInNode(holeExpr, symbols.all, propsAccessors) }
   }
   if (pos.kind === 'attr') {
-    return { kind: 'attr', exprSrc: eraseSignalReadsInNode(holeExpr, symbols.all) }
+    return { kind: 'attr', exprSrc: eraseSignalReadsInNode(holeExpr, symbols.all, propsAccessors) }
   }
   if (pos.kind === 'prop') {
-    return { kind: 'prop', exprSrc: eraseSignalReadsInNode(holeExpr, symbols.all) }
+    return { kind: 'prop', exprSrc: eraseSignalReadsInNode(holeExpr, symbols.all, propsAccessors) }
   }
   // event
-  return { kind: 'event', handlerSrc: eraseHandlerExpr(holeExpr, symbols, diagnostics) }
+  return {
+    kind: 'event',
+    handlerSrc: eraseHandlerExpr(holeExpr, symbols, diagnostics, propsParamName),
+  }
 }
 
 /**
@@ -1453,6 +1573,8 @@ function computeThunksForTemplate(
   symbols: ScriptSymbols,
   diagnostics: NvDiagnostic[],
   consumed: ReadonlySet<number> = new Set(),
+  propsParamName?: string,
+  propsAccessors?: ReadonlyMap<string, string>,
 ): ThunkSource[] {
   const template = tte.template
   if (ts.isNoSubstitutionTemplateLiteral(template)) return []
@@ -1471,7 +1593,15 @@ function computeThunksForTemplate(
     .map((expr, i) =>
       consumed.has(i)
         ? null
-        : computeThunkSource(expr, positions[i] as PosKind, doc, symbols, diagnostics),
+        : computeThunkSource(
+            expr,
+            positions[i] as PosKind,
+            doc,
+            symbols,
+            diagnostics,
+            propsParamName,
+            propsAccessors,
+          ),
     )
     .filter((t): t is ThunkSource => t !== null)
 }
@@ -1556,6 +1686,37 @@ export function parseNvFileForEmit(
   doc: Document,
 ): NvComponentResult[] {
   const diagnostics: NvDiagnostic[] = []
+
+  // Pre-pass on original (pre-preprocessed) source to extract props accessor maps,
+  // since preprocessMutationWrites erases `const { ... } = props` from $script blocks.
+  const originalSf = ts.createSourceFile(
+    fileName,
+    source,
+    ts.ScriptTarget.ES2022,
+    true,
+    ts.ScriptKind.TS,
+  )
+  const propsAccessorsByComponent = new Map<string, Map<string, string>>()
+  ts.forEachChild(originalSf, (node) => {
+    if (!ts.isVariableStatement(node)) return
+    for (const decl of node.declarationList.declarations) {
+      if (!ts.isIdentifier(decl.name)) continue
+      if (!decl.initializer || !ts.isCallExpression(decl.initializer)) continue
+      if (!isNvConstruct(decl.initializer, '$component')) continue
+      const componentFn = decl.initializer.arguments[0]
+      if (!componentFn || !ts.isArrowFunction(componentFn)) continue
+      const propsParamName =
+        componentFn.parameters.length > 0 &&
+        componentFn.parameters[0] !== undefined &&
+        ts.isIdentifier(componentFn.parameters[0].name)
+          ? componentFn.parameters[0].name.text
+          : undefined
+      if (propsParamName === undefined) continue
+      const accessors = extractPropsAccessors(componentFn, propsParamName, diagnostics)
+      if (accessors.size > 0) propsAccessorsByComponent.set(decl.name.text, accessors)
+    }
+  })
+
   const processed = preprocessMutationWrites(source, fileName, diagnostics)
 
   const sf = ts.createSourceFile(
@@ -1585,8 +1746,21 @@ export function parseNvFileForEmit(
 
       const scriptBody = extractScriptBodySource(componentFn)
 
+      // Detect props parameter name from $component((props) => ...)
+      const emitPropsParamName: string | undefined =
+        componentFn.parameters.length > 0 &&
+        componentFn.parameters[0] !== undefined &&
+        ts.isIdentifier(componentFn.parameters[0].name)
+          ? componentFn.parameters[0].name.text
+          : undefined
+
       // Find the $render template expression to compute thunks
       const emitDiagnostics: NvDiagnostic[] = []
+
+      // Retrieve props accessor map from the pre-pass on the original source
+      // (preprocessMutationWrites erases `const { ... } = props` before we can scan it)
+      const emitPropsAccessors: ReadonlyMap<string, string> =
+        propsAccessorsByComponent.get(name) ?? new Map()
       let bindingThunks: ThunkSource[] = []
       if (ts.isBlock(componentFn.body)) {
         for (const stmt of componentFn.body.statements) {
@@ -1622,6 +1796,8 @@ export function parseNvFileForEmit(
             symbols,
             emitDiagnostics,
             consumedByComponent,
+            emitPropsParamName,
+            emitPropsAccessors,
           )
           bindingThunks = [...componentThunks, ...holeThunks]
           break
