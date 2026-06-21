@@ -37,6 +37,7 @@ import type {
   PropBinding,
   PropEntry,
   ReactiveExpr,
+  SlotEntry,
   TemplateIR,
   TemplateShape,
   TextBinding,
@@ -245,6 +246,7 @@ export function createHtmlTag(document: Document) {
       tagName: string
       props: PropEntry[]
       propNames: string[]
+      slots: SlotEntry[]
     }
     const pendingComponents: PendingComp[] = []
 
@@ -291,17 +293,29 @@ export function createHtmlTag(document: Document) {
             if (!propNames.includes(attr.name)) propNames.push(attr.name)
           }
 
-          // Replace element with anchor comment
+          // Capture slot content before replacing element with anchor
+          const slots: SlotEntry[] = []
           if (el.childNodes.length > 0) {
-            console.warn(
-              `[nv] Component slot content is not yet supported; children of <${tagName}> will not be rendered`,
-            )
+            const innerHTML = el.innerHTML
+            if (/<!--nv-\d+-->|data-nv-/.test(innerHTML)) {
+              console.warn(
+                `[nv] Dynamic slot content in <${tagName}> is not yet supported`,
+              )
+            } else {
+              // Static slot content
+              const slotIR: TemplateIR = {
+                id: `slot:${tagName}:default`,
+                shape: { html: innerHTML, bindingPaths: [] },
+                bindings: [],
+              }
+              slots.push({ name: 'default', content: slotIR })
+            }
           }
           const compIndex = pendingComponents.length
           const anchor = document.createComment(`nv-comp-${compIndex}`)
           el.parentNode?.replaceChild(anchor, el)
           const anchorPath = computePath(anchor, frag)
-          pendingComponents.push({ anchorPath, tagName, props: propEntries, propNames })
+          pendingComponents.push({ anchorPath, tagName, props: propEntries, propNames, slots })
           return // don't recurse into component children
         }
 
@@ -346,7 +360,7 @@ export function createHtmlTag(document: Document) {
 
     // Build bindings — component bindings first
     const bindings: Binding[] = []
-    for (const { anchorPath, tagName, props: propEntries, propNames } of pendingComponents) {
+    for (const { anchorPath, tagName, props: propEntries, propNames, slots } of pendingComponents) {
       const pathIndex = allPaths.length
       allPaths.push(anchorPath)
       const cb: ComponentBinding = {
@@ -359,7 +373,7 @@ export function createHtmlTag(document: Document) {
         },
         props: propEntries,
         propNames,
-        slots: [],
+        slots,
       }
       bindings.push(cb)
     }

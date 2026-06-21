@@ -1090,6 +1090,23 @@ describe('buildPropsAccessorMap', () => {
   })
 })
 
+describe('eraseHandlerExpr: destructuring-write diagnostics', () => {
+  it('TC-DW-01: destructuring assignment to signal in handler → error diagnostic mentioning "destructuring"', () => {
+    const nvSource = [
+      'const C = $component(() => {',
+      '  $script(() => { const count = signal(0) })',
+      '  $render(() => html`<button @click="${() => { ({ count } = obj) }}">x</button>`)',
+      '})',
+    ].join('\n')
+    const results = parseNvFileForEmit(nvSource, 'test.nv', document)
+    const diags = results[0]?.diagnostics ?? []
+    expect(
+      diags.some((d) => d.kind === 'error' && d.message.toLowerCase().includes('destructuring')),
+      `Expected destructuring error diagnostic. Got: ${JSON.stringify(diags)}`,
+    ).toBe(true)
+  })
+})
+
 // ── Component element detection (TC-C series) ─────────────────────────────────
 
 describe('nv-parser — component element detection', () => {
@@ -1192,9 +1209,9 @@ describe('nv-parser — component element detection', () => {
   })
 })
 
-describe('TC-slot-warning: slot content in component element emits warning diagnostic', () => {
-  it('warns when component element has child content', () => {
-    // Template needs a hole so the DFS walk runs (no-substitution templates return early).
+describe('TC-slot-warning: slot content in component element', () => {
+  it('static slot content is captured, no warning emitted', () => {
+    // Static child content → captured as default slot, no diagnostic
     const nvSource = [
       'export const App = $component(() => {',
       '  $script(() => { const n = signal(0) })',
@@ -1203,14 +1220,39 @@ describe('TC-slot-warning: slot content in component element emits warning diagn
     ].join('\n')
     const results = parseNvFile(nvSource, 'app.nv', document)
     const diags = results[0]?.diagnostics ?? []
+    // Static slot content should NOT produce a warning
     expect(
       diags.some(
-        (d) => d.kind === 'warning' && d.message.includes('slot content is not yet supported'),
+        (d) => d.kind === 'warning' && d.message.toLowerCase().includes('slot'),
+      ),
+    ).toBe(false)
+    // The ComponentBinding should have the slot captured
+    const ir = results[0]?.ir
+    const compBinding = ir?.bindings.find((b) => b.kind === 'component') as any
+    expect(compBinding).toBeDefined()
+    expect(compBinding.slots).toHaveLength(1)
+    expect(compBinding.slots[0].name).toBe('default')
+    expect(compBinding.slots[0].content.shape.html).toContain('<p>hello</p>')
+  })
+
+  it('dynamic slot content emits warning, no slot captured', () => {
+    // Dynamic child content → warning diagnostic
+    const nvSource = [
+      'export const App = $component(() => {',
+      '  $script(() => { const n = signal(0) })',
+      '  $render(() => html`<div><Card .title="${n}"><span>${n}</span></Card></div>`)',
+      '})',
+    ].join('\n')
+    const results = parseNvFile(nvSource, 'app.nv', document)
+    const diags = results[0]?.diagnostics ?? []
+    expect(
+      diags.some(
+        (d) => d.kind === 'warning' && d.message.toLowerCase().includes('dynamic slot'),
       ),
     ).toBe(true)
   })
 
-  it('no warning when component element has no children', () => {
+  it('no warning or slots when component element has no children', () => {
     const nvSource = [
       'export const App = $component(() => {',
       '  $script(() => { const n = signal(0) })',
@@ -1221,8 +1263,25 @@ describe('TC-slot-warning: slot content in component element emits warning diagn
     const diags = results[0]?.diagnostics ?? []
     expect(
       diags.some(
-        (d) => d.kind === 'warning' && d.message.includes('slot content is not yet supported'),
+        (d) => d.kind === 'warning' && d.message.toLowerCase().includes('slot'),
       ),
     ).toBe(false)
+  })
+
+  it('TC-slot-static: static slot content captured in ComponentBinding slots', () => {
+    // <Card .title="${n}"><p>hello</p></Card> → slots: [{ name: 'default', content: { shape: { html: '<p>hello</p>' } } }]
+    const nvSource = [
+      'export const Parent = $component(() => {',
+      '  $script(() => { const n = signal(0) })',
+      '  $render(() => html`<Card .title="${n}"><p>hello</p></Card>`)',
+      '})',
+    ].join('\n')
+    const results = parseNvFile(nvSource, 'parent.nv', document)
+    const ir = results[0]?.ir
+    const compBinding = ir?.bindings.find((b) => b.kind === 'component') as any
+    expect(compBinding).toBeDefined()
+    expect(compBinding.slots).toHaveLength(1)
+    expect(compBinding.slots[0].name).toBe('default')
+    expect(compBinding.slots[0].content.shape.html).toContain('<p>hello</p>')
   })
 })

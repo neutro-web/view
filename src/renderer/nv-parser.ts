@@ -60,6 +60,7 @@ import type {
   PropBinding,
   PropEntry,
   ReactiveExpr,
+  SlotEntry,
   TemplateIR,
   TemplateShape,
   TextBinding,
@@ -292,6 +293,7 @@ interface PendingNvComponentInfo {
   tagName: string
   propNames: readonly string[]
   reactiveHoles: ReadonlyArray<{ name: string; holeIndex: number }>
+  slots: SlotEntry[]
 }
 
 interface ProcessResult {
@@ -352,6 +354,7 @@ function processHtmlTemplate(
     propEntries: PropEntry[]
     propNames: string[]
     reactiveHoles: Array<{ name: string; holeIndex: number }>
+    slots: SlotEntry[]
   }
   const pendingComponents: PendingNvComponent[] = []
   const processdiagnostics: NvDiagnostic[] = []
@@ -392,19 +395,39 @@ function processHtmlTemplate(
           if (!propNames.includes(attr.name)) propNames.push(attr.name)
         }
 
+        // Capture slot content before replacing element with anchor
+        const slots: SlotEntry[] = []
         if (el.childNodes.length > 0) {
-          processdiagnostics.push({
-            kind: 'warning',
-            message: `Component slot content is not yet supported; children of <${tagName}> will not be rendered`,
-            start: 0,
-            end: 0,
-          })
+          const innerHTML = el.innerHTML
+          if (/<!--nv-\d+-->|data-nv-/.test(innerHTML)) {
+            // Mark any hole indices embedded in slot children as consumed so path-check passes
+            const holeRe = /<!--nv-(\d+)-->/g
+            let m2: RegExpExecArray | null
+            // biome-ignore lint/suspicious/noAssignInExpressions: idiomatic regex loop
+            while ((m2 = holeRe.exec(innerHTML)) !== null) {
+              consumedByComponent.add(Number.parseInt(m2[1] as string, 10))
+            }
+            processdiagnostics.push({
+              kind: 'warning',
+              message: `Dynamic slot content in <${tagName}> is not yet supported`,
+              start: 0,
+              end: 0,
+            })
+          } else {
+            // Static slot content
+            const slotIR: TemplateIR = {
+              id: `slot:${tagName}:default`,
+              shape: { html: innerHTML, bindingPaths: [] },
+              bindings: [],
+            }
+            slots.push({ name: 'default', content: slotIR })
+          }
         }
         const compIndex = pendingComponents.length
         const anchor = doc.createComment(`nv-comp-${compIndex}`)
         el.parentNode?.replaceChild(anchor, el)
         const anchorPath = computePath(anchor, frag)
-        pendingComponents.push({ anchorPath, tagName, propEntries, propNames, reactiveHoles })
+        pendingComponents.push({ anchorPath, tagName, propEntries, propNames, reactiveHoles, slots })
         return // don't recurse into component children
       }
 
@@ -450,7 +473,7 @@ function processHtmlTemplate(
   const verdicts: Array<'ACCEPT' | 'PLAIN'> = []
 
   // Add component bindings (anchors appended after hole paths)
-  for (const { anchorPath, tagName, propEntries, propNames } of pendingComponents) {
+  for (const { anchorPath, tagName, propEntries, propNames, slots } of pendingComponents) {
     const pathIndex = allPaths.length
     allPaths.push(anchorPath)
     const cb: ComponentBinding = {
@@ -463,7 +486,7 @@ function processHtmlTemplate(
       },
       props: propEntries,
       propNames,
-      slots: [],
+      slots,
     }
     bindings.push(cb)
   }
@@ -537,10 +560,11 @@ function processHtmlTemplate(
       meta: { frontEnd: 'nv-file' },
     },
     verdicts,
-    pendingComponents: pendingComponents.map(({ tagName, propNames, reactiveHoles }) => ({
+    pendingComponents: pendingComponents.map(({ tagName, propNames, reactiveHoles, slots }) => ({
       tagName,
       propNames,
       reactiveHoles,
+      slots,
     })),
     consumedByComponent,
     diagnostics: processdiagnostics,
@@ -1156,11 +1180,9 @@ export function parseNvFile(source: string, fileName: string, doc: Document): Nv
  *   - Mutation-write erasure (assignment → .set()) for writable signals
  *   - Diagnostic for assignment to derived
  *
- * Known gap: destructuring assignment targets (`[a, b] = ...`, `({ x } = ...)`)
- * are not detected as signal writes and fall through to bare-read erasure only —
- * the statement survives unchanged. Fails safe (no false-positive .set()), but
- * a destructuring write to a signal name is silently not rewritten. Document the
- * limitation at the authoring surface; no plan to fix in v1.
+ * Destructuring assignment targets (`[a, b] = ...`, `({ x } = ...)`) where a
+ * bound name matches a signal name produce an error diagnostic — signals are not
+ * writable via destructuring; use `.set()` directly.
  *
  * Returns the erased source text of the ENTIRE handler expression.
  */
@@ -1239,6 +1261,43 @@ function eraseHandlerExpr(
       }
     }
 
+    // Destructuring assignment in statement position: ({ count } = obj), [count] = arr
+    if (ts.isExpressionStatement(node)) {
+      let binaryExpr: ts.BinaryExpression | null = null
+      if (ts.isBinaryExpression(node.expression)) {
+        binaryExpr = node.expression
+      } else if (ts.isParenthesizedExpression(node.expression) && ts.isBinaryExpression(node.expression.expression)) {
+        binaryExpr = node.expression.expression
+      }
+      if (binaryExpr !== null && binaryExpr.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+        const lhs = binaryExpr.left
+        if (ts.isObjectLiteralExpression(lhs) || ts.isArrayLiteralExpression(lhs)) {
+          const names: string[] = []
+          if (ts.isObjectLiteralExpression(lhs)) {
+            for (const prop of lhs.properties) {
+              if (ts.isShorthandPropertyAssignment(prop)) names.push(prop.name.text)
+              else if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.initializer)) names.push(prop.initializer.text)
+            }
+          } else {
+            for (const el of lhs.elements) {
+              if (ts.isIdentifier(el)) names.push(el.text)
+            }
+          }
+          for (const name of names) {
+            if (symbols.all.has(name) && !shadowed.has(name)) {
+              diagnostics.push({
+                kind: 'error',
+                message: `Destructuring assignment to '${name}' is not supported; signals are not writable via destructuring. Use '${name}.set(value)' directly.`,
+                start: binaryExpr.getStart(),
+                end: binaryExpr.getEnd(),
+              })
+            }
+          }
+          return
+        }
+      }
+    }
+
     // Assignment expression (arrow expression body, not wrapped in ExpressionStatement)
     if (ts.isBinaryExpression(node)) {
       const { left: lhs, operatorToken, right: rhs } = node
@@ -1267,6 +1326,31 @@ function eraseHandlerExpr(
           })
           return
         }
+      }
+      // Destructuring assignment in expression position
+      if (isSimple && (ts.isObjectLiteralExpression(lhs) || ts.isArrayLiteralExpression(lhs))) {
+        const names: string[] = []
+        if (ts.isObjectLiteralExpression(lhs)) {
+          for (const prop of lhs.properties) {
+            if (ts.isShorthandPropertyAssignment(prop)) names.push(prop.name.text)
+            else if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.initializer)) names.push(prop.initializer.text)
+          }
+        } else {
+          for (const el of lhs.elements) {
+            if (ts.isIdentifier(el)) names.push(el.text)
+          }
+        }
+        for (const name of names) {
+          if (symbols.all.has(name) && !shadowed.has(name)) {
+            diagnostics.push({
+              kind: 'error',
+              message: `Destructuring assignment to '${name}' is not supported; signals are not writable via destructuring. Use '${name}.set(value)' directly.`,
+              start: node.getStart(),
+              end: node.getEnd(),
+            })
+          }
+        }
+        return
       }
     }
 
