@@ -3251,3 +3251,26 @@ CORRECTIONS (architect review, 2026-06-21):
 - GATE 8: was INCOMPLETE at checklist time — landing log entry appended but Current State
   header not updated. Closed 2026-06-21.
 ```
+
+## Component API composition bugs #2/#3 — FIXED (2026-06-21)
+
+**Context.** Reading the emitted module for a nested `<Counter/>` (architect seam review)
+surfaced two latent defects masked by the composition deferral — no test exercised an
+emitted component rendering a prop.
+
+**#3 prop-expr not erased.** Component prop thunks used raw `.getText()`, emitting
+`expr: () => (n)` (the signal object) instead of `() => (n())`. Fix: route propSrcs
+through `eraseSignalReadsInNode(expr, symbols.all, emitPropsAccessors)` in
+`parseNvFileForEmit`. Pinned: EM-13b (`propSrc === 'n()'`), TC-C06-exec (render-hole
+liveness, prior).
+
+**#2 shape.html leaked component tag.** `shapeHtml` was captured pre-DFS-walk, so the
+component element survived as `<div><Counter/></div>` instead of the anchor comment;
+`bindingPaths` then pointed at an Element, not the Comment anchor `wireComponent` expects.
+Fix: re-serialize the post-walk fragment in `processHtmlTemplate`. Output now
+`<div><!--nv-comp-0--></div>`. Side effect: IR `id` now hashes the re-serialized shape
+(correct). Pinned: Bug-#2 tests (both `parseNvFile` + emit paths), id-stability EM-00i intact.
+
+**Not a decision; no contract/Current-State change.** Factory-shape convergence (#1) remains
+the sole composition blocker — emitted factories return `{ mount }`, not ComponentRef-shaped
+TemplateIR.
