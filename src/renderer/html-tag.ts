@@ -1,7 +1,7 @@
 /**
  * nv Tagged-Template Front-End
  * Stream: (3) Renderer/templating
- * IR contract: nv-template-ir.md v0.2
+ * IR contract: nv-template-ir.md v0.3.1
  *
  * Produces a TemplateIR from a tagged template literal. Handles TextBinding
  * and AttrBinding for the PoC slice. Other binding kinds are added as the

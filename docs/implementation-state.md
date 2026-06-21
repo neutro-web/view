@@ -14,7 +14,7 @@ it disagrees with the source, the source wins and this file is stale → fix it.
 **Maintenance.** Update in the same pass that lands code, as a ready-to-commit edit (same
 discipline as log entries). Keep it to roughly this length; detail belongs in the code.
 
-Last verified against source: **2026-06-21.** Contract **v0.4.2**, Template IR **v0.3**.
+Last verified against source: **2026-06-21.** Contract **v0.4.2**, Template IR **v0.3.1**.
 
 ---
 

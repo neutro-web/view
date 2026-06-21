@@ -1,8 +1,8 @@
 # nv Template IR — Design v0.3.1
  
 **Stream:** (3) Renderer/templating  
-**Contract reference:** nv Reactive Core Runtime Contract v0.4  
-**Status:** Approved — v0.3 (arch review closed 2026-06-20). Component API implementation may begin.  
+**Contract reference:** nv Reactive Core Runtime Contract v0.4.2  
+**Status:** Approved — v0.3.1 (arch review closed 2026-06-21). Slot consumption landed.  
 **Changelog:**  
 - v0.2 (2026-06-17): initial approved IR spec — six binding kinds (PoC scope) + two designed-deferred (List, Sync).  
 - v0.2.1 (2026-06-20): multi-root template shapes; list item single-root constraint noted.  
@@ -140,7 +140,7 @@ anchor `Comment` node; the back-end inserts/removes content before this anchor.
  
 ## 3. Binding Kinds
  
-Nine kinds total: six in PoC scope, two designed-and-deferred, one added in v0.3.
+Ten kinds total: six in PoC scope, two designed-and-deferred, one added in v0.3, one added in v0.3.1.
  
 ```typescript
 type Binding =
@@ -152,7 +152,8 @@ type Binding =
   | ConditionalBinding // ─┘
   | ListBinding        //  ── designed, deferred (§3.7)
   | SyncBinding        //  ── designed, deferred (§3.8)
-  | ComponentBinding;  //  ── v0.3 (component API)
+  | ComponentBinding   //  ── v0.3 (component API)
+  | SlotOutletBinding; //  ── v0.3.1 (slot consumption)
  
 type BaseBinding = {
   pathIndex: number;   // index into shape.bindingPaths — which node this targets
@@ -919,5 +920,6 @@ type ComponentBinding = BaseBinding & {
 type Binding =
   | TextBinding | AttrBinding | PropBinding | EventBinding
   | ChildBinding | ConditionalBinding | ListBinding | SyncBinding
-  | ComponentBinding;
+  | ComponentBinding
+  | SlotOutletBinding;
 ```

@@ -5,6 +5,7 @@
 **Contract impact:** Template-IR **v0.3 → v0.3.1** (new `SlotOutletBinding`). Reactive-core **v0.4.2 unchanged**.
 **Filled by:** architect, before CC starts. **Read back by:** architect, against placed files on main's HEAD.
 **CC does NOT self-assess pass/fail.** CC produces the evidence bundle (raw output); the architect reads it back.
+**Status: PASSED 2026-06-21** (read back against main's HEAD at `e605e19`; G3.1 tightened post-landing to structural-comparator oracle — `test/renderer/ir-equivalence.ts` — after original assertion found under-specified; no production code changed. All G0–G5 items green; G6 close-out complete).
 
 ---
 

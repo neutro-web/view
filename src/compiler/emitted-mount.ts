@@ -4,7 +4,7 @@
  * Spec:     Phase 1b-1 (2026-06-19) + Phase 1b-2 (Child/Conditional)
  * Consumes: Phase 1a verdicts (BindingErasureVerdict)
  *
- * "Compiler = interpreter partially evaluated" (Invariant BE, IR v0.2 §6.2):
+ * "Compiler = interpreter partially evaluated" (Invariant BE, IR v0.3.1 §6.2):
  *   EMIT TIME: resolve IR walk, binding-kind dispatch, and NodePath traversals
  *     into specialized WireSpec closures. ConditionalBinding branches are
  *     recursively emitted at emit time via emitSetup().

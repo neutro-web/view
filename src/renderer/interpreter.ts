@@ -1,7 +1,7 @@
 /**
  * nv Runtime Interpreter Back-End
  * Stream: (3) Renderer/templating
- * IR contract: nv-template-ir.md v0.2
+ * IR contract: nv-template-ir.md v0.3.1
  *
  * This is the semantic ground truth implementation. The "compiler = interpreter
  * partially evaluated" framing means every observable behavior here is the spec
