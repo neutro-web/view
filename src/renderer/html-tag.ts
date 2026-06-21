@@ -30,10 +30,12 @@
 import type {
   AttrBinding,
   Binding,
+  ComponentBinding,
   EventBinding,
   HandlerExpr,
   NodePath,
   PropBinding,
+  PropEntry,
   ReactiveExpr,
   TemplateIR,
   TemplateShape,
@@ -182,8 +184,17 @@ function buildHtmlStrings(
     }
   }
 
+  // Inject data-nv-component sentinel for capitalized-tag elements so DFS walk can detect them.
+  sentinelHtml = sentinelHtml.replace(
+    /<([A-Z][\w-]*)(\s|\/|>)/g,
+    (_, name: string, after: string) => `<${name} data-nv-component="${name}"${after}`,
+  )
+
   // shapeHtml: remove data-nv-attr-N sentinel attributes.
-  const shapeHtml = sentinelHtml.replace(/\s+data-nv-(?:attr|event|prop)-\d+="[^"]*"/g, '')
+  const shapeHtml = sentinelHtml.replace(
+    /\s+data-nv-(?:attr|event|prop|component)-\d+="[^"]*"|\s+data-nv-component="[^"]*"/g,
+    '',
+  )
 
   return { sentinelHtml, shapeHtml }
 }
@@ -227,6 +238,15 @@ export function createHtmlTag(document: Document) {
     const frag = tmpl.content // DocumentFragment — root for path computation
 
     const bindingPaths: NodePath[] = new Array(exprs.length).fill(null)
+    const consumedByComponent = new Set<number>()
+
+    interface PendingComp {
+      anchorPath: NodePath
+      tagName: string
+      props: PropEntry[]
+      propNames: string[]
+    }
+    const pendingComponents: PendingComp[] = []
 
     // DFS walk to find sentinels
     ;(function walk(node: Node): void {
@@ -240,6 +260,46 @@ export function createHtmlTag(document: Document) {
         }
       } else if (node.nodeType === 1 /* ELEMENT_NODE */) {
         const el = node as Element
+
+        // Component element detection via data-nv-component sentinel
+        const compName = el.getAttribute('data-nv-component')
+        if (compName !== null) {
+          el.removeAttribute('data-nv-component')
+          const tagName = compName
+          const propEntries: PropEntry[] = []
+          const propNames: string[] = []
+
+          // Gather reactive prop holes (data-nv-attr-N, data-nv-prop-N, data-nv-event-N)
+          for (let k = 0; k < exprs.length; k++) {
+            for (const atype of ['attr', 'prop', 'event'] as const) {
+              const v = el.getAttribute(`data-nv-${atype}-${k}`)
+              if (v !== null) {
+                el.removeAttribute(`data-nv-${atype}-${k}`)
+                const expr = exprs[k] as ReactiveExpr<unknown>
+                propEntries.push({ name: v, expr })
+                propNames.push(v)
+                consumedByComponent.add(k)
+              }
+            }
+          }
+
+          // Gather static (plain) attributes
+          const staticAttrs = Array.from(el.attributes)
+          for (const attr of staticAttrs) {
+            const val = attr.value
+            propEntries.push({ name: attr.name, expr: () => val })
+            if (!propNames.includes(attr.name)) propNames.push(attr.name)
+          }
+
+          // Replace element with anchor comment
+          const compIndex = pendingComponents.length
+          const anchor = document.createComment(`nv-comp-${compIndex}`)
+          el.parentNode?.replaceChild(anchor, el)
+          const anchorPath = computePath(anchor, frag)
+          pendingComponents.push({ anchorPath, tagName, props: propEntries, propNames })
+          return // don't recurse into component children
+        }
+
         for (let k = 0; k < exprs.length; k++) {
           const attrVal = el.getAttribute(`data-nv-attr-${k}`)
           if (attrVal !== null) {
@@ -266,9 +326,9 @@ export function createHtmlTag(document: Document) {
       }
     })(frag)
 
-    // Verify all holes were found
+    // Verify all non-component holes were found
     for (let i = 0; i < exprs.length; i++) {
-      if (bindingPaths[i] === null) {
+      if (!consumedByComponent.has(i) && bindingPaths[i] === null) {
         throw new Error(
           `[nv/html] Could not locate sentinel for hole ${i} in template. ` +
             `Sentinel HTML: ${sentinelHtml.slice(0, 200)}`,
@@ -276,9 +336,32 @@ export function createHtmlTag(document: Document) {
       }
     }
 
-    // Build bindings
+    // Build allPaths: component anchors appended after hole paths
+    const allPaths: NodePath[] = [...bindingPaths]
+
+    // Build bindings — component bindings first
     const bindings: Binding[] = []
+    for (const { anchorPath, tagName, props: propEntries, propNames } of pendingComponents) {
+      const pathIndex = allPaths.length
+      allPaths.push(anchorPath)
+      const cb: ComponentBinding = {
+        kind: 'component',
+        pathIndex,
+        component: (_props, _slots) => ({
+          id: tagName,
+          shape: { html: '', bindingPaths: [] },
+          bindings: [],
+          meta: { frontEnd: 'tagged-template' },
+        }),
+        props: propEntries,
+        propNames,
+        slots: [],
+      }
+      bindings.push(cb)
+    }
+
     for (let i = 0; i < exprs.length; i++) {
+      if (consumedByComponent.has(i)) continue
       // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
       const hole = holes[i]!
       // The tagged-template front-end can only validate that exprs[i] is a function
@@ -312,7 +395,7 @@ export function createHtmlTag(document: Document) {
 
     const shape: TemplateShape = {
       html: shapeHtml,
-      bindingPaths: bindingPaths as NodePath[],
+      bindingPaths: allPaths as NodePath[],
     }
 
     // Stable ID: use a short hash of the static structure for cross-session stability.

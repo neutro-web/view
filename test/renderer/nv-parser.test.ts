@@ -1088,3 +1088,57 @@ describe('buildPropsAccessorMap', () => {
     expect(map.size).toBe(2)
   })
 })
+
+// ── Component element detection (TC-C series) ─────────────────────────────────
+
+describe('nv-parser — component element detection', () => {
+  it('TC-C01-parser: <Counter count="${n}"/> → ComponentBinding with propNames', () => {
+    const nvSource = [
+      'const Parent = $component(() => {',
+      '  $script(() => { const n = signal(0) })',
+      '  $render(() => html`<Counter count="${n}"></Counter>`)',
+      '})',
+    ].join('\n')
+    const results = parseNvFile(nvSource, 'test.nv', document)
+    const ir = results[0]?.ir
+    expect(ir).toBeDefined()
+    const compBinding = ir?.bindings.find((b) => b.kind === 'component')
+    expect(compBinding).toBeDefined()
+    expect(compBinding?.kind).toBe('component')
+    // biome-ignore lint/suspicious/noExplicitAny: test cast
+    const cb = compBinding as any
+    expect(cb.propNames).toContain('count')
+    expect(cb.props[0]?.name).toBe('count')
+  })
+
+  it('TC-C04-parser: child uses const { count } = props → scriptBody contains props.count()', () => {
+    const nvSource = [
+      'const Counter = $component((props) => {',
+      '  $script(() => {',
+      '    const { count } = props',
+      '    const doubled = count * 2',
+      '  })',
+      '  $render(() => html`<div></div>`)',
+      '})',
+    ].join('\n')
+    const preprocessed = preprocessMutationWrites(nvSource, 'test.nv')
+    expect(preprocessed).toContain('props.count()')
+    expect(preprocessed).not.toMatch(/const \{ count \} = props/)
+  })
+
+  it('TC-C07-parser: child assigns to prop → diagnostic with "read-only" message', () => {
+    const nvSource = [
+      'const Counter = $component((props) => {',
+      '  $script(() => {',
+      '    const { count } = props',
+      '    count = 5',
+      '  })',
+      '  $render(() => html`<div></div>`)',
+      '})',
+    ].join('\n')
+    const diags: NvDiagnostic[] = []
+    preprocessMutationWrites(nvSource, 'test.nv', diags)
+    expect(diags.length).toBeGreaterThan(0)
+    expect(diags[0]?.message).toContain('read-only')
+  })
+})

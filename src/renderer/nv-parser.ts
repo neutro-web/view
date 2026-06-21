@@ -52,11 +52,13 @@ import * as ts from 'typescript'
 import type {
   AttrBinding,
   Binding,
+  ComponentBinding,
   ConditionalBinding,
   EventBinding,
   HandlerExpr,
   NodePath,
   PropBinding,
+  PropEntry,
   ReactiveExpr,
   TemplateIR,
   TemplateShape,
@@ -249,7 +251,16 @@ function buildNvHtmlStrings(
     }
   }
 
-  const shapeHtml = sentinelHtml.replace(/\s+data-nv-(?:attr|prop|event)-\d+="[^"]*"/g, '')
+  // Inject data-nv-component sentinel for capitalized-tag elements so DFS walk can detect them.
+  sentinelHtml = sentinelHtml.replace(
+    /<([A-Z][\w-]*)(\s|\/|>)/g,
+    (_, name: string, after: string) => `<${name} data-nv-component="${name}"${after}`,
+  )
+
+  const shapeHtml = sentinelHtml.replace(
+    /\s+data-nv-(?:attr|prop|event)-\d+="[^"]*"|\s+data-nv-component="[^"]*"/g,
+    '',
+  )
   return { sentinelHtml, shapeHtml }
 }
 
@@ -317,13 +328,62 @@ function processHtmlTemplate(
   tmpl.innerHTML = sentinelHtml
   const frag = tmpl.content
 
+  const stubExpr = (() => undefined) as ReactiveExpr<unknown>
+  const stubHandler = (() => (_e: Event) => undefined) as HandlerExpr
+
   const bindingPaths: NodePath[] = new Array(holeExprs.length).fill(null)
+  const consumedByComponent = new Set<number>()
+
+  interface PendingNvComponent {
+    anchorPath: NodePath
+    tagName: string
+    propEntries: PropEntry[]
+    propNames: string[]
+  }
+  const pendingComponents: PendingNvComponent[] = []
   ;(function walk(node: Node): void {
     if (node.nodeType === 8) {
       const m = (node as Comment).data.match(/^nv-(\d+)$/)
       if (m !== null) bindingPaths[Number.parseInt(m[1] as string, 10)] = computePath(node, frag)
     } else if (node.nodeType === 1) {
       const el = node as Element
+
+      // Component element detection via data-nv-component sentinel
+      const compName = el.getAttribute('data-nv-component')
+      if (compName !== null) {
+        el.removeAttribute('data-nv-component')
+        const tagName = compName
+        const propEntries: PropEntry[] = []
+        const propNames: string[] = []
+
+        for (let k = 0; k < holeExprs.length; k++) {
+          for (const atype of ['attr', 'prop', 'event'] as const) {
+            const v = el.getAttribute(`data-nv-${atype}-${k}`)
+            if (v !== null) {
+              el.removeAttribute(`data-nv-${atype}-${k}`)
+              propEntries.push({ name: v, expr: stubExpr })
+              propNames.push(v)
+              consumedByComponent.add(k)
+            }
+          }
+        }
+
+        // Gather static (plain) attributes on the component element
+        const staticAttrs = Array.from(el.attributes)
+        for (const attr of staticAttrs) {
+          const val = attr.value
+          propEntries.push({ name: attr.name, expr: () => val })
+          if (!propNames.includes(attr.name)) propNames.push(attr.name)
+        }
+
+        const compIndex = pendingComponents.length
+        const anchor = doc.createComment(`nv-comp-${compIndex}`)
+        el.parentNode?.replaceChild(anchor, el)
+        const anchorPath = computePath(anchor, frag)
+        pendingComponents.push({ anchorPath, tagName, propEntries, propNames })
+        return // don't recurse into component children
+      }
+
       for (let k = 0; k < holeExprs.length; k++) {
         for (const atype of ['attr', 'prop', 'event'] as const) {
           const v = el.getAttribute(`data-nv-${atype}-${k}`)
@@ -342,18 +402,43 @@ function processHtmlTemplate(
   })(frag)
 
   for (let i = 0; i < holeExprs.length; i++) {
-    if (bindingPaths[i] === null)
+    if (!consumedByComponent.has(i) && bindingPaths[i] === null)
       throw new Error(
         `[nv/nv-parser] No sentinel for hole ${i}. Sentinel: ${sentinelHtml.slice(0, 200)}`,
       )
   }
 
+  // Build allPaths: component anchors appended after hole paths
+  const allPaths: NodePath[] = [...bindingPaths]
+
   const bindings: Binding[] = []
   const verdicts: Array<'ACCEPT' | 'PLAIN'> = []
-  const stubExpr = (() => undefined) as ReactiveExpr<unknown>
-  const stubHandler = (() => (_e: Event) => undefined) as HandlerExpr
+
+  // Add component bindings (anchors beyond hole range)
+  for (const { anchorPath, tagName, propEntries, propNames } of pendingComponents) {
+    const pathIndex = allPaths.length
+    allPaths.push(anchorPath)
+    const cb: ComponentBinding = {
+      kind: 'component',
+      pathIndex,
+      component: (_props, _slots) => ({
+        id: `comp:${tagName}`,
+        shape: { html: '', bindingPaths: [] },
+        bindings: [],
+        meta: { frontEnd: 'nv-file' },
+      }),
+      props: propEntries,
+      propNames,
+      slots: [],
+    }
+    bindings.push(cb)
+  }
 
   for (let i = 0; i < holeExprs.length; i++) {
+    if (consumedByComponent.has(i)) {
+      verdicts.push('PLAIN')
+      continue
+    }
     const pos = positions[i] as PosKind
     const holeExpr = holeExprs[i] as ts.Expression
     const pathIndex = i
@@ -413,7 +498,7 @@ function processHtmlTemplate(
   return {
     ir: {
       id: `nv:${simpleHash(shapeHtml)}`,
-      shape: { html: shapeHtml, bindingPaths: bindingPaths as NodePath[] },
+      shape: { html: shapeHtml, bindingPaths: allPaths as NodePath[] },
       bindings,
       meta: { frontEnd: 'nv-file' },
     },
@@ -768,13 +853,37 @@ function eraseScriptBlock(
   symbols: ScriptSymbols,
   out: Rewrite[],
   diagnostics: NvDiagnostic[],
+  propsParamName?: string,
 ): void {
+  // Build mutable props accessor map (grows as we detect `const { x } = props`)
+  const propsAccessors = new Map<string, string>()
+
   // Walk CHILDREN of the $script body directly — not the body block itself.
   // This prevents gatherBlockShadows from treating the $script's own `const count = signal(0)`
   // declarations as shadows (they are reactive declarations, not local shadows).
   ts.forEachChild(block, (child) => walk(child, new Set<string>()))
 
   function walk(node: ts.Node, shadowed: ReadonlySet<string>): void {
+    // Props destructuring detection: `const { count } = props`
+    if (propsParamName !== undefined && ts.isVariableStatement(node)) {
+      for (const decl of node.declarationList.declarations) {
+        if (
+          ts.isObjectBindingPattern(decl.name) &&
+          decl.initializer &&
+          ts.isIdentifier(decl.initializer) &&
+          decl.initializer.text === propsParamName
+        ) {
+          const accessorMap = buildPropsAccessorMap(decl.name, [], diagnostics)
+          for (const [local, accessor] of accessorMap) {
+            propsAccessors.set(local, accessor)
+          }
+          // Erase the destructure declaration itself
+          out.push({ start: node.getFullStart(), end: node.getEnd(), replacement: '' })
+          return
+        }
+      }
+    }
+
     // Scope entry: function introduces new parameter and body-level shadowing
     if (
       ts.isArrowFunction(node) ||
@@ -811,6 +920,16 @@ function eraseScriptBlock(
       const binaryOp = compoundOpMap.get(op)
       if ((isSimple || binaryOp !== undefined) && ts.isIdentifier(lhs) && !shadowed.has(lhs.text)) {
         const name = lhs.text
+        // Props write detection: assignment to a destructured prop → error diagnostic
+        if (propsAccessors.has(name)) {
+          diagnostics.push({
+            kind: 'error',
+            message: `Assignment to prop '${name}': props are read-only. Use a local signal if you need local mutable state.`,
+            start: node.expression.getStart(),
+            end: node.expression.getEnd(),
+          })
+          return
+        }
         if (symbols.writable.has(name)) {
           const erasedRhs = eraseSignalReadsInNode(rhs, symbols.all)
           out.push({
@@ -832,6 +951,22 @@ function eraseScriptBlock(
           return
         }
       }
+    }
+
+    // Props accessor read: identifier is in propsAccessors map
+    if (ts.isIdentifier(node) && propsAccessors.has(node.text) && !shadowed.has(node.text)) {
+      const accessor = propsAccessors.get(node.text) ?? ''
+      const p = node.parent
+      if (ts.isCallExpression(p) && p.expression === node) return
+      if (ts.isPropertyAccessExpression(p) && (p.expression === node || p.name === node)) return
+      if (ts.isVariableDeclaration(p) && p.name === node) return
+      if (ts.isParameter(p) && p.name === node) return
+      if (ts.isShorthandPropertyAssignment(p)) return
+      if (ts.isPropertyAssignment(p) && p.name === node) return
+      if (ts.isImportSpecifier(p) || ts.isImportClause(p)) return
+      if (ts.isLabeledStatement(p) && p.label === node) return
+      out.push({ start: node.getStart(), end: node.getEnd(), replacement: accessor })
+      return
     }
 
     // Bare read: reactive identifier in a value position, not shadowed
@@ -890,8 +1025,14 @@ export function preprocessMutationWrites(
         if (!scriptFn || !ts.isArrowFunction(scriptFn) || !ts.isBlock(scriptFn.body)) continue
         blocks.push(scriptFn.body)
       }
+      // Detect props parameter name from $component((props) => ...)
+      const propsParamName: string | undefined =
+        fn.parameters.length > 0 && ts.isIdentifier(fn.parameters[0]?.name)
+          ? fn.parameters[0]?.name.text
+          : undefined
       const symbols = collectScriptSymbols(blocks)
-      for (const block of blocks) eraseScriptBlock(block, symbols, rewrites, diagnostics)
+      for (const block of blocks)
+        eraseScriptBlock(block, symbols, rewrites, diagnostics, propsParamName)
       return // each $component is its own scope
     }
     ts.forEachChild(node, walk)

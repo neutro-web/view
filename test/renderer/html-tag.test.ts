@@ -45,3 +45,28 @@ describe('html-tag — prop hole (.propName syntax)', () => {
     expect((ir.bindings[0] as PropBinding).name).toBe('value')
   })
 })
+
+describe('html-tag — component element detection (TC-C01-html)', () => {
+  it('TC-C01-html: <Counter count="${() => n}"/> → ComponentBinding with propNames', () => {
+    const { html } = setup()
+    const n = 42
+    const ir = html`<Counter count="${() => n}"></Counter>`
+    const compBinding = ir.bindings.find((b) => b.kind === 'component')
+    expect(compBinding).toBeDefined()
+    expect(compBinding?.kind).toBe('component')
+    // biome-ignore lint/suspicious/noExplicitAny: test cast
+    const cb = compBinding as any
+    expect(cb.propNames).toContain('count')
+    expect(cb.props[0]?.name).toBe('count')
+  })
+
+  it('TC-C01-html: static-only component element → ComponentBinding with static prop', () => {
+    const { html } = setup()
+    const ir = html`<Counter label="Hits"></Counter>`
+    const compBinding = ir.bindings.find((b) => b.kind === 'component')
+    expect(compBinding).toBeDefined()
+    // biome-ignore lint/suspicious/noExplicitAny: test cast
+    const cb = compBinding as any
+    expect(cb.propNames).toContain('label')
+  })
+})
