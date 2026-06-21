@@ -3274,3 +3274,25 @@ Fix: re-serialize the post-walk fragment in `processHtmlTemplate`. Output now
 **Not a decision; no contract/Current-State change.** Factory-shape convergence (#1) remains
 the sole composition blocker — emitted factories return `{ mount }`, not ComponentRef-shaped
 TemplateIR.
+
+## Spike S-A2 — A2 factory-shape ownership VERIFIED (2026-06-21)
+
+**Result.** A2 ownership claim execute-verified against real core.ts + interpreter.ts
+(spike, sandbox). An A2-shaped ComponentRef ((props,slots)=>TemplateIR, no own root)
+mounted via wireComponent yields: single-root ownership, live parent→child prop edge,
+child-body effects owned+disposed by the parent cascade, zero leak after parent dispose
+(10/10). Root sugar mount(Child(props),parent,doc) single-root + reactive + no-leak (8/8).
+Back-ends confirmed UNCHANGED.
+
+**Mechanism correction (supersedes the "double-root" framing in the convergence draft).**
+createRoot auto-attaches to the active owner (root.owner=currentOwner; addChild). A nested
+createRoot run synchronously inside a parent root is owned and disposed normally — NOT a leak.
+The old {mount} shape leaks for a different reason: Counter() returns {mount}, invoked by the
+consumer outside any owner context (currentOwner===null) → freestanding root outside the owner
+tree → composition leaks unless disposers are manually threaded. A2 returns TemplateIR so the
+parent root owns child effects by construction. This is the precise correctness argument for A2
+over B; the earlier "B adds a redundant root" framing was imprecise (redundant nesting is a perf
+cost only when synchronous; the leak requires out-of-context invocation).
+
+**Status.** Convergence spec §3 rewritten to the verified mechanism. Implementation (emitter
+§4–§7) cleared to proceed — ownership premise no longer an assumption.
