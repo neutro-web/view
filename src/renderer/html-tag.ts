@@ -38,6 +38,7 @@ import type {
   PropEntry,
   ReactiveExpr,
   SlotEntry,
+  SlotOutletBinding,
   TemplateIR,
   TemplateShape,
   TextBinding,
@@ -112,6 +113,89 @@ function computePath(node: Node, root: Node): NodePath {
     current = parent
   }
   return path
+}
+
+// ── Slot sub-IR builder ───────────────────────────────────────────────────────
+
+/**
+ * Build a TemplateIR from a set of DOM nodes (slot content).
+ * Walks the nodes for <!--nv-i--> sentinels and data-nv-* attr/prop/event sentinels.
+ * Returns the sub-IR and the set of hole indices found (to mark consumed in parent).
+ */
+function buildSlotSubIR(
+  slotNodes: Node[],
+  exprs: unknown[],
+  doc: Document,
+  slotId: string,
+): { ir: TemplateIR; holeIndices: number[] } {
+  if (slotNodes.length === 0) {
+    return {
+      ir: { id: slotId, shape: { html: '', bindingPaths: [] }, bindings: [] },
+      holeIndices: [],
+    }
+  }
+
+  // Build a fragment wrapping all slot nodes for path computation.
+  const fragWrapper = doc.createElement('div')
+  for (const n of slotNodes) {
+    fragWrapper.appendChild(n.cloneNode(true))
+  }
+  const fragRoot = fragWrapper
+
+  const holeIndices: number[] = []
+  const slotPaths: NodePath[] = []
+
+  // Walk fragRoot to find sentinels.
+  ;(function walk(node: Node): void {
+    if (node.nodeType === 8 /* COMMENT_NODE */) {
+      const m = (node as Comment).data.match(/^nv-(\d+)$/)
+      if (m !== null) {
+        // biome-ignore lint/style/noNonNullAssertion: regex match guarantees group
+        const idx = Number.parseInt(m[1]!, 10)
+        holeIndices.push(idx)
+        slotPaths.push(computePath(node, fragRoot))
+      }
+    } else if (node.nodeType === 1 /* ELEMENT_NODE */) {
+      const el = node as Element
+      for (let k = 0; k < exprs.length; k++) {
+        for (const atype of ['attr', 'prop', 'event'] as const) {
+          if (el.getAttribute(`data-nv-${atype}-${k}`) !== null) {
+            holeIndices.push(k)
+            slotPaths.push(computePath(el, fragRoot))
+            el.removeAttribute(`data-nv-${atype}-${k}`)
+          }
+        }
+      }
+    }
+    let child = node.firstChild
+    while (child !== null) {
+      walk(child)
+      child = child.nextSibling
+    }
+  })(fragRoot)
+
+  // Build shape.html: serialize fragWrapper.innerHTML, strip data-nv-* sentinels.
+  const rawHtml = fragWrapper.innerHTML.replace(
+    /\s+data-nv-(?:attr|prop|event|component)-\d+="[^"]*"/g,
+    '',
+  )
+
+  // Build compact bindings (pathIndex aligned with slotPaths).
+  type PrimitiveExpr = ReactiveExpr<string | number | boolean | null | undefined>
+  const bindings: Binding[] = holeIndices.map((origIdx, compactIdx) => {
+    const expr = exprs[origIdx] as PrimitiveExpr
+    const b: TextBinding = { kind: 'text', pathIndex: compactIdx, expr }
+    return b
+  })
+
+  return {
+    ir: {
+      id: slotId,
+      shape: { html: rawHtml, bindingPaths: slotPaths },
+      bindings,
+    },
+    holeIndices,
+  }
 }
 
 // ── Sentinel HTML builder ─────────────────────────────────────────────────────
@@ -293,20 +377,53 @@ export function createHtmlTag(document: Document) {
             if (!propNames.includes(attr.name)) propNames.push(attr.name)
           }
 
-          // Capture slot content before replacing element with anchor
+          // Capture slot content before replacing element with anchor.
+          // Named slots: children that are <slot name="x"> elements.
+          // Default slot: all other children.
           const slots: SlotEntry[] = []
           if (el.childNodes.length > 0) {
-            const innerHTML = el.innerHTML
-            if (/<!--nv-\d+-->|data-nv-/.test(innerHTML)) {
-              console.warn(`[nv] Dynamic slot content in <${tagName}> is not yet supported`)
-            } else {
-              // Static slot content
-              const slotIR: TemplateIR = {
-                id: `slot:${tagName}:default`,
-                shape: { html: innerHTML, bindingPaths: [] },
-                bindings: [],
+            const defaultNodes: Node[] = []
+            const namedGroups = new Map<string, Node[]>()
+
+            for (const child of Array.from(el.childNodes)) {
+              if (
+                child.nodeType === 1 &&
+                (child as Element).tagName.toLowerCase() === 'slot' &&
+                (child as Element).hasAttribute('name')
+              ) {
+                // biome-ignore lint/style/noNonNullAssertion: hasAttribute check above guarantees non-null
+                const slotName = (child as Element).getAttribute('name')!
+                namedGroups.set(slotName, Array.from((child as Element).childNodes))
+              } else {
+                defaultNodes.push(child)
               }
-              slots.push({ name: 'default', content: slotIR })
+            }
+
+            // Build sub-IR for default slot (if any non-whitespace or comment content)
+            const hasDefaultContent = defaultNodes.some(
+              (n) => n.nodeType !== 3 || (n as Text).data.trim() !== '',
+            )
+            if (hasDefaultContent || defaultNodes.some((n) => n.nodeType === 8)) {
+              const { ir: defaultIR, holeIndices } = buildSlotSubIR(
+                defaultNodes,
+                exprs,
+                document,
+                `slot:${tagName}:default`,
+              )
+              slots.push({ name: 'default', content: defaultIR })
+              for (const idx of holeIndices) consumedByComponent.add(idx)
+            }
+
+            // Build sub-IR for each named slot
+            for (const [slotName, nodes] of namedGroups) {
+              const { ir: namedIR, holeIndices } = buildSlotSubIR(
+                nodes,
+                exprs,
+                document,
+                `slot:${tagName}:${slotName}`,
+              )
+              slots.push({ name: slotName, content: namedIR })
+              for (const idx of holeIndices) consumedByComponent.add(idx)
             }
           }
           const compIndex = pendingComponents.length
@@ -389,8 +506,18 @@ export function createHtmlTag(document: Document) {
       type PrimitiveExpr = ReactiveExpr<string | number | boolean | null | undefined>
       const expr = exprs[i] as PrimitiveExpr
       if (hole.kind === 'text') {
-        const b: TextBinding = { kind: 'text', pathIndex: i, expr }
-        bindings.push(b)
+        // Check if this hole is a slot outlet: () => slots.name
+        const exprFn = exprs[i] as { toString(): string }
+        const slotOutletMatch = exprFn.toString().match(/^\s*\(\s*\)\s*=>\s*slots\.(\w+)\s*$/)
+        if (slotOutletMatch !== null) {
+          // biome-ignore lint/style/noNonNullAssertion: regex match guarantees group
+          const slotName = slotOutletMatch[1]!
+          const b: SlotOutletBinding = { kind: 'slot-outlet', pathIndex: i, name: slotName }
+          bindings.push(b)
+        } else {
+          const b: TextBinding = { kind: 'text', pathIndex: i, expr }
+          bindings.push(b)
+        }
       } else if (hole.kind === 'attr') {
         const b: AttrBinding = { kind: 'attr', pathIndex: i, name: hole.name, expr }
         bindings.push(b)
