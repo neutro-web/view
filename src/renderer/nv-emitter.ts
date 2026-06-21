@@ -73,6 +73,9 @@ function emitThunkSource(thunk: ThunkSource, indent: string): string {
         .join(', ')
       return `/* component:${thunk.componentSrc} */\n${indent}  ${thunk.componentSrc}, [${propParts}]`
     }
+    case 'slot-outlet':
+      // Slot outlet has no expression — handled structurally in emitBindingLiteral.
+      return `/* slot-outlet:${thunk.name} */`
   }
 }
 
