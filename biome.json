@@ -11,6 +11,7 @@
       "node_modules",
       "coverage",
       "*.md",
+      ".claude",
       "test/browser/test-results",
       "test/browser/playwright-report"
     ]
