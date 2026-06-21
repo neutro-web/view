@@ -3234,3 +3234,20 @@ gated step.
 **Gate status.** 8-gate verification checklist passed. 3059/3059 tests green. `pnpm typecheck` clean. `pnpm lint` clean. `pnpm build` clean.
 
 **Commits.** `3e21613` (ir.ts v0.3) → … → `73f92b8` (test + fix wave) on `main`.
+
+---
+
+## Component API v1 — Verification Gate Corrections (architect review, 2026-06-21)
+
+```
+CORRECTIONS (architect review, 2026-06-21):
+- GATE 6: TC-C14f proves the two-file .nv→.js PLUGIN CHAIN end-to-end (app.nv imports
+  counter.nv, both parsed/emitted by nvPlugin, specifier round-trip works, App mounts +
+  reactive). It does NOT prove component composition — App never instantiates <Counter/>;
+  Counter is void-referenced to defeat tree-shaking. DOM assertions are App's own n signal.
+  Emitted-component-as-child blocked on factory-shape convergence (forward queue).
+- GATE 4: slot CAPTURE verified (static→default-slot IR, dynamic→warning). Slot CONSUMPTION
+  not built — factories ignore slotsObj.
+- GATE 8: was INCOMPLETE at checklist time — landing log entry appended but Current State
+  header not updated. Closed 2026-06-21.
+```
