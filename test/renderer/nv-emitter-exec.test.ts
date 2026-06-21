@@ -307,6 +307,115 @@ const B = $component(() => {
   })
 })
 
+// ── TC-C04-exec / TC-C05-exec / TC-C06-exec: Props-erasure liveness ──────────
+
+async function bundleComponentWithSignal(source: string, name: string): Promise<string> {
+  const js = emitModule(parseNvFileForEmit(source, `${name.toLowerCase()}.nv`, sharedDoc))
+  const withExports = `${js}\nexport { flushSync, signal } from '@neutro/view/core'\n`
+  const entryFile = tmpPath('.js')
+  const outFile = tmpPath('.bundle.mjs')
+  fs.writeFileSync(entryFile, withExports, 'utf8')
+  await esbuild.build({
+    entryPoints: [entryFile],
+    bundle: true,
+    format: 'esm',
+    outfile: outFile,
+    platform: 'node',
+    plugins: [
+      {
+        name: 'neutro-alias',
+        setup(build) {
+          build.onResolve({ filter: /^@neutro\/view\/core$/ }, () => ({ path: coreIndexPath }))
+          build.onResolve({ filter: /^@neutro\/view\/renderer$/ }, () => ({
+            path: rendererIndexPath,
+          }))
+        },
+      },
+    ],
+  })
+  return outFile
+}
+
+type SignalBundleModule = {
+  flushSync(): void
+  signal<T>(v: T): { (): T; set(v: T): void }
+  [name: string]: unknown
+}
+
+describe('TC-C04-exec / TC-C05-exec / TC-C06-exec  props-erasure liveness', () => {
+  test('TC-C04-exec  simple destructure: { count } = props → DOM reactive to external signal', async () => {
+    const source = `
+const Counter = $component((props) => {
+  $script(() => { const { count } = props })
+  $render(() => html\`<span>\${count}</span>\`)
+})`
+    const bundlePath = await bundleComponentWithSignal(source, 'Counter')
+    const mod = (await import(bundlePath)) as SignalBundleModule & {
+      Counter: (props: Record<string, () => unknown>) => {
+        mount(p: Element, d: Document): () => void
+      }
+    }
+    const n = mod.signal(0)
+    const doc = makeDoc()
+    const parent = makeParent(doc)
+    const dispose = mod.Counter({ count: () => n() }).mount(parent, doc)
+    mod.flushSync()
+    expect(parent.querySelector('span')?.textContent).toBe('0')
+    n.set(7)
+    mod.flushSync()
+    expect(parent.querySelector('span')?.textContent).toBe('7')
+    dispose()
+  })
+
+  test('TC-C05-exec  alias destructure: { count: c } = props → DOM reactive to external signal', async () => {
+    const source = `
+const Widget = $component((props) => {
+  $script(() => { const { count: c } = props })
+  $render(() => html\`<span>\${c}</span>\`)
+})`
+    const bundlePath = await bundleComponentWithSignal(source, 'Widget')
+    const mod = (await import(bundlePath)) as SignalBundleModule & {
+      Widget: (props: Record<string, () => unknown>) => {
+        mount(p: Element, d: Document): () => void
+      }
+    }
+    const n = mod.signal(0)
+    const doc = makeDoc()
+    const parent = makeParent(doc)
+    const dispose = mod.Widget({ count: () => n() }).mount(parent, doc)
+    mod.flushSync()
+    expect(parent.querySelector('span')?.textContent).toBe('0')
+    n.set(42)
+    mod.flushSync()
+    expect(parent.querySelector('span')?.textContent).toBe('42')
+    dispose()
+  })
+
+  test('TC-C06-exec  rest member: ...rest / rest.label → DOM reactive to external signal', async () => {
+    const source = `
+const Label = $component((props) => {
+  $script(() => { const { ...rest } = props })
+  $render(() => html\`<span>\${rest.label}</span>\`)
+})`
+    const bundlePath = await bundleComponentWithSignal(source, 'Label')
+    const mod = (await import(bundlePath)) as SignalBundleModule & {
+      Label: (props: Record<string, () => unknown>) => {
+        mount(p: Element, d: Document): () => void
+      }
+    }
+    const lbl = mod.signal('hello')
+    const doc = makeDoc()
+    const parent = makeParent(doc)
+    const dispose = mod.Label({ label: () => lbl() }).mount(parent, doc)
+    mod.flushSync()
+    expect(parent.querySelector('span')?.textContent).toBe('hello')
+    lbl.set('world')
+    mod.flushSync()
+    expect(parent.querySelector('span')?.textContent).toBe('world')
+    dispose()
+  })
+})
+
 // ── TC-C14: Cross-file component imports — .nv specifier rewrite ───────────────
 
 describe('TC-C14  cross-file component imports — .nv → .js specifier rewrite', () => {
@@ -346,9 +455,11 @@ const Counter = $component((props) => {
   $render(() => html\`<span>\${count}</span>\`)
 })`
 
-    // app.nv: imports Counter (proving cross-file bundling works) and renders independently.
-    // Note: runtime component composition (using Counter as a child) is a planned feature;
-    // this test verifies the .nv specifier rewrite + esbuild pipeline end-to-end.
+    // app.nv: imports Counter (cross-file bundle proves .nv plugin chains) and renders
+    // its own reactive state. Counter is referenced to prevent tree-shaking; it is parsed
+    // by nvPlugin when app.nv is bundled, proving the two-file pipeline.
+    // Note: mounting Counter as a child element requires the emitter factory shape to match
+    // ComponentRef — deferred to a later milestone.
     const appSource = `
 import { Counter } from './counter.nv'
 const App = $component(() => {
@@ -356,7 +467,7 @@ const App = $component(() => {
     const n = signal(0)
     void Counter
   })
-  $render(() => html\`<p>\${n}</p>\`)
+  $render(() => html\`<p>\${n}</p><button @click="\${() => n = n + 1}">+</button>\`)
 })`
 
     // Write both .nv files to a shared temp dir so './counter.nv' resolves correctly
@@ -424,6 +535,12 @@ const App = $component(() => {
 
     // App renders a <p> showing "0"
     expect(parent.querySelector('p')?.textContent).toBe('0')
+
+    // Click button → n increments → DOM updates (proves reactivity end-to-end)
+    const btn = parent.querySelector('button')
+    btn?.dispatchEvent(new dom.window.MouseEvent('click'))
+    mod.flushSync()
+    expect(parent.querySelector('p')?.textContent).toBe('1')
 
     dispose()
   })

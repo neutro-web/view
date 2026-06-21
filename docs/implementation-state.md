@@ -14,7 +14,7 @@ it disagrees with the source, the source wins and this file is stale → fix it.
 **Maintenance.** Update in the same pass that lands code, as a ready-to-commit edit (same
 discipline as log entries). Keep it to roughly this length; detail belongs in the code.
 
-Last verified against source: **2026-06-20.** Contract **v0.4.2**, Template IR **v0.2.1**.
+Last verified against source: **2026-06-21.** Contract **v0.4.2**, Template IR **v0.3**.
 
 ---
 
@@ -34,15 +34,15 @@ Legend: **REAL** = production-complete & verified · **PARTIAL** = works for a s
 | `sync` classifier + write-graph cycle checker | REAL | Steps 1–2. 41/41. SignalId seam test-locked. |
 | equality-policy inferencer (step 3) | REAL (inert) | Maps node value-type → `OBJECT_IS`/`false`/DECLINE. `_compilerEquals?` hook is an **inert stub** in core; not benchmarkable until wired. |
 | branch-variant analyzer (step 4) | REAL (shelved) | Union oracle. Measured **net-negative**; SHELVED behind a reconcile-cost consumer (E2). |
-| `emitted-mount.ts` | REAL | Compiler back-end. Consumes a **real-thunk** IR → specialized mount. Handles text/attr/prop/event/child/conditional/list; sync throws. 32/32. **Not on the v1 build-pipeline path** (build uses interpreter `mount`). |
+| `emitted-mount.ts` | REAL | Compiler back-end. Consumes a **real-thunk** IR → specialized mount. Handles text/attr/prop/event/child/conditional/list/**component**; sync throws. **Not on the v1 build-pipeline path** (build uses interpreter `mount`). Component case: `createRoot` → `componentFactory(propsObj, slotsObj)` → `emitSetup(childIR)` → mount. Direct-capture (`componentFactory` + `propEntries`), never captures binding object. `emptyVerdicts` for slot sub-IRs. |
 
 ### `src/renderer/` → `@neutro/view/renderer`
 | File | Status | Notes |
 |---|---|---|
-| `ir.ts` | REAL | IR types, matches Template-IR v0.2 exactly. 8 binding kinds (6 PoC + List landed + Sync deferred). |
-| `interpreter.ts` | REAL | Back-end / **semantic ground truth**. Exports `mount(ir, parent, doc): () => void` and `walkPath`. `mount` **creates its own `createRoot`**; effects enqueued, run on first flush. `mountFragment(ir,parent,doc,before?)` is **internal (not exported)** — there is **no setup-without-root primitive**. Handles all 6 PoC kinds + list; sync throws. Nested roots (conditional/list) are bridged manually via `onCleanup`. |
-| `html-tag.ts` | **PARTIAL** | Tagged-template front-end (`createHtmlTag(doc)`). **Handles `text` + `attr` ONLY.** No prop/event/child/conditional/list. All holes must be thunks (`() => …`); non-function throws. Produces **real** (live-closure) thunks. |
-| `nv-parser.ts` | PARTIAL → **REAL for the build path** | Adds `parseNvFileForEmit` + `eraseHandlerExpr` + `computeThunksForTemplate`/`computeThunkSource` + `extractScriptBodySource`/`extractModuleScope`. `parseNvFile` (structural-only, stub thunks) unchanged and still used by FE-equivalence tests. `parseNvFileForEmit` returns the real `emit` payload: erased `scriptBody`, index-aligned `bindingThunks` (recursive for conditional), `moduleScope`. |
+| `ir.ts` | REAL | IR types, matches Template-IR v0.3 exactly. 9 binding kinds (6 PoC + List + ComponentBinding landed; Sync deferred). `ComponentBinding` adds `component: ComponentRef`, `props: PropEntry[]`, `propNames`, `slots: SlotEntry[]`. All types local-structural (no DOM/core imports). |
+| `interpreter.ts` | REAL | Back-end / **semantic ground truth**. Exports `mount(ir, parent, doc): () => void` and `walkPath`. `mount` **creates its own `createRoot`**; effects enqueued, run on first flush. `mountFragment(ir,parent,doc,before?)` is **internal (not exported)**. Handles all 6 PoC kinds + list + component (`wireComponent`); sync throws. Nested roots (conditional/list/component) bridged via `onCleanup`. |
+| `html-tag.ts` | **PARTIAL** | Tagged-template front-end (`createHtmlTag(doc)`). Handles `text`, `attr`, `prop` (`.name=`), `event` (`@name=`), and **`component`** (capitalized tag detection, `data-nv-component` sentinel). Static inter-tag slot content captured as default-slot IR. Dynamic/nested-component slot content fires a warning (deferred). All holes thunks; non-function throws. |
+| `nv-parser.ts` | PARTIAL → **REAL for the build path** | Adds `parseNvFileForEmit` + `eraseHandlerExpr` + `computeThunksForTemplate`/`computeThunkSource` + `extractScriptBodySource`/`extractModuleScope`. `parseNvFile` (structural-only, stub thunks) unchanged. `parseNvFileForEmit` returns the real `emit` payload: erased `scriptBody`, index-aligned `bindingThunks` (recursive for conditional + component), `moduleScope`. Component detection: `processHtmlTemplate` DFS walk detects capitalized tags via `data-nv-component` sentinel, builds `ComponentBinding` with throwing stub factory, captures propEntries via `buildPropsAccessorMap`, captures static default-slot IR. `buildPropsAccessorMap` is the shared props-destructure analyzer used in `eraseScriptBlock`, `eraseHandlerExpr`, and `computeThunkSource`. |
 | `nv-emitter.ts` | **REAL** | `emitModule(results) → ES module text`. IR object literal; nested-root factory with `onCleanup(disposeMount)` bridge; minimal imports via word-boundary detection; throws on error diagnostics. Spec §5. |
 | `nv-esbuild-plugin.ts` | **REAL** | `nvPlugin()`: `onLoad(/\.nv$/)` → jsdom doc → `parseNvFileForEmit` → `emitModule` → `{ contents, loader: 'js' }`. Thin I/O glue. |
 | build pipeline (overall) | **REAL** | Transform + erasure layer verified. Executable-module gate CLOSED (EX-01..03, dynamic import, esbuild alias). Multi-root dispose fixed. |
@@ -89,24 +89,32 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
   `nv-emitter-exec.test.ts` write the emitted `.js` to disk, bundle via esbuild (alias
   `@neutro/view/*` → `src/`), `import()` the bundle, mount, and assert DOM. Conditional
   literal and multi-component emission both verified end-to-end.
-- **Handler destructuring-write gap.** `eraseHandlerExpr` does not detect destructuring
-  assignment targets (`[a,b] = …`, `({x} = …)`) as signal writes — falls through to
-  bare-read only, no false-positive `.set()` (fails safe). A destructuring write to a
-  signal needs explicit `.set()` in v1. Documented, not a soundness hole.
+- **Handler destructuring-write — DIAGNOSED (2026-06-21).** `eraseHandlerExpr` now detects
+  destructuring assignment targets (`[a,b] = …`, `({x} = …)`) where any bound name is a
+  reactive signal, and emits an error diagnostic pointing to explicit `.set()`. The gap is
+  closed for writes. Reads of props-destructured locals inside handler bodies are also erased
+  via `buildPropsAccessorMap` (now called from handler erasure as a second call site).
 - **`extractModuleScope` edge:** passes top-level imports + non-`$component` statements
   through verbatim; verify non-`const` component forms and `$component` helper functions
   behave as intended (low risk).
 - **`parseNvFile` thunks are stubs** — structural form is real; thunks are `(() => undefined)`.
   Use `parseNvFileForEmit` for the build path (returns real erased thunk sources).
 - **Child & List not `.nv`-reachable** — interpreter supports them via hand-authored IR only.
-- **`html-tag.ts` covers text/attr only** — prop/event/conditional require manual IR or the
-  `.nv` path.
-- **Component API undesigned** — props/slots/identity/ComponentBinding is the next design gate
-  (IR §9.3, *open*). No public component-invocation contract exists. **Props-erasure mechanics
-  designed + verified** (spike, 2026-06-20, 74/74 — erasure mechanics 39/39 + liveness 35/35
-  against real core.ts); feeds component-api-spec §3. ComponentBinding/props/slots still
-  unbuilt. Handler destructuring-write gap scheduled to close via the shared destructuring
-  analyzer (D3) when the component API lands.
+- **`html-tag.ts`** now covers text/attr/prop/event/component. Conditional/list require manual
+  IR or the `.nv` path.
+- **Component API v1 — LANDED (2026-06-21).** `ComponentBinding` is real in `ir.ts` (v0.3).
+  Both front-ends (`html-tag.ts`, `nv-parser.ts`) detect capitalized component elements and
+  produce `ComponentBinding` with throwing stub factory (factory resolution deferred — cannot
+  resolve at parse time), real `props[]`/`propNames`/`slots[]`. Both back-ends
+  (`interpreter.ts` wireComponent, `emitted-mount.ts` case 'component') consume
+  `ComponentBinding` — create child reactive root, build propsObj/slotsObj, call factory,
+  mount returned IR, cleanup on owner dispose. Props-erasure: `buildPropsAccessorMap` shared
+  across `eraseScriptBlock`, `eraseHandlerExpr`, `computeThunkSource` (three callers). D3
+  (destructuring write in handler → diagnostic) closed. Static default-slot capture in both
+  front-ends; dynamic/nested-component slot content is warned and deferred.
+  Cross-file composition via emitter path deferred: emitted factories return `{ mount }` not
+  `ComponentRef`-shape `TemplateIR`; mounting an emitted component as child of another emitted
+  component requires the factory shapes to converge (next milestone).
 - **Equality hook inert; step 4 shelved** — neither specialization is wired to save work.
 - **SyncBinding** throws at both back-ends.
 - **Multi-root mount/dispose — FIXED (v0.2.1).** Both back-ends now snapshot all fragment
@@ -118,5 +126,5 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
 ---
 
 ## Not built at all (forward queue)
-`$style` scoping, ComponentBinding + component API, SyncBinding,
+`$style` scoping, SyncBinding, emitter factory shape convergence (emitted component as child),
 LIS list move-minimization (parked), kind-split (parked behind real-app evidence).

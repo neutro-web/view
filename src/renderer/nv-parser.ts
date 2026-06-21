@@ -748,6 +748,20 @@ function eraseSignalReadsInNode(
       if (accessor !== undefined || reactive.has(n.text)) {
         const p = n.parent
         if (ts.isCallExpression(p) && p.expression === n) return
+        // REST binding in property access position: `rest.propKey` → `props.propKey()`
+        if (
+          accessor?.startsWith('REST:') &&
+          ts.isPropertyAccessExpression(p) &&
+          p.expression === n &&
+          ts.isIdentifier(p.name)
+        ) {
+          rewrites.push({
+            start: p.getStart(),
+            end: p.getEnd(),
+            replacement: `props.${p.name.text}()`,
+          })
+          return
+        }
         if (ts.isPropertyAccessExpression(p) && (p.expression === n || p.name === n)) return
         if (ts.isVariableDeclaration(p) && p.name === n) return
         if (ts.isParameter(p) && p.name === n) return
