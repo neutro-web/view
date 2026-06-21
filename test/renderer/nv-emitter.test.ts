@@ -901,3 +901,46 @@ const App = $component(() => {
   ).propSrcs[0]?.exprSrc
   expect(propSrc).toBe('n()') // not 'n'
 })
+
+// ── TC-C16: ComponentRef shape — no mount method on instance ─────────────────
+
+describe('TC-C16  emitted factory returns ComponentRef, not { mount }', () => {
+  test('TC-C16a  Counter(props, slots) returns object with shape + bindings, no .mount', () => {
+    const source = `
+const Counter = $component((props) => {
+  $script(() => { const { count } = props })
+  $render(() => html\`<span>\${count}</span>\`)
+})`
+    const results = parseNvFileForEmit(source, 'counter.nv', document)
+    const js = emitModule(results)
+    // Evaluate the factory with real primitives
+    const scope = { signal, derived, effect, createRoot, onCleanup, flushSync, mount }
+    const fn = new Function(...Object.keys(scope), `${js}\nreturn Counter`)
+    const Counter = fn(...Object.values(scope)) as (
+      props: Record<string, unknown>,
+      slots: Record<string, unknown>,
+    ) => unknown
+    const ir = Counter({}, {})
+    // Must be a plain object with shape/bindings
+    expect(ir).toBeDefined()
+    expect(typeof ir).toBe('object')
+    expect((ir as Record<string, unknown>).shape).toBeDefined()
+    expect((ir as Record<string, unknown>).bindings).toBeDefined()
+    // Must NOT have a .mount method on the returned IR
+    expect((ir as Record<string, unknown>).mount).toBeUndefined()
+  })
+
+  test('TC-C16b  Counter.mount is a function (sugar on the factory)', () => {
+    const source = `
+const Counter = $component((props) => {
+  $script(() => { const { count } = props })
+  $render(() => html\`<span>\${count}</span>\`)
+})`
+    const results = parseNvFileForEmit(source, 'counter.nv', document)
+    const js = emitModule(results)
+    const scope = { signal, derived, effect, createRoot, onCleanup, flushSync, mount }
+    const fn = new Function(...Object.keys(scope), `${js}\nreturn Counter`)
+    const Counter = fn(...Object.values(scope)) as { mount?: unknown }
+    expect(typeof Counter.mount).toBe('function')
+  })
+})

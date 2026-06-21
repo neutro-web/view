@@ -8,11 +8,11 @@
  * Per component, emits:
  *   1. moduleScope verbatim (top-level imports + non-$component statements)
  *   2. A named export factory function `export function Name() { ... }`
- *      Inside: createRoot wrapping inlined erased $script body → real-thunk IR
- *      literal → mount(__ir, parent, doc) bridged by onCleanup.
+ *      Body: inlined erased $script, returns IR literal directly. No createRoot.
+ *      Sugar: Name.mount = (parent, doc, props?, slots?) => mount(Name(...), parent, doc)
  *
- * Imports: only primitives referenced in $script + createRoot/onCleanup (core)
- *          + mount (renderer). Uses @neutro/view/* published-surface aliases.
+ * Imports: only primitives referenced in $script (core) + mount (renderer).
+ *          Uses @neutro/view/* published-surface aliases.
  *
  * Throws if any result has an error-level diagnostic (§7).
  */
@@ -184,26 +184,20 @@ function emitComponentFactory(result: NvComponentResult): string {
   const scriptLines = emit.scriptBody
     ? emit.scriptBody
         .split('\n')
-        .map((l) => `        ${l}`)
+        .map((l) => `  ${l}`)
         .join('\n')
     : ''
 
-  const irLiteral = emitIrLiteral(result.ir, emit.bindingThunks, '        ')
+  const irLiteral = emitIrLiteral(result.ir, emit.bindingThunks, '  ')
   const scriptSection = scriptLines ? `${scriptLines}\n` : ''
+  const name = result.name
 
   return [
-    `export function ${result.name}(props, slots) {`,
-    '  return {',
-    '    mount(parent, doc) {',
-    '      return createRoot((dispose) => {',
-    `${scriptSection}        const __ir = ${irLiteral}`,
-    '        const disposeMount = mount(__ir, parent, doc)',
-    '        onCleanup(disposeMount)',
-    '        return dispose',
-    '      })',
-    '    },',
-    '  }',
+    `export function ${name}(props, slots) {`,
+    `${scriptSection}  return ${irLiteral}`,
     '}',
+    `${name}.mount = (parent, doc, props = {}, slots = {}) =>`,
+    `  mount(${name}(props, slots), parent, doc)`,
     '',
   ].join('\n')
 }
@@ -214,7 +208,7 @@ function emitImports(results: NvComponentResult[]): string {
   const allScriptBodies = results.map((r) => r.emit?.scriptBody ?? '').join('\n')
   const usedPrimitives = detectUsedPrimitives(allScriptBodies)
 
-  const coreImports = ['createRoot', 'onCleanup', ...usedPrimitives].sort()
+  const coreImports = [...usedPrimitives].sort()
   const lines: string[] = []
   if (coreImports.length > 0) {
     lines.push(`import { ${coreImports.join(', ')} } from '@neutro/view/core'`)
