@@ -1,11 +1,12 @@
-# nv Template IR — Design v0.2.1
+# nv Template IR — Design v0.3
  
 **Stream:** (3) Renderer/templating  
 **Contract reference:** nv Reactive Core Runtime Contract v0.4  
-**Status:** Approved — v0.2 (arch review closed 2026-06-17). PoC implementation may begin.  
-**v0.2.1 note (2026-06-20):** Back-ends support multi-root template shapes. The single-root
-constraint was an implementation detail of the initial PoC, not an IR constraint. List item
-templates remain limited to a single root element (loudly enforced; v1 limitation).
+**Status:** Approved — v0.3 (arch review closed 2026-06-20). Component API implementation may begin.  
+**Changelog:**  
+- v0.2 (2026-06-17): initial approved IR spec — six binding kinds (PoC scope) + two designed-deferred (List, Sync).  
+- v0.2.1 (2026-06-20): multi-root template shapes; list item single-root constraint noted.  
+- v0.3 (2026-06-20): add ComponentBinding, PropEntry, SlotEntry, ComponentRef, PropsObject, SlotFns.
  
 ---
  
@@ -127,6 +128,7 @@ structural traversal.
 | `attr`, `prop`, `event`, `sync` | `Element`  | Sentinel is a sibling comment; path targets the element |
 | `child`              | `Comment` (anchor)   | Sentinel IS the anchor; content inserted before it |
 | `conditional`, `list` | `Comment` (anchor)  | Same as `child` |
+| `component`          | `Comment` (anchor)   | Same as `child`; child DOM comes from the factory |
  
 The path for `text` bindings points to the `Text` node (post-replacement).
 The path for `attr`/`prop`/`event` bindings points to the `Element` itself.
@@ -137,7 +139,7 @@ anchor `Comment` node; the back-end inserts/removes content before this anchor.
  
 ## 3. Binding Kinds
  
-Eight kinds total: six in PoC scope, two designed-and-deferred.
+Nine kinds total: six in PoC scope, two designed-and-deferred, one added in v0.3.
  
 ```typescript
 type Binding =
@@ -148,7 +150,8 @@ type Binding =
   | ChildBinding       //  │
   | ConditionalBinding // ─┘
   | ListBinding        //  ── designed, deferred (§3.7)
-  | SyncBinding;       //  ── designed, deferred (§3.8)
+  | SyncBinding        //  ── designed, deferred (§3.8)
+  | ComponentBinding;  //  ── v0.3 (component API)
  
 type BaseBinding = {
   pathIndex: number;   // index into shape.bindingPaths — which node this targets
@@ -420,6 +423,36 @@ has applied at every compiler step. If the renderer's `writeTargetId` uses a
 different derivation, the cycle checker cannot connect the renderer's write-back
 edge to the rest of the write-graph. Build this field when `SyncBinding` is scoped;
 note it here so the requirement is on record.
+ 
+### ComponentBinding (v0.3)
+ 
+A child component invocation. Mounts a child factory in its own `createRoot` scope,
+passing props as live accessor thunks and slot content as `TemplateIR` instances.
+ 
+```typescript
+type PropsObject = { readonly [name: string]: ReactiveExpr }
+type SlotFns     = { readonly [name: string]: TemplateIR }
+type ComponentRef = (props: PropsObject, slots: SlotFns) => TemplateIR
+ 
+type ComponentBinding = BaseBinding & {
+  kind: 'component'
+  component: ComponentRef
+  props: readonly PropEntry[]
+  propNames: readonly string[]
+  slots: readonly SlotEntry[]
+}
+ 
+type PropEntry = { name: string; expr: ReactiveExpr }
+type SlotEntry = { name: string; content: TemplateIR }
+```
+ 
+Target node: Comment anchor (same as child/conditional/list). The parent's `shape.html` holds only the anchor; the child's DOM comes from its factory.
+ 
+**Props liveness contract.** Each `PropEntry.expr` is a live thunk. When the child calls `props.count()` inside a reactive tracking context, it registers a direct dependency edge on the parent's signal — no intermediate layer. A parent signal write triggers the child's effect re-run directly.
+ 
+**Ownership contract.** The back-end calls `createRoot` once at mount time. The child factory is called once inside that root. If the parent region is disposed, `onCleanup(() => childDisposer())` bridges the two lifetimes and tears down the child root. This matches the §3.6 `ConditionalBinding` pattern exactly.
+ 
+**Gate:** `ir.ts` MUST NOT be touched until this file (v0.3) is committed. See task A-0 in `docs/superpowers/plans/2026-06-20-component-api.md`.
  
 ---
  
@@ -866,7 +899,24 @@ type SyncBinding = BaseBinding & {  // DESIGNED, DEFERRED
   transform?:     (eventValue: unknown, current: unknown) => unknown;
 };
  
+// ── ComponentBinding (v0.3) ──────────────────────────────────────────────────
+type PropsObject  = { readonly [name: string]: ReactiveExpr }
+type SlotFns      = { readonly [name: string]: TemplateIR }
+type ComponentRef = (props: PropsObject, slots: SlotFns) => TemplateIR
+ 
+type PropEntry = { name: string; expr: ReactiveExpr }
+type SlotEntry = { name: string; content: TemplateIR }
+ 
+type ComponentBinding = BaseBinding & {
+  kind: 'component'
+  component: ComponentRef
+  props: readonly PropEntry[]
+  propNames: readonly string[]
+  slots: readonly SlotEntry[]
+};
+ 
 type Binding =
   | TextBinding | AttrBinding | PropBinding | EventBinding
-  | ChildBinding | ConditionalBinding | ListBinding | SyncBinding;
+  | ChildBinding | ConditionalBinding | ListBinding | SyncBinding
+  | ComponentBinding;
 ```
