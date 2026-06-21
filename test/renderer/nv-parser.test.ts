@@ -1125,8 +1125,8 @@ describe('nv-parser — component element detection', () => {
     expect(compBinding).toBeDefined()
     expect(compBinding?.kind).toBe('component')
     const cb = compBinding as ComponentBinding | undefined
-    expect(cb.propNames).toContain('count')
-    expect(cb.props[0]?.name).toBe('count')
+    expect(cb!.propNames).toContain('count')
+    expect(cb!.props[0]?.name).toBe('count')
   })
 
   it('TC-C04-parser: child uses const { count } = props → scriptBody contains props.count()', () => {
@@ -1230,9 +1230,9 @@ describe('TC-slot-warning: slot content in component element', () => {
       | ComponentBinding
       | undefined
     expect(compBinding).toBeDefined()
-    expect(compBinding.slots).toHaveLength(1)
-    expect(compBinding.slots[0].name).toBe('default')
-    expect(compBinding.slots[0].content.shape.html).toContain('<p>hello</p>')
+    expect(compBinding!.slots).toHaveLength(1)
+    expect(compBinding!.slots[0]!.name).toBe('default')
+    expect(compBinding!.slots[0]!.content.shape.html).toContain('<p>hello</p>')
   })
 
   it('dynamic slot content emits warning, no slot captured', () => {
@@ -1278,8 +1278,8 @@ describe('TC-slot-warning: slot content in component element', () => {
       | ComponentBinding
       | undefined
     expect(compBinding).toBeDefined()
-    expect(compBinding.slots).toHaveLength(1)
-    expect(compBinding.slots[0].name).toBe('default')
-    expect(compBinding.slots[0].content.shape.html).toContain('<p>hello</p>')
+    expect(compBinding!.slots).toHaveLength(1)
+    expect(compBinding!.slots[0]!.name).toBe('default')
+    expect(compBinding!.slots[0]!.content.shape.html).toContain('<p>hello</p>')
   })
 })
