@@ -95,7 +95,13 @@ export function walkPath(root: Node, path: NodePath): Node {
  *   child       → Comment anchor, content inserted before it
  *   conditional → Comment anchor
  */
-function wireBinding(binding: Binding, targetNode: Node, doc: Document): void {
+function wireBinding(
+  binding: Binding,
+  targetNode: Node,
+  doc: Document,
+  slotsObj?: Record<string, TemplateIR>,
+  capturedParentOwner?: ReturnType<typeof getOwner>,
+): void {
   switch (binding.kind) {
     case 'text': {
       wireText(binding, targetNode, doc)
@@ -130,9 +136,11 @@ function wireBinding(binding: Binding, targetNode: Node, doc: Document): void {
       break
     }
     case 'slot-outlet': {
-      throw new Error(
-        `[nv/interpreter] v0: '${binding.kind}' binding is designed but not yet implemented in the interpreter. Deferred per IR §9.2.`,
-      )
+      if (slotsObj === undefined || capturedParentOwner === undefined) {
+        throw new Error('[nv/interpreter] SlotOutletBinding encountered outside component context')
+      }
+      wireSlotOutlet(binding, targetNode, doc, slotsObj, capturedParentOwner)
+      break
     }
     case 'sync': {
       throw new Error(
@@ -430,6 +438,40 @@ function wireConditional(binding: ConditionalBinding, anchorNode: Node, doc: Doc
   })
 }
 
+// ── SlotOutletBinding ─────────────────────────────────────────────────────────
+
+function wireSlotOutlet(
+  binding: SlotOutletBinding,
+  anchorNode: Node,
+  doc: Document,
+  slotsObj: Record<string, TemplateIR>,
+  capturedParentOwner: ReturnType<typeof getOwner>,
+): void {
+  const slotIR = slotsObj[binding.name]
+  if (slotIR === undefined) return // unfilled slot: render nothing (v1; fallback deferred)
+
+  const parent = anchorNode.parentNode
+  if (parent === null) {
+    throw new Error('[nv/interpreter] SlotOutletBinding: anchor has no parent')
+  }
+
+  // Render slot content under the parent's owner so reactive reads are owned by the parent,
+  // not the child. D-slot-1: parent-lexical ownership.
+  runWithOwner(capturedParentOwner, () => {
+    const slotDisposer = createRoot((dispose) => {
+      const { roots } = mountFragment(slotIR, parent, doc, anchorNode)
+      onCleanup(() => {
+        for (const n of roots) {
+          if (n.parentNode !== null) n.parentNode.removeChild(n)
+        }
+      })
+      return dispose
+    })
+    // Bridge: child teardown disposes slot root (removes slot DOM).
+    onCleanup(() => slotDisposer())
+  })
+}
+
 // ── ComponentBinding ──────────────────────────────────────────────────────────
 
 function wireComponent(binding: ComponentBinding, anchorNode: Node, doc: Document): void {
@@ -450,12 +492,19 @@ function wireComponent(binding: ComponentBinding, anchorNode: Node, doc: Documen
     slotsObj[s.name] = s.content
   }
 
+  // Capture parent owner BEFORE the child's createRoot (D-slot-1).
+  // Slot content must be owned by the parent, not the child.
+  const capturedParentOwner = getOwner()
+
   // Mount the child factory in its own createRoot scope.
   // Static component: owned by the current scope (no runWithOwner needed —
   // same pattern as wireConditional's branch mounting).
   const childDisposer = createRoot((dispose) => {
     const childIR = binding.component(propsObj, slotsObj)
-    const { roots } = mountFragment(childIR, parent, doc, anchorNode)
+    const { roots } = mountFragment(childIR, parent, doc, anchorNode, {
+      slotsObj,
+      capturedParentOwner,
+    })
     onCleanup(() => {
       for (const n of roots) {
         if (n.parentNode !== null) n.parentNode.removeChild(n)
@@ -482,6 +531,10 @@ function mountFragment(
   parent: Element | Node,
   doc: Document,
   before: Node | null = null,
+  slotContext?: {
+    slotsObj: Record<string, TemplateIR>
+    capturedParentOwner: ReturnType<typeof getOwner>
+  },
 ): { roots: Node[] } {
   // 1. Parse shape.html into a fresh DocumentFragment via <template>.
   //    jsdom supports <template> element; real browsers also support this.
@@ -503,7 +556,13 @@ function mountFragment(
   for (let i = 0; i < ir.bindings.length; i++) {
     // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
     // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
-    wireBinding(ir.bindings[i]!, targets[i]!, doc)
+    wireBinding(
+      ir.bindings[i]!,
+      targets[i]!,
+      doc,
+      slotContext?.slotsObj,
+      slotContext?.capturedParentOwner,
+    )
   }
 
   // 4. Snapshot all fragment children BEFORE inserting (after insert the fragment is empty).
