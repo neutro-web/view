@@ -88,6 +88,13 @@ export type ThunkSource =
       consequent: ThunkSource[]
       alternate: ThunkSource[] | null
     }
+  | {
+      kind: 'component'
+      componentSrc: string
+      propSrcs: Array<{ name: string; exprSrc: string }>
+      propNames: readonly string[]
+      slots: Array<{ name: string; thunks: ThunkSource[] }>
+    }
 
 /** Emit payload attached to NvComponentResult when using parseNvFileForEmit. */
 export interface NvEmitPayload {

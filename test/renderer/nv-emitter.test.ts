@@ -33,7 +33,14 @@ import { JSDOM } from 'jsdom'
 import { describe, expect, test } from 'vitest'
 import { createRoot, derived, effect, flushSync, onCleanup, signal } from '../../src/core/core.js'
 import { mount } from '../../src/renderer/index.js'
-import type { Binding, ConditionalBinding, TemplateIR } from '../../src/renderer/ir.js'
+import type {
+  Binding,
+  ComponentBinding,
+  ComponentRef,
+  ConditionalBinding,
+  ReactiveExpr,
+  TemplateIR,
+} from '../../src/renderer/ir.js'
 import { emitModule } from '../../src/renderer/nv-emitter.js'
 import { parseNvFileForEmit } from '../../src/renderer/nv-parser.js'
 import type { NvComponentResult, ThunkSource } from '../../src/renderer/nv-parser.js'
@@ -708,6 +715,91 @@ const Counter = $component(() => {
     expect(js).toContain('mount(__ir, parent, doc)')
     // onCleanup bridge
     expect(js).toContain('onCleanup(disposeMount)')
+  })
+})
+
+// ── EM-D1a: factory signature — Name(props, slots) ───────────────────────────
+
+describe('factory signature — props + slots params', () => {
+  test('EM-D1a  emits Name(props, slots) factory', () => {
+    const source = `
+const Counter = $component(() => {
+  $script(() => { const count = signal(0) })
+  $render(() => html\`<span>\${count}</span>\`)
+})`
+    const results = parseNvFileForEmit(source, 'test.nv', document)
+    const js = emitModule(results)
+    expect(js).toContain('export function Counter(props, slots)')
+  })
+
+  test('EM-D1b  emits Name(props, slots) for each component in multi-component file', () => {
+    const source = `
+const Foo = $component(() => {
+  $script(() => { const x = signal(1) })
+  $render(() => html\`<span>\${x}</span>\`)
+})
+const Bar = $component(() => {
+  $script(() => { const y = signal(2) })
+  $render(() => html\`<p>\${y}</p>\`)
+})`
+    const results = parseNvFileForEmit(source, 'test.nv', document)
+    const js = emitModule(results)
+    expect(js).toContain('export function Foo(props, slots)')
+    expect(js).toContain('export function Bar(props, slots)')
+  })
+})
+
+// ── EM-D1c: ComponentBinding literal emission ─────────────────────────────────
+
+describe('ComponentBinding literal emission', () => {
+  test('EM-D1c  emits component binding literal with kind, component, props, propNames, slots', () => {
+    // Hand-author a minimal NvComponentResult with a ComponentBinding in the IR
+    const stubShape = { html: '<div></div>', bindingPaths: [[0]] as [number[]] }
+    const slotIr: TemplateIR = {
+      id: 'nv:slot001',
+      shape: { html: '<span></span>', bindingPaths: [] },
+      bindings: [],
+    }
+    const componentBinding: ComponentBinding = {
+      kind: 'component',
+      pathIndex: 0,
+      component: (() => slotIr) as unknown as ComponentRef,
+      props: [{ name: 'label', expr: (() => 'hello') as unknown as ReactiveExpr }],
+      propNames: ['label'],
+      slots: [{ name: 'default', content: slotIr }],
+    }
+    const ir: TemplateIR = {
+      id: 'nv:test001',
+      shape: stubShape,
+      bindings: [componentBinding],
+    }
+    const componentThunkSource: ThunkSource = {
+      kind: 'component',
+      componentSrc: 'MyButton',
+      propSrcs: [{ name: 'label', exprSrc: '"hello"' }],
+      propNames: ['label'],
+      slots: [{ name: 'default', thunks: [] }],
+    }
+    const result: NvComponentResult = {
+      name: 'Host',
+      ir,
+      scriptSignals: [],
+      style: null,
+      verdicts: ['PLAIN'],
+      diagnostics: [],
+      emit: {
+        scriptBody: '',
+        bindingThunks: [componentThunkSource],
+        moduleScope: '',
+      },
+    }
+
+    const js = emitModule([result])
+    expect(js).toContain("kind: 'component'")
+    expect(js).toContain('component: MyButton')
+    expect(js).toContain('"label"')
+    expect(js).toContain('propNames')
+    expect(js).toContain('name: "default"')
   })
 })
 

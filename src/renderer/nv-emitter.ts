@@ -20,6 +20,7 @@
 import type {
   AttrBinding,
   Binding,
+  ComponentBinding,
   ConditionalBinding,
   EventBinding,
   PropBinding,
@@ -66,6 +67,12 @@ function emitThunkSource(thunk: ThunkSource, indent: string): string {
           : `,\n${indent}  []`
       return `/* conditional */\n${indent}  (() => (${thunk.conditionSrc}))${consequentPart},\n${indent}  ${alternatePart}`
     }
+    case 'component': {
+      const propParts = thunk.propSrcs
+        .map((p) => `{ name: ${JSON.stringify(p.name)}, expr: () => (${p.exprSrc}) }`)
+        .join(', ')
+      return `/* component:${thunk.componentSrc} */\n${indent}  ${thunk.componentSrc}, [${propParts}]`
+    }
   }
 }
 
@@ -104,6 +111,31 @@ function emitBindingLiteral(
         `${i2}condition: () => (${thunk.conditionSrc}),`,
         `${i2}consequent: ${emitIrLiteral(cb.consequent, thunk.consequent, i2)},`,
         `${i2}alternate: ${altLiteral} }`,
+      ].join('\n')
+    }
+    case 'component': {
+      if (thunk.kind !== 'component')
+        throw new Error('[nv/emitter] ComponentBinding thunk kind mismatch')
+      const cb = binding as ComponentBinding
+      const i2 = `${indent}  `
+      const propLiterals = cb.props
+        .map((p, idx) => {
+          const pSrc = thunk.propSrcs[idx]
+          return `{ name: ${JSON.stringify(p.name)}, expr: () => (${pSrc?.exprSrc ?? 'undefined'}) }`
+        })
+        .join(', ')
+      const slotLiterals = cb.slots
+        .map((s, idx) => {
+          const slotThunks = thunk.slots[idx]?.thunks ?? []
+          return `{ name: ${JSON.stringify(s.name)}, content: ${emitIrLiteral(s.content, slotThunks, i2)} }`
+        })
+        .join(', ')
+      return [
+        `{ kind: 'component', ${pathEntry},`,
+        `${i2}component: ${thunk.componentSrc},`,
+        `${i2}props: [${propLiterals}],`,
+        `${i2}propNames: ${JSON.stringify(cb.propNames)},`,
+        `${i2}slots: [${slotLiterals}] }`,
       ].join('\n')
     }
     default:
@@ -160,7 +192,7 @@ function emitComponentFactory(result: NvComponentResult): string {
   const scriptSection = scriptLines ? `${scriptLines}\n` : ''
 
   return [
-    `export function ${result.name}() {`,
+    `export function ${result.name}(props, slots) {`,
     '  return {',
     '    mount(parent, doc) {',
     '      return createRoot((dispose) => {',

@@ -4,7 +4,7 @@ exports[`EX-02  Conditional: emitted module exercises conditional literal > EX-0
 "import { createRoot, onCleanup, signal } from '@neutro/view/core'
 import { mount } from '@neutro/view/renderer'
 
-export function Toggle() {
+export function Toggle(props, slots) {
   return {
     mount(parent, doc) {
       return createRoot((dispose) => {
