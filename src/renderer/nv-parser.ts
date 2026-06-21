@@ -61,6 +61,7 @@ import type {
   PropEntry,
   ReactiveExpr,
   SlotEntry,
+  SlotOutletBinding,
   TemplateIR,
   TemplateShape,
   TextBinding,
@@ -96,7 +97,7 @@ export type ThunkSource =
       componentSrc: string
       propSrcs: Array<{ name: string; exprSrc: string }>
       propNames: readonly string[]
-      slots: Array<{ name: string; thunks: ThunkSource[] }>
+      slots: Array<{ name: string; holeIndices: number[]; thunks: ThunkSource[] }>
     }
 
 /** Emit payload attached to NvComponentResult when using parseNvFileForEmit. */
@@ -208,6 +209,93 @@ function computePath(node: Node, root: Node): NodePath {
   return path
 }
 
+// ── Slot sub-IR builder (nv-parser context) ───────────────────────────────────
+
+/**
+ * Build a TemplateIR from sentinel-DOM nodes (slot content in nv-parser context).
+ * slotNodes: child nodes of the slot group (already in sentinel DOM form with <!--nv-i--> markers).
+ * holeExprs: original hole expression array (length = total holes in parent template).
+ * doc: Document for DOM operations.
+ * slotId: stable ID for the sub-IR.
+ *
+ * Returns the sub-IR (with stubExpr for all bindings — real exprs injected at mount time
+ * via the emit path) and the found hole indices (to mark consumed in parent).
+ */
+function buildNvSlotSubIR(
+  slotNodes: Node[],
+  holeExprs: ts.Expression[],
+  doc: Document,
+  slotId: string,
+): { ir: TemplateIR; holeIndices: number[] } {
+  const stubExpr = (() => undefined) as ReactiveExpr<unknown>
+
+  if (slotNodes.length === 0) {
+    return {
+      ir: { id: slotId, shape: { html: '', bindingPaths: [] }, bindings: [] },
+      holeIndices: [],
+    }
+  }
+
+  const fragWrapper = doc.createElement('div')
+  for (const n of slotNodes) {
+    fragWrapper.appendChild(n.cloneNode(true))
+  }
+  const fragRoot = fragWrapper
+
+  const holeIndices: number[] = []
+  const slotPaths: NodePath[] = []
+  ;(function walk(node: Node): void {
+    if (node.nodeType === 8) {
+      const m = (node as Comment).data.match(/^nv-(\d+)$/)
+      if (m !== null) {
+        const idx = Number.parseInt(m[1] as string, 10)
+        holeIndices.push(idx)
+        slotPaths.push(computePath(node, fragRoot))
+      }
+    } else if (node.nodeType === 1) {
+      const el = node as Element
+      for (let k = 0; k < holeExprs.length; k++) {
+        for (const atype of ['attr', 'prop', 'event'] as const) {
+          if (el.getAttribute(`data-nv-${atype}-${k}`) !== null) {
+            holeIndices.push(k)
+            slotPaths.push(computePath(el, fragRoot))
+            el.removeAttribute(`data-nv-${atype}-${k}`)
+          }
+        }
+      }
+    }
+    let child = node.firstChild
+    while (child !== null) {
+      walk(child)
+      child = child.nextSibling
+    }
+  })(fragRoot)
+
+  const rawHtml = fragWrapper.innerHTML.replace(
+    /\s+data-nv-(?:attr|prop|event|component)-\d+="[^"]*"/g,
+    '',
+  )
+
+  const bindings: Binding[] = holeIndices.map((_, compactIdx) => {
+    const b: TextBinding = {
+      kind: 'text',
+      pathIndex: compactIdx,
+      expr: stubExpr as ReactiveExpr<string | number | boolean | null | undefined>,
+    }
+    return b
+  })
+
+  return {
+    ir: {
+      id: slotId,
+      shape: { html: rawHtml, bindingPaths: slotPaths },
+      bindings,
+      meta: { frontEnd: 'nv-file' },
+    },
+    holeIndices,
+  }
+}
+
 // ── Sentinel HTML builder ─────────────────────────────────────────────────────
 
 function buildNvHtmlStrings(
@@ -294,6 +382,8 @@ interface PendingNvComponentInfo {
   propNames: readonly string[]
   reactiveHoles: ReadonlyArray<{ name: string; holeIndex: number }>
   slots: SlotEntry[]
+  /** For each slot entry (index-aligned with slots), the original hole indices in the parent template. */
+  slotHoleGroups: ReadonlyArray<ReadonlyArray<number>>
 }
 
 interface ProcessResult {
@@ -355,6 +445,7 @@ function processHtmlTemplate(
     propNames: string[]
     reactiveHoles: Array<{ name: string; holeIndex: number }>
     slots: SlotEntry[]
+    slotHoleGroups: number[][]
   }
   const pendingComponents: PendingNvComponent[] = []
   const processdiagnostics: NvDiagnostic[] = []
@@ -395,32 +486,53 @@ function processHtmlTemplate(
           if (!propNames.includes(attr.name)) propNames.push(attr.name)
         }
 
-        // Capture slot content before replacing element with anchor
+        // Capture slot content before replacing element with anchor.
+        // Named slots: children that are <slot name="x"> elements.
+        // Default slot: all other children.
         const slots: SlotEntry[] = []
+        const slotHoleGroups: number[][] = []
         if (el.childNodes.length > 0) {
-          const innerHTML = el.innerHTML
-          if (/<!--nv-\d+-->|data-nv-/.test(innerHTML)) {
-            // Mark any hole indices embedded in slot children as consumed so path-check passes
-            const holeRe = /<!--nv-(\d+)-->/g
-            let m2: RegExpExecArray | null
-            // biome-ignore lint/suspicious/noAssignInExpressions: idiomatic regex loop
-            while ((m2 = holeRe.exec(innerHTML)) !== null) {
-              consumedByComponent.add(Number.parseInt(m2[1] as string, 10))
+          const defaultNodes: Node[] = []
+          const namedGroups = new Map<string, Node[]>()
+
+          for (const child of Array.from(el.childNodes)) {
+            if (
+              child.nodeType === 1 &&
+              (child as Element).tagName.toLowerCase() === 'slot' &&
+              (child as Element).hasAttribute('name')
+            ) {
+              const slotName = (child as Element).getAttribute('name') as string
+              namedGroups.set(slotName, Array.from((child as Element).childNodes))
+            } else {
+              defaultNodes.push(child)
             }
-            processdiagnostics.push({
-              kind: 'warning',
-              message: `Dynamic slot content in <${tagName}> is not yet supported`,
-              start: 0,
-              end: 0,
-            })
-          } else {
-            // Static slot content
-            const slotIR: TemplateIR = {
-              id: `slot:${tagName}:default`,
-              shape: { html: innerHTML, bindingPaths: [] },
-              bindings: [],
-            }
-            slots.push({ name: 'default', content: slotIR })
+          }
+
+          const hasDefaultContent = defaultNodes.some(
+            (n) => n.nodeType !== 3 || (n as Text).data.trim() !== '',
+          )
+          if (hasDefaultContent || defaultNodes.some((n) => n.nodeType === 8)) {
+            const { ir: defaultIR, holeIndices } = buildNvSlotSubIR(
+              defaultNodes,
+              holeExprs,
+              doc,
+              `slot:${tagName}:default`,
+            )
+            slots.push({ name: 'default', content: defaultIR })
+            slotHoleGroups.push(holeIndices)
+            for (const idx of holeIndices) consumedByComponent.add(idx)
+          }
+
+          for (const [slotName, nodes] of namedGroups) {
+            const { ir: namedIR, holeIndices } = buildNvSlotSubIR(
+              nodes,
+              holeExprs,
+              doc,
+              `slot:${tagName}:${slotName}`,
+            )
+            slots.push({ name: slotName, content: namedIR })
+            slotHoleGroups.push(holeIndices)
+            for (const idx of holeIndices) consumedByComponent.add(idx)
           }
         }
         const compIndex = pendingComponents.length
@@ -434,6 +546,7 @@ function processHtmlTemplate(
           propNames,
           reactiveHoles,
           slots,
+          slotHoleGroups,
         })
         return // don't recurse into component children
       }
@@ -509,6 +622,20 @@ function processHtmlTemplate(
     verdicts.push(exprReadsSignal(holeExpr, signals) ? 'ACCEPT' : 'PLAIN')
 
     if (pos.kind === 'text') {
+      // Check if this hole is a slot outlet: expression is `slots.name` property access.
+      const isSlotOutlet =
+        ts.isPropertyAccessExpression(holeExpr) &&
+        ts.isIdentifier(holeExpr.expression) &&
+        holeExpr.expression.text === 'slots' &&
+        ts.isIdentifier(holeExpr.name)
+
+      if (isSlotOutlet && ts.isPropertyAccessExpression(holeExpr)) {
+        const slotName = (holeExpr.name as ts.Identifier).text
+        const b: SlotOutletBinding = { kind: 'slot-outlet', pathIndex, name: slotName }
+        bindings.push(b)
+        continue
+      }
+
       if (ts.isConditionalExpression(holeExpr)) {
         const { whenTrue, whenFalse } = holeExpr
         const isHtmlTTE = (e: ts.Expression): e is ts.TaggedTemplateExpression =>
@@ -575,12 +702,15 @@ function processHtmlTemplate(
       meta: { frontEnd: 'nv-file' },
     },
     verdicts,
-    pendingComponents: pendingComponents.map(({ tagName, propNames, reactiveHoles, slots }) => ({
-      tagName,
-      propNames,
-      reactiveHoles,
-      slots,
-    })),
+    pendingComponents: pendingComponents.map(
+      ({ tagName, propNames, reactiveHoles, slots, slotHoleGroups }) => ({
+        tagName,
+        propNames,
+        reactiveHoles,
+        slots,
+        slotHoleGroups,
+      }),
+    ),
     consumedByComponent,
     diagnostics: processdiagnostics,
   }

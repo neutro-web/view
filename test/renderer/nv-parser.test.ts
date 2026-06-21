@@ -1235,8 +1235,8 @@ describe('TC-slot-warning: slot content in component element', () => {
     expect(compBinding!.slots[0]!.content.shape.html).toContain('<p>hello</p>')
   })
 
-  it('dynamic slot content emits warning, no slot captured', () => {
-    // Dynamic child content → warning diagnostic
+  it('dynamic slot content is captured as default slot with hole tracking', () => {
+    // Dynamic child content → captured as default slot with holeIndices; no warning
     const nvSource = [
       'export const App = $component(() => {',
       '  $script(() => { const n = signal(0) })',
@@ -1245,9 +1245,18 @@ describe('TC-slot-warning: slot content in component element', () => {
     ].join('\n')
     const results = parseNvFile(nvSource, 'app.nv', document)
     const diags = results[0]?.diagnostics ?? []
+    // Dynamic slot content should NOT produce a warning anymore
     expect(
       diags.some((d) => d.kind === 'warning' && d.message.toLowerCase().includes('dynamic slot')),
-    ).toBe(true)
+    ).toBe(false)
+    // The ComponentBinding should have the slot captured
+    const ir = results[0]?.ir
+    const compBinding = ir?.bindings.find((b) => b.kind === 'component') as
+      | ComponentBinding
+      | undefined
+    expect(compBinding).toBeDefined()
+    expect(compBinding!.slots).toHaveLength(1)
+    expect(compBinding!.slots[0]!.name).toBe('default')
   })
 
   it('no warning or slots when component element has no children', () => {

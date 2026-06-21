@@ -785,7 +785,7 @@ describe('ComponentBinding literal emission', () => {
       componentSrc: 'MyButton',
       propSrcs: [{ name: 'label', exprSrc: '"hello"' }],
       propNames: ['label'],
-      slots: [{ name: 'default', thunks: [] }],
+      slots: [{ name: 'default', holeIndices: [], thunks: [] }],
     }
     const result: NvComponentResult = {
       name: 'Host',
