@@ -107,9 +107,13 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
   across `eraseScriptBlock`, `eraseHandlerExpr`, `computeThunkSource` (three callers). D3
   (destructuring write in handler → diagnostic) closed. Static default-slot capture in both
   front-ends; dynamic/nested-component slot content is warned and deferred.
-  Cross-file composition via emitter path deferred: emitted factories return `{ mount }` not
-  `ComponentRef`-shape `TemplateIR`; mounting an emitted component as child of another emitted
-  component requires the factory shapes to converge (next milestone).
+  Cross-file / nested composition via the emitter path **works (A2, 2026-06-21).** Emitted
+  factories are `ComponentRef`-shaped — `export function Name(props, slots) { <$script>; return
+  <IR literal> }` returning `TemplateIR` directly (no `createRoot`, no `__ir`), plus a
+  `Name.mount = (parent, doc, props = {}, slots = {}) => mount(Name(props, slots), parent, doc)`
+  root sugar. A parent emitting a `<Child/>` binding threads prop accessor thunks
+  (`expr: () => (n())`) into the child factory; the parent root owns the child's effects by
+  construction. Slot **consumption** still deferred (factories accept `slots` but ignore them).
 - **Equality hook inert; step 4 shelved** — neither specialization is wired to save work.
 - **SyncBinding** throws at both back-ends.
 - **Multi-root mount/dispose — FIXED (v0.2.1).** Both back-ends now snapshot all fragment
@@ -121,6 +125,7 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
 ---
 
 ## Not built at all (forward queue)
-`$style` scoping, SyncBinding,
-LIS list move-minimization (parked), kind-split (parked behind real-app evidence),
-`roots[0] as Node` biome-laundering cleanup (replace with `biome-ignore` + `!`; no runtime impact).
+`$style` scoping, SyncBinding, slot consumption (emitted/interpreter factories accept `slots`
+but do not consume them), LIS list move-minimization (parked), kind-split (parked behind
+real-app evidence), `roots[0] as Node` biome-laundering cleanup (replace with `biome-ignore`
++ `!`; no runtime impact).
