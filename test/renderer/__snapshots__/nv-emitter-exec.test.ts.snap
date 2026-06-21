@@ -1,0 +1,39 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`EX-02  Conditional: emitted module exercises conditional literal > EX-02-emitted-js  conditional fixture emitted JS snapshot 1`] = `
+"import { createRoot, onCleanup, signal } from '@neutro/view/core'
+import { mount } from '@neutro/view/renderer'
+
+export function Toggle() {
+  return {
+    mount(parent, doc) {
+      return createRoot((dispose) => {
+        const show = signal(true)
+        const __ir = {
+          id: "nv:3202dff4",
+          shape: { html: "<div><!--nv-0--></div><button>flip</button>", bindingPaths: [[0, 0], [1]] },
+          bindings: [
+            { kind: 'conditional', pathIndex: 0,
+              condition: () => (show()),
+              consequent: {
+                id: "nv:312e1ccb",
+                shape: { html: "<span>yes</span>", bindingPaths: [] },
+                bindings: [],
+              },
+              alternate: {
+                id: "nv:3d8c5eb9",
+                shape: { html: "<span>no</span>", bindingPaths: [] },
+                bindings: [],
+              } },
+            { kind: 'event', pathIndex: 1, eventName: "click", handlerKind: 'reactive', handler: () => (() => show.set(!show())) }
+          ],
+        }
+        const disposeMount = mount(__ir, parent, doc)
+        onCleanup(disposeMount)
+        return dispose
+      })
+    },
+  }
+}
+"
+`;
