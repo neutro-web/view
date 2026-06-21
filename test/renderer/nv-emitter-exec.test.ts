@@ -980,12 +980,11 @@ const Counter = $component((props) => {
   })
 })
 
-describe('TC-C15-parity  two independent mounts of same emitted ComponentRef produce identical DOM', () => {
-  test('parity  two mounts of Counter ComponentRef with same signal produce structurallyEqual DOM before and after prop update', async () => {
-    // This test uses the round-trip approach: build IR directly via nv-parser,
-    // mount with interpreter, then emit+bundle and mount with emitted path,
-    // compare DOM structure.
-    // We test the same source as TC-C15 but using the comparator.
+describe('TC-C15-parity  emitted ComponentRef is a valid ComponentRef: two independent interpreter mounts produce identical DOM', () => {
+  test('parity  two createRoot+mount calls on the same emitted Counter factory produce structurallyEqual DOM before and after prop update', async () => {
+    // Confirms the emitted Counter is a valid ComponentRef: the same factory can be
+    // called twice (in two independent roots) and produce identical reactive DOM.
+    // emitted-mount.ts back-end differential is covered by test/compiler/emitted-mount.test.ts (TC-C01..C13).
 
     // Import structurallyEqual from comparator
     const { structurallyEqual } = await import('../../src/renderer/comparator.js')
@@ -1054,7 +1053,7 @@ export { mount } from '@neutro/view/renderer'
     })
     mod.flushSync()
 
-    // Path B: same factory, same mount — but in a second root (emulated emitted-mount path)
+    // Path B: same factory, same interpreter mount — in a second independent root
     const docB = makeDoc()
     const parentB = makeParent(docB)
     let disposeB!: () => void
