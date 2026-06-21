@@ -121,7 +121,9 @@ function emitBindingLiteral(
       const propLiterals = cb.props
         .map((p, idx) => {
           const pSrc = thunk.propSrcs[idx]
-          return `{ name: ${JSON.stringify(p.name)}, expr: () => (${pSrc?.exprSrc ?? 'undefined'}) }`
+          if (!pSrc)
+            throw new Error(`[nv/emitter] Missing propSrc for prop '${p.name}' at index ${idx}`)
+          return `{ name: ${JSON.stringify(p.name)}, expr: () => (${pSrc.exprSrc}) }`
         })
         .join(', ')
       const slotLiterals = cb.slots
