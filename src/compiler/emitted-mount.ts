@@ -503,6 +503,12 @@ function emitSetup(
         break
       }
 
+      case 'slot-outlet': {
+        throw new Error(
+          `[nv/emit] v0: '${binding.kind}' binding is designed but not yet implemented. Deferred per IR §9.2.`,
+        )
+      }
+
       default: {
         const kind = (binding as Binding).kind
         throw new Error(

@@ -140,6 +140,10 @@ function emitBindingLiteral(
         `${i2}slots: [${slotLiterals}] }`,
       ].join('\n')
     }
+    case 'slot-outlet':
+      throw new Error(
+        `[nv/emitter] v0: '${binding.kind}' binding is designed but not yet implemented. Deferred per IR §9.2.`,
+      )
     default:
       throw new Error(
         `[nv/emitter] Unsupported binding kind for emit: ${(binding as Binding).kind}`,

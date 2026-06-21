@@ -1,4 +1,4 @@
-# nv Template IR — Design v0.3
+# nv Template IR — Design v0.3.1
  
 **Stream:** (3) Renderer/templating  
 **Contract reference:** nv Reactive Core Runtime Contract v0.4  
@@ -7,6 +7,7 @@
 - v0.2 (2026-06-17): initial approved IR spec — six binding kinds (PoC scope) + two designed-deferred (List, Sync).  
 - v0.2.1 (2026-06-20): multi-root template shapes; list item single-root constraint noted.  
 - v0.3 (2026-06-20): add ComponentBinding, PropEntry, SlotEntry, ComponentRef, PropsObject, SlotFns.
+- v0.3.1 (2026-06-21): add SlotOutletBinding (kind:'slot-outlet', name, no expr); named + reactive slot capture on both front-ends.
  
 ---
  

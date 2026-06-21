@@ -52,6 +52,8 @@ import type {
   NodePath,
   PropBinding,
   ReactiveExpr,
+  SlotOutletBinding,
+  SyncBinding,
   TemplateIR,
   TextBinding,
   WritableSignal,
@@ -126,6 +128,11 @@ function wireBinding(binding: Binding, targetNode: Node, doc: Document): void {
     case 'component': {
       wireComponent(binding, targetNode, doc)
       break
+    }
+    case 'slot-outlet': {
+      throw new Error(
+        `[nv/interpreter] v0: '${binding.kind}' binding is designed but not yet implemented in the interpreter. Deferred per IR §9.2.`,
+      )
     }
     case 'sync': {
       throw new Error(

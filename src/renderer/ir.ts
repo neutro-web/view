@@ -212,6 +212,19 @@ export type ComponentBinding = BaseBinding & {
   slots: readonly SlotEntry[]
 }
 
+// ── SlotOutletBinding (v0.3.1) ─────────────────────────────────────────────
+
+/**
+ * Marks where a named slot's content is inserted.
+ * Targets a Comment anchor (same family as conditional/component).
+ * NO expr — slot content is not tracked reactively; it is owned parent-lexically (D-slot-1).
+ * name: the slot name to resolve from slotsObj passed to the child factory.
+ */
+export type SlotOutletBinding = BaseBinding & {
+  kind: 'slot-outlet'
+  name: string
+}
+
 export type Binding =
   | TextBinding
   | AttrBinding
@@ -222,3 +235,4 @@ export type Binding =
   | ListBinding
   | SyncBinding
   | ComponentBinding
+  | SlotOutletBinding
