@@ -124,7 +124,15 @@ async function bundleEmittedJs(emittedJs: string): Promise<string> {
 
 // ── Bundle module type ────────────────────────────────────────────────────────
 
-type ComponentFactory = () => { mount(parent: Element, doc: Document): () => void }
+type ComponentFactory = {
+  (props?: Record<string, unknown>, slots?: Record<string, unknown>): unknown
+  mount(
+    parent: Element,
+    doc: Document,
+    props?: Record<string, unknown>,
+    slots?: Record<string, unknown>,
+  ): () => void
+}
 
 interface BundleModule {
   flushSync(): void
@@ -153,7 +161,7 @@ const Counter = $component(() => {
     const mod = await buildCounter()
     const doc = makeDoc()
     const parent = makeParent(doc)
-    const dispose = mod.Counter().mount(parent, doc)
+    const dispose = mod.Counter.mount(parent, doc)
     mod.flushSync()
 
     expect(parent.querySelector('span')?.textContent).toBe('0')
@@ -164,7 +172,7 @@ const Counter = $component(() => {
     const mod = await buildCounter()
     const doc = makeDoc()
     const parent = makeParent(doc)
-    const dispose = mod.Counter().mount(parent, doc)
+    const dispose = mod.Counter.mount(parent, doc)
     mod.flushSync()
 
     const btn = parent.querySelector('button')!
@@ -185,7 +193,7 @@ const Counter = $component(() => {
     const mod = await buildCounter()
     const doc = makeDoc()
     const parent = makeParent(doc)
-    const dispose = mod.Counter().mount(parent, doc)
+    const dispose = mod.Counter.mount(parent, doc)
     mod.flushSync()
 
     expect(parent.querySelector('span')).not.toBeNull()
@@ -216,7 +224,7 @@ const Toggle = $component(() => {
     const mod = await buildToggle()
     const doc = makeDoc()
     const parent = makeParent(doc)
-    const dispose = mod.Toggle().mount(parent, doc)
+    const dispose = mod.Toggle.mount(parent, doc)
     mod.flushSync()
 
     const div = parent.querySelector('div')
@@ -229,7 +237,7 @@ const Toggle = $component(() => {
     const mod = await buildToggle()
     const doc = makeDoc()
     const parent = makeParent(doc)
-    const dispose = mod.Toggle().mount(parent, doc)
+    const dispose = mod.Toggle.mount(parent, doc)
     mod.flushSync()
 
     const btn = parent.querySelector('button')!
@@ -293,12 +301,12 @@ const B = $component(() => {
     const doc = makeDoc()
 
     const parentA = makeParent(doc)
-    const disposeA = mod.A().mount(parentA, doc)
+    const disposeA = mod.A.mount(parentA, doc)
     mod.flushSync()
     expect(parentA.querySelector('p')?.textContent).toBe('hello')
 
     const parentB = makeParent(doc)
-    const disposeB = mod.B().mount(parentB, doc)
+    const disposeB = mod.B.mount(parentB, doc)
     mod.flushSync()
     expect(parentB.querySelector('p')?.textContent).toBe('world')
 
@@ -351,14 +359,20 @@ const Counter = $component((props) => {
 })`
     const bundlePath = await bundleComponentWithSignal(source, 'Counter')
     const mod = (await import(bundlePath)) as SignalBundleModule & {
-      Counter: (props: Record<string, () => unknown>) => {
-        mount(p: Element, d: Document): () => void
+      Counter: {
+        (props: Record<string, () => unknown>, slots?: Record<string, unknown>): unknown
+        mount(
+          p: Element,
+          d: Document,
+          props?: Record<string, () => unknown>,
+          slots?: Record<string, unknown>,
+        ): () => void
       }
     }
     const n = mod.signal(0)
     const doc = makeDoc()
     const parent = makeParent(doc)
-    const dispose = mod.Counter({ count: () => n() }).mount(parent, doc)
+    const dispose = mod.Counter.mount(parent, doc, { count: () => n() })
     mod.flushSync()
     expect(parent.querySelector('span')?.textContent).toBe('0')
     n.set(7)
@@ -375,14 +389,20 @@ const Widget = $component((props) => {
 })`
     const bundlePath = await bundleComponentWithSignal(source, 'Widget')
     const mod = (await import(bundlePath)) as SignalBundleModule & {
-      Widget: (props: Record<string, () => unknown>) => {
-        mount(p: Element, d: Document): () => void
+      Widget: {
+        (props: Record<string, () => unknown>, slots?: Record<string, unknown>): unknown
+        mount(
+          p: Element,
+          d: Document,
+          props?: Record<string, () => unknown>,
+          slots?: Record<string, unknown>,
+        ): () => void
       }
     }
     const n = mod.signal(0)
     const doc = makeDoc()
     const parent = makeParent(doc)
-    const dispose = mod.Widget({ count: () => n() }).mount(parent, doc)
+    const dispose = mod.Widget.mount(parent, doc, { count: () => n() })
     mod.flushSync()
     expect(parent.querySelector('span')?.textContent).toBe('0')
     n.set(42)
@@ -399,14 +419,20 @@ const Label = $component((props) => {
 })`
     const bundlePath = await bundleComponentWithSignal(source, 'Label')
     const mod = (await import(bundlePath)) as SignalBundleModule & {
-      Label: (props: Record<string, () => unknown>) => {
-        mount(p: Element, d: Document): () => void
+      Label: {
+        (props: Record<string, () => unknown>, slots?: Record<string, unknown>): unknown
+        mount(
+          p: Element,
+          d: Document,
+          props?: Record<string, () => unknown>,
+          slots?: Record<string, unknown>,
+        ): () => void
       }
     }
     const lbl = mod.signal('hello')
     const doc = makeDoc()
     const parent = makeParent(doc)
-    const dispose = mod.Label({ label: () => lbl() }).mount(parent, doc)
+    const dispose = mod.Label.mount(parent, doc, { label: () => lbl() })
     mod.flushSync()
     expect(parent.querySelector('span')?.textContent).toBe('hello')
     lbl.set('world')
@@ -530,7 +556,7 @@ const App = $component(() => {
     // Mount App and verify it renders correctly
     const doc = makeDoc()
     const parent = makeParent(doc)
-    const dispose = mod.App().mount(parent, doc)
+    const dispose = mod.App.mount(parent, doc)
     mod.flushSync()
 
     // App renders a <p> showing "0"
@@ -642,10 +668,15 @@ const App = $component(() => {
 }
 
 type TwoComponentModule = {
-  App: (
-    props?: Record<string, unknown>,
-    slots?: Record<string, unknown>,
-  ) => { mount(p: Element, d: Document): () => void }
+  App: {
+    (props?: Record<string, unknown>, slots?: Record<string, unknown>): unknown
+    mount(
+      p: Element,
+      d: Document,
+      props?: Record<string, unknown>,
+      slots?: Record<string, unknown>,
+    ): () => void
+  }
   flushSync(): void
   signal<T>(v: T): { (): T; set(v: T): void }
 }
@@ -657,7 +688,7 @@ describe('TC-C15  two-component composition: App mounts Counter as child', () =>
 
     const doc = makeDoc()
     const parent = makeParent(doc)
-    const dispose = mod.App().mount(parent, doc)
+    const dispose = mod.App.mount(parent, doc)
     mod.flushSync()
 
     // Counter renders the initial value of n (0)
@@ -727,7 +758,15 @@ const App = $component((props) => {
       ],
     })
     type AppMod = {
-      App: (props: Record<string, () => unknown>) => { mount(p: Element, d: Document): () => void }
+      App: {
+        (props: Record<string, () => unknown>, slots?: Record<string, unknown>): unknown
+        mount(
+          p: Element,
+          d: Document,
+          props?: Record<string, () => unknown>,
+          slots?: Record<string, unknown>,
+        ): () => void
+      }
       flushSync(): void
       signal<T>(v: T): { (): T; set(v: T): void }
     }
@@ -736,7 +775,7 @@ const App = $component((props) => {
     const n = mod.signal(0)
     const doc = makeDoc()
     const parent = makeParent(doc)
-    const dispose = mod.App({ n: () => n() }).mount(parent, doc)
+    const dispose = mod.App.mount(parent, doc, { n: () => n() })
     mod.flushSync()
 
     expect(parent.querySelector('span')?.textContent).toBe('0')
@@ -806,7 +845,15 @@ const App = $component((props) => {
       ],
     })
     type AppMod = {
-      App: (props: Record<string, () => unknown>) => { mount(p: Element, d: Document): () => void }
+      App: {
+        (props: Record<string, () => unknown>, slots?: Record<string, unknown>): unknown
+        mount(
+          p: Element,
+          d: Document,
+          props?: Record<string, () => unknown>,
+          slots?: Record<string, unknown>,
+        ): () => void
+      }
       flushSync(): void
       signal<T>(v: T): { (): T; set(v: T): void }
     }
@@ -815,7 +862,7 @@ const App = $component((props) => {
     const n = mod.signal(5)
     const doc = makeDoc()
     const parent = makeParent(doc)
-    const dispose = mod.App({ n: () => n() }).mount(parent, doc)
+    const dispose = mod.App.mount(parent, doc, { n: () => n() })
     mod.flushSync()
     expect(parent.querySelector('span')?.textContent).toBe('5')
 
