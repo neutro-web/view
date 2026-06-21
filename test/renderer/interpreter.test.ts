@@ -2084,3 +2084,52 @@ test('TC-C12  wireComponent: component inside list item — per-item owner', () 
   expect(parent.querySelectorAll('li').length).toBe(0)
   rmParent(parent)
 })
+
+// ── TC-C13: wireComponent — factory called exactly once at mount ───────────────
+
+test('TC-C13  wireComponent: factory called exactly once at mount, not on prop updates', () => {
+  const parent = mkParent()
+  const countSig = signal(0)
+  let factoryCalls = 0
+
+  const CounterFactory: ComponentBinding['component'] = (props) => {
+    factoryCalls++
+    return {
+      id: 'ctr',
+      shape: { html: '<span><!--nv-0--></span>', bindingPaths: [[0, 0]] },
+      bindings: [
+        { kind: 'text', pathIndex: 0, expr: () => String((props.count as () => number)()) },
+      ],
+    }
+  }
+
+  const ir: TemplateIR = {
+    id: 'p',
+    shape: { html: '<div><!--nv-comp-0--></div>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'component',
+        pathIndex: 0,
+        component: CounterFactory,
+        props: [{ name: 'count', expr: () => countSig() }],
+        propNames: ['count'],
+        slots: [],
+      } satisfies ComponentBinding,
+    ],
+  }
+
+  const dispose = mount(ir, parent, document)
+  flushSync()
+  expect(factoryCalls).toBe(1)
+
+  countSig.set(1)
+  flushSync()
+  expect(factoryCalls).toBe(1)
+
+  countSig.set(2)
+  flushSync()
+  expect(factoryCalls).toBe(1)
+
+  dispose()
+  rmParent(parent)
+})

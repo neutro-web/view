@@ -1475,3 +1475,52 @@ test('TC-C12 emitted-mount: component inside list item — per-item owner', () =
   dispose()
   expect(container.querySelectorAll('li').length).toBe(0)
 })
+
+// ── TC-C13 (emitted-mount): factory called exactly once at mount ───────────────
+
+test('TC-C13 emitted-mount: factory called exactly once at mount, not on prop updates', () => {
+  const { document } = new JSDOM('<!DOCTYPE html><body></body>').window
+  const countSig = signal(0)
+  let factoryCalls = 0
+
+  const CounterFactory: ComponentBinding['component'] = (props) => {
+    factoryCalls++
+    return {
+      id: 'ctr',
+      shape: { html: '<span><!--nv-0--></span>', bindingPaths: [[0, 0]] },
+      bindings: [
+        { kind: 'text', pathIndex: 0, expr: () => String((props.count as () => number)()) },
+      ],
+    }
+  }
+
+  const ir: TemplateIR = {
+    id: 'p',
+    shape: { html: '<div><!--nv-comp-0--></div>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'component',
+        pathIndex: 0,
+        component: CounterFactory as unknown as ComponentBinding['component'],
+        props: [{ name: 'count', expr: () => countSig() }],
+        propNames: ['count'],
+        slots: [],
+      } satisfies ComponentBinding,
+    ],
+  }
+
+  const { mountFn } = emitMount(ir)
+  const dispose = mountFn(document.body as unknown as Element, document as unknown as Document)
+  flushSync()
+  expect(factoryCalls).toBe(1)
+
+  countSig.set(1)
+  flushSync()
+  expect(factoryCalls).toBe(1)
+
+  countSig.set(2)
+  flushSync()
+  expect(factoryCalls).toBe(1)
+
+  dispose()
+})

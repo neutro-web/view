@@ -292,6 +292,11 @@ export function createHtmlTag(document: Document) {
           }
 
           // Replace element with anchor comment
+          if (el.childNodes.length > 0) {
+            console.warn(
+              `[nv] Component slot content is not yet supported; children of <${tagName}> will not be rendered`,
+            )
+          }
           const compIndex = pendingComponents.length
           const anchor = document.createComment(`nv-comp-${compIndex}`)
           el.parentNode?.replaceChild(anchor, el)
@@ -347,12 +352,11 @@ export function createHtmlTag(document: Document) {
       const cb: ComponentBinding = {
         kind: 'component',
         pathIndex,
-        component: (_props, _slots) => ({
-          id: tagName,
-          shape: { html: '', bindingPaths: [] },
-          bindings: [],
-          meta: { frontEnd: 'tagged-template' },
-        }),
+        component: (_props, _slots) => {
+          throw new Error(
+            `[nv] ComponentBinding for <${tagName}> has no resolved factory. The tagged-template front-end cannot resolve component imports at parse time. Pass a pre-resolved factory via the ComponentBinding directly.`,
+          )
+        },
         props: propEntries,
         propNames,
         slots: [],

@@ -299,6 +299,7 @@ interface ProcessResult {
   verdicts: Array<'ACCEPT' | 'PLAIN'>
   pendingComponents: PendingNvComponentInfo[]
   consumedByComponent: ReadonlySet<number>
+  diagnostics: NvDiagnostic[]
 }
 
 function processHtmlTemplate(
@@ -318,6 +319,7 @@ function processHtmlTemplate(
       verdicts: [],
       pendingComponents: [],
       consumedByComponent: new Set<number>(),
+      diagnostics: [],
     }
   }
 
@@ -352,6 +354,7 @@ function processHtmlTemplate(
     reactiveHoles: Array<{ name: string; holeIndex: number }>
   }
   const pendingComponents: PendingNvComponent[] = []
+  const processdiagnostics: NvDiagnostic[] = []
   ;(function walk(node: Node): void {
     if (node.nodeType === 8) {
       const m = (node as Comment).data.match(/^nv-(\d+)$/)
@@ -389,6 +392,14 @@ function processHtmlTemplate(
           if (!propNames.includes(attr.name)) propNames.push(attr.name)
         }
 
+        if (el.childNodes.length > 0) {
+          processdiagnostics.push({
+            kind: 'warning',
+            message: `Component slot content is not yet supported; children of <${tagName}> will not be rendered`,
+            start: 0,
+            end: 0,
+          })
+        }
         const compIndex = pendingComponents.length
         const anchor = doc.createComment(`nv-comp-${compIndex}`)
         el.parentNode?.replaceChild(anchor, el)
@@ -433,6 +444,9 @@ function processHtmlTemplate(
   }
 
   const bindings: Binding[] = []
+  // verdicts[i] is indexed by HOLE position (0..holeExprs.length-1), NOT by binding position.
+  // Consumed holes push 'PLAIN'. ComponentBindings have no verdict entry.
+  // emitSetup keys verdicts by binding.pathIndex via a Map — do NOT zip with bindings positionally.
   const verdicts: Array<'ACCEPT' | 'PLAIN'> = []
 
   // Add component bindings (anchors appended after hole paths)
@@ -442,12 +456,11 @@ function processHtmlTemplate(
     const cb: ComponentBinding = {
       kind: 'component',
       pathIndex,
-      component: (_props, _slots) => ({
-        id: `comp:${tagName}`,
-        shape: { html: '', bindingPaths: [] },
-        bindings: [],
-        meta: { frontEnd: 'nv-file' },
-      }),
+      component: (_props, _slots) => {
+        throw new Error(
+          `[nv] ComponentBinding for <${tagName}> has no resolved factory. Use the emit path (parseNvFileForEmit + emitModule) to resolve component factories from imports.`,
+        )
+      },
       props: propEntries,
       propNames,
       slots: [],
@@ -530,6 +543,7 @@ function processHtmlTemplate(
       reactiveHoles,
     })),
     consumedByComponent,
+    diagnostics: processdiagnostics,
   }
 }
 
