@@ -35,6 +35,7 @@ import { createHtmlTag } from '../../src/renderer/html-tag.js'
 import { mount } from '../../src/renderer/interpreter.js'
 import type {
   ChildBinding,
+  ComponentBinding,
   ConditionalBinding,
   EventBinding,
   PropBinding,
@@ -1126,4 +1127,100 @@ test('P2 §5: Hidden-class characterization — emission overhead (logged, not a
     `     Overhead:          ${overheadPct}%  (expected: minimal; only FALSE sites are written)`,
   )
   // No hard assertion — characterization only (test environment timing is noisy).
+})
+
+// ── TC-C01 (emitted-mount): ComponentBinding reactive prop ────────────────────
+
+test('TC-C01 emitted-mount: ComponentBinding — child updates when parent signal changes', () => {
+  const { document } = new JSDOM('<!DOCTYPE html><body></body>').window
+  const n = signal(0)
+
+  const CounterFactory = (props: { count: () => number }): TemplateIR => ({
+    id: 'counter',
+    shape: { html: '<span><!--nv-0--></span>', bindingPaths: [[0, 0]] },
+    bindings: [{ kind: 'text', pathIndex: 0, expr: () => String(props.count()) }],
+  })
+
+  const parentIR: TemplateIR = {
+    id: 'parent',
+    shape: { html: '<div><!--nv-comp-0--></div>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'component',
+        pathIndex: 0,
+        component: CounterFactory as unknown as ComponentBinding['component'],
+        props: [{ name: 'count', expr: () => n() }],
+        propNames: ['count'],
+        slots: [],
+      } satisfies ComponentBinding,
+    ],
+  }
+
+  const { mountFn } = emitMount(parentIR)
+  const dispose = mountFn(document.body as unknown as Element, document as unknown as Document)
+  flushSync()
+
+  expect(document.body.querySelector('span')?.textContent).toBe('0')
+  n.set(42)
+  flushSync()
+  expect(document.body.querySelector('span')?.textContent).toBe('42')
+  dispose()
+  expect(document.body.querySelector('span')).toBeNull()
+})
+
+// ── TC-C10 (emitted-mount): 1000-flip no-leak ────────────────────────────────
+
+test('TC-C10 emitted-mount: 1000-flip no-leak — component inside conditional', () => {
+  const { document } = new JSDOM('<!DOCTYPE html><body></body>').window
+  const show = signal(true)
+
+  const CounterFactory = (props: { n: () => number }): TemplateIR => ({
+    id: 'c',
+    shape: { html: '<span><!--nv-0--></span>', bindingPaths: [[0, 0]] },
+    bindings: [{ kind: 'text', pathIndex: 0, expr: () => String(props.n()) }],
+  })
+
+  const compBinding: ComponentBinding = {
+    kind: 'component',
+    pathIndex: 0,
+    component: CounterFactory as unknown as ComponentBinding['component'],
+    props: [{ name: 'n', expr: () => 0 }],
+    propNames: ['n'],
+    slots: [],
+  }
+
+  const compIR: TemplateIR = {
+    id: 'comp-ir',
+    shape: { html: '<div><!--nv-comp-0--></div>', bindingPaths: [[0, 0]] },
+    bindings: [compBinding],
+  }
+
+  const parentIR: TemplateIR = {
+    id: 'parent',
+    shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'conditional',
+        pathIndex: 0,
+        condition: () => Boolean(show()),
+        consequent: compIR,
+        alternate: null,
+      },
+    ],
+  }
+
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+
+  const { mountFn } = emitMount(parentIR)
+  const dispose = mountFn(container as unknown as Element, document as unknown as Document)
+  flushSync()
+
+  for (let i = 0; i < 1000; i++) {
+    show.set(i % 2 === 0)
+    flushSync()
+  }
+
+  dispose()
+  expect(container.childElementCount).toBe(0)
 })
