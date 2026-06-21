@@ -879,3 +879,25 @@ const App = $component(() => {
   const emitted = emitModule(results)
   expect(emitted).toContain("kind: 'component'")
 })
+
+test('EM-13b  component prop exprSrc is erased: n (signal) → n() in propSrc', () => {
+  const src = `
+const App = $component(() => {
+  $script(() => { const n = signal(0) })
+  $render(() => html\`<div><Counter .count="\${n}"/></div>\`)
+})`
+  const doc = makeDoc()
+  const results = parseNvFileForEmit(src, 'app.nv', doc)
+  const thunks = results[0]!.emit!.bindingThunks
+  const compThunk = thunks.find((t) => t.kind === 'component')
+  expect(compThunk).toBeDefined()
+  expect(compThunk!.kind).toBe('component')
+  // propSrc must be erased: signal read → call expression
+  const propSrc = (
+    compThunk as Extract<
+      import('../../src/renderer/nv-parser.js').ThunkSource,
+      { kind: 'component' }
+    >
+  ).propSrcs[0]?.exprSrc
+  expect(propSrc).toBe('n()') // not 'n'
+})

@@ -559,10 +559,18 @@ function processHtmlTemplate(
     }
   }
 
+  // Re-serialize shape from post-walk fragment (component elements replaced by anchors)
+  const shapeDiv = doc.createElement('div')
+  shapeDiv.appendChild(frag.cloneNode(true))
+  const reserializedShape = shapeDiv.innerHTML.replace(
+    /\s+data-nv-(?:attr|prop|event)-\d+="[^"]*"/g,
+    '',
+  ) // strip hole attr sentinels only
+
   return {
     ir: {
-      id: `nv:${simpleHash(shapeHtml)}`,
-      shape: { html: shapeHtml, bindingPaths: allPaths as NodePath[] },
+      id: `nv:${simpleHash(reserializedShape)}`,
+      shape: { html: reserializedShape, bindingPaths: allPaths as NodePath[] },
       bindings,
       meta: { frontEnd: 'nv-file' },
     },
@@ -1799,7 +1807,11 @@ export function parseNvFileForEmit(
             componentSrc: pc.tagName,
             propSrcs: pc.reactiveHoles.map((rh) => ({
               name: rh.name,
-              exprSrc: (bodyHoleExprs[rh.holeIndex] as ts.Expression).getText(),
+              exprSrc: eraseSignalReadsInNode(
+                bodyHoleExprs[rh.holeIndex] as ts.Expression,
+                symbols.all,
+                emitPropsAccessors,
+              ),
             })),
             propNames: pc.propNames,
             slots: [],

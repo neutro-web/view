@@ -1282,4 +1282,35 @@ describe('TC-slot-warning: slot content in component element', () => {
     expect(compBinding!.slots[0]!.name).toBe('default')
     expect(compBinding!.slots[0]!.content.shape.html).toContain('<p>hello</p>')
   })
+
+  it('Bug #2: shape.html replaces <Counter/> with anchor comment, not element tag', () => {
+    const nvSource = [
+      'const App = $component(() => {',
+      '  $script(() => { const n = signal(0) })',
+      '  $render(() => html`<div><Counter .count="${n}"/></div>`)',
+      '})',
+    ].join('\n')
+    const results = parseNvFile(nvSource, 'app.nv', document)
+    const ir = results[0]!.ir
+    // shape.html must NOT contain a Counter element tag
+    expect(ir.shape.html).not.toContain('Counter')
+    // shape.html must contain the anchor comment
+    expect(ir.shape.html).toContain('<!--nv-comp-')
+    // the component binding's pathIndex must resolve to a Comment node, not an Element
+    const compBinding = ir.bindings.find((b) => b.kind === 'component')
+    expect(compBinding).toBeDefined()
+  })
+
+  it('Bug #2 (emit path): shape.html anchor comment present in parseNvFileForEmit result', () => {
+    const nvSource = [
+      'const App = $component(() => {',
+      '  $script(() => { const n = signal(0) })',
+      '  $render(() => html`<div><Counter .count="${n}"/></div>`)',
+      '})',
+    ].join('\n')
+    const results = parseNvFileForEmit(nvSource, 'app.nv', document)
+    const ir = results[0]!.ir
+    expect(ir.shape.html).not.toContain('Counter')
+    expect(ir.shape.html).toContain('<!--nv-comp-')
+  })
 })
