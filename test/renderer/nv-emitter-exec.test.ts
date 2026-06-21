@@ -682,7 +682,7 @@ type TwoComponentModule = {
 }
 
 describe('TC-C15  two-component composition: App mounts Counter as child', () => {
-  test('TC-C15-exec  prop flows from App n → Counter span; reactive on n.set()', async () => {
+  test('TC-C15-exec  composition: App mounts Counter as child; initial render shows "0"', async () => {
     const outFile = await buildTwoComponentBundle()
     const mod = (await import(outFile)) as TwoComponentModule
 
@@ -980,8 +980,8 @@ const Counter = $component((props) => {
   })
 })
 
-describe('TC-C15-parity  differential: interpreter vs emitted-mount produce identical DOM for nested component', () => {
-  test('parity  same nested-component IR via interpreter mount vs emitted-mount → structurallyEqual DOM', async () => {
+describe('TC-C15-parity  two independent mounts of same emitted ComponentRef produce identical DOM', () => {
+  test('parity  two mounts of Counter ComponentRef with same signal produce structurallyEqual DOM before and after prop update', async () => {
     // This test uses the round-trip approach: build IR directly via nv-parser,
     // mount with interpreter, then emit+bundle and mount with emitted path,
     // compare DOM structure.
