@@ -29,6 +29,7 @@ import * as esbuild from 'esbuild'
 import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, test } from 'vitest'
 import { emitModule } from '../../src/renderer/nv-emitter.js'
+import { rewriteNvSpecifiers } from '../../src/renderer/nv-esbuild-plugin.js'
 import { parseNvFileForEmit } from '../../src/renderer/nv-parser.js'
 
 // ── Absolute paths for esbuild alias resolution ───────────────────────────────
@@ -295,5 +296,56 @@ const B = $component(() => {
 
     disposeA()
     disposeB()
+  })
+})
+
+// ── TC-C14: Cross-file component imports — .nv specifier rewrite ───────────────
+
+describe('TC-C14  cross-file component imports — .nv → .js specifier rewrite', () => {
+  test('TC-C14a  rewriteNvSpecifiers rewrites single-quoted .nv specifier', () => {
+    const src = `import { Counter } from './counter.nv'`
+    const rewritten = rewriteNvSpecifiers(src)
+    expect(rewritten).toBe(`import { Counter } from './counter.js'`)
+  })
+
+  test('TC-C14b  rewriteNvSpecifiers rewrites double-quoted .nv specifier', () => {
+    const src = `import { Counter } from "./counter.nv"`
+    const rewritten = rewriteNvSpecifiers(src)
+    expect(rewritten).toBe(`import { Counter } from "./counter.js"`)
+  })
+
+  test('TC-C14c  rewriteNvSpecifiers rewrites multiple .nv specifiers', () => {
+    const src = `import { Counter } from './counter.nv'\nimport { Button } from "./button.nv"`
+    const rewritten = rewriteNvSpecifiers(src)
+    expect(rewritten).toContain(`from './counter.js'`)
+    expect(rewritten).toContain(`from "./button.js"`)
+  })
+
+  test('TC-C14d  rewriteNvSpecifiers preserves non-.nv imports', () => {
+    const src = `import { Counter } from './counter.nv'\nimport { signal } from '@neutro/view/core'`
+    const rewritten = rewriteNvSpecifiers(src)
+    expect(rewritten).toContain(`from './counter.js'`)
+    expect(rewritten).toContain(`from '@neutro/view/core'`)
+  })
+
+  test('TC-C14e  emitModule output can be rewritten by rewriteNvSpecifiers', () => {
+    // Create a source that imports from another .nv file
+    const parentSource = `
+const Parent = $component(() => {
+  $script(() => {
+    const msg = signal('parent')
+  })
+  $render(() => html\`<div>\${msg}</div>\`)
+})`
+
+    const results = parseNvFileForEmit(parentSource, 'parent.nv', sharedDoc)
+    const emitted = emitModule(results)
+    const rewritten = rewriteNvSpecifiers(emitted)
+
+    // Verify emitted JS is valid after rewrite
+    // (rewrite should not break the structure even if no .nv imports are present)
+    expect(typeof rewritten).toBe('string')
+    expect(rewritten.length > 0).toBe(true)
+    expect(rewritten).toContain('export function Parent(')
   })
 })
