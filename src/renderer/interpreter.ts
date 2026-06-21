@@ -554,10 +554,10 @@ function mountFragment(
 
   // 3. Wire each binding (creates effects owned by the enclosing root).
   for (let i = 0; i < ir.bindings.length; i++) {
-    // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
-    // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
     wireBinding(
+      // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
       ir.bindings[i]!,
+      // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
       targets[i]!,
       doc,
       slotContext?.slotsObj,
