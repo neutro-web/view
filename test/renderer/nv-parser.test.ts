@@ -37,6 +37,7 @@ import type {
   AttrBinding,
   Binding,
   ChildBinding,
+  ComponentBinding,
   ConditionalBinding,
   EventBinding,
   PropBinding,
@@ -1123,8 +1124,7 @@ describe('nv-parser — component element detection', () => {
     const compBinding = ir?.bindings.find((b) => b.kind === 'component')
     expect(compBinding).toBeDefined()
     expect(compBinding?.kind).toBe('component')
-    // biome-ignore lint/suspicious/noExplicitAny: test cast
-    const cb = compBinding as any
+    const cb = compBinding as ComponentBinding | undefined
     expect(cb.propNames).toContain('count')
     expect(cb.props[0]?.name).toBe('count')
   })
@@ -1222,13 +1222,13 @@ describe('TC-slot-warning: slot content in component element', () => {
     const diags = results[0]?.diagnostics ?? []
     // Static slot content should NOT produce a warning
     expect(
-      diags.some(
-        (d) => d.kind === 'warning' && d.message.toLowerCase().includes('slot'),
-      ),
+      diags.some((d) => d.kind === 'warning' && d.message.toLowerCase().includes('slot')),
     ).toBe(false)
     // The ComponentBinding should have the slot captured
     const ir = results[0]?.ir
-    const compBinding = ir?.bindings.find((b) => b.kind === 'component') as any
+    const compBinding = ir?.bindings.find((b) => b.kind === 'component') as
+      | ComponentBinding
+      | undefined
     expect(compBinding).toBeDefined()
     expect(compBinding.slots).toHaveLength(1)
     expect(compBinding.slots[0].name).toBe('default')
@@ -1246,9 +1246,7 @@ describe('TC-slot-warning: slot content in component element', () => {
     const results = parseNvFile(nvSource, 'app.nv', document)
     const diags = results[0]?.diagnostics ?? []
     expect(
-      diags.some(
-        (d) => d.kind === 'warning' && d.message.toLowerCase().includes('dynamic slot'),
-      ),
+      diags.some((d) => d.kind === 'warning' && d.message.toLowerCase().includes('dynamic slot')),
     ).toBe(true)
   })
 
@@ -1262,9 +1260,7 @@ describe('TC-slot-warning: slot content in component element', () => {
     const results = parseNvFile(nvSource, 'app.nv', document)
     const diags = results[0]?.diagnostics ?? []
     expect(
-      diags.some(
-        (d) => d.kind === 'warning' && d.message.toLowerCase().includes('slot'),
-      ),
+      diags.some((d) => d.kind === 'warning' && d.message.toLowerCase().includes('slot')),
     ).toBe(false)
   })
 
@@ -1278,7 +1274,9 @@ describe('TC-slot-warning: slot content in component element', () => {
     ].join('\n')
     const results = parseNvFile(nvSource, 'parent.nv', document)
     const ir = results[0]?.ir
-    const compBinding = ir?.bindings.find((b) => b.kind === 'component') as any
+    const compBinding = ir?.bindings.find((b) => b.kind === 'component') as
+      | ComponentBinding
+      | undefined
     expect(compBinding).toBeDefined()
     expect(compBinding.slots).toHaveLength(1)
     expect(compBinding.slots[0].name).toBe('default')

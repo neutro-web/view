@@ -298,9 +298,7 @@ export function createHtmlTag(document: Document) {
           if (el.childNodes.length > 0) {
             const innerHTML = el.innerHTML
             if (/<!--nv-\d+-->|data-nv-/.test(innerHTML)) {
-              console.warn(
-                `[nv] Dynamic slot content in <${tagName}> is not yet supported`,
-              )
+              console.warn(`[nv] Dynamic slot content in <${tagName}> is not yet supported`)
             } else {
               // Static slot content
               const slotIR: TemplateIR = {
