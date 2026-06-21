@@ -38,6 +38,7 @@ import type {
   ComponentBinding,
   NodePath,
   ReactiveExpr,
+  SlotOutletBinding,
   TemplateIR,
 } from '../renderer/ir.js'
 import type { BindingErasureVerdict } from './types.js'
@@ -128,6 +129,10 @@ export interface EmitResult {
 function emitSetup(
   ir: TemplateIR,
   verdicts: ReadonlyMap<number, BindingErasureVerdict>,
+  slotContext?: {
+    slotsObj: Record<string, TemplateIR>
+    capturedParentOwner: ReturnType<typeof getOwner>
+  },
 ): { setup: SetupFn; diagnostics: string[] } {
   const shapeHtml = ir.shape.html
   const diagnostics: string[] = []
@@ -450,18 +455,11 @@ function emitSetup(
       }
 
       case 'component': {
-        // Recursively emit each slot IR at emit time (emptyVerdicts — slot pathIndices independent).
+        // Direct-capture: component factory + prop/slot entries. Never the binding object.
         const emptyVerdicts = new Map<number, BindingErasureVerdict>()
-        const slotSetups: Array<{ name: string; setup: SetupFn }> = []
-        for (const slot of binding.slots) {
-          const { setup: slotSetup, diagnostics: sDiags } = emitSetup(slot.content, emptyVerdicts)
-          for (const d of sDiags) diagnostics.push(d)
-          slotSetups.push({ name: slot.name, setup: slotSetup })
-        }
-
-        // Direct-capture: component factory + prop entries. Never the binding object.
         const componentFactory = binding.component
         const propEntries = binding.props
+        const slotEntries = binding.slots
 
         wireSpecs.push({
           accessor,
@@ -475,19 +473,19 @@ function emitSetup(
               propsObj[p.name] = p.expr
             }
 
-            // Build SlotFns: pass slot TemplateIRs through to the factory.
+            // Build slotsObj: pass slot TemplateIRs through to the factory.
             const slotsObj: Record<string, TemplateIR> = {}
-            for (const { name: slotName } of slotSetups) {
-              const slotEntry = binding.slots.find((s) => s.name === slotName)
-              if (slotEntry) slotsObj[slotName] = slotEntry.content
+            for (const s of slotEntries) {
+              slotsObj[s.name] = s.content
             }
 
-            // Call the component factory and mount its returned IR using emitSetup.
-            // Same owner-tree shape as interpreter's wireComponent (no runWithOwner for static component).
-            const childEmptyVerdicts = new Map<number, BindingErasureVerdict>()
+            // Capture parent owner BEFORE child's createRoot (D-slot-1).
+            const capturedParentOwner = getOwner()
+
             const childDisposer = createRoot((dispose) => {
               const childIR = componentFactory(propsObj, slotsObj)
-              const { setup: childSetup } = emitSetup(childIR, childEmptyVerdicts)
+              const childSlotContext = { slotsObj, capturedParentOwner }
+              const { setup: childSetup } = emitSetup(childIR, emptyVerdicts, childSlotContext)
               const { roots } = childSetup(parent, doc, anchorNode)
               onCleanup(() => {
                 for (const n of roots) {
@@ -504,9 +502,37 @@ function emitSetup(
       }
 
       case 'slot-outlet': {
-        throw new Error(
-          `[nv/emit] v0: '${binding.kind}' binding is designed but not yet implemented. Deferred per IR §9.2.`,
-        )
+        // slotContext is captured from the emitSetup closure (set when called from case 'component').
+        const slotName = (binding as SlotOutletBinding).name
+
+        wireSpecs.push({
+          accessor,
+          wire(anchorNode, doc) {
+            if (!slotContext) return // no slot context = unfilled
+            const slotIR = slotContext.slotsObj[slotName]
+            if (slotIR === undefined) return // unfilled slot: render nothing
+
+            const parent = anchorNode.parentNode
+            if (parent === null)
+              throw new Error('[nv/emit] SlotOutletBinding: anchor has no parent')
+
+            runWithOwner(slotContext.capturedParentOwner, () => {
+              const slotDisposer = createRoot((dispose) => {
+                const emptyVerdicts = new Map<number, BindingErasureVerdict>()
+                const { setup: slotSetup } = emitSetup(slotIR, emptyVerdicts)
+                const { roots } = slotSetup(parent, doc, anchorNode)
+                onCleanup(() => {
+                  for (const n of roots) {
+                    if (n.parentNode !== null) n.parentNode.removeChild(n)
+                  }
+                })
+                return dispose
+              })
+              onCleanup(() => slotDisposer())
+            })
+          },
+        })
+        break
       }
 
       default: {
