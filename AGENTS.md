@@ -164,6 +164,14 @@ making a design decision that is flagged open or unspecified. Pure layout, helpe
 organization, parser/data-structure tuning, and import organization are in-stream. When
 unsure, surface it; under-escalating is the costlier error.
 
+## Acceptance gates
+
+Every non-trivial feature landing is verified against a filled-in gate file in
+`docs/gates/`, derived from the approved design *before* implementation starts. The
+gate is the acceptance contract: it states what evidence proves "done." Completion is
+read back against placed files on main's HEAD, not summaries or green counts. Template
+and process: `docs/gates/README.md`.
+
 ## Two standing gates (separate, both required)
 
 `tsc --strict` (with the DOM lib in scope) and the test suite are **separate gates**.
