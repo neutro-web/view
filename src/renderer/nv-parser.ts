@@ -288,9 +288,17 @@ function exprReadsSignal(expr: ts.Expression, signals: ReadonlySet<string>): boo
 
 // ── Template processing ───────────────────────────────────────────────────────
 
+interface PendingNvComponentInfo {
+  tagName: string
+  propNames: readonly string[]
+  reactiveHoles: ReadonlyArray<{ name: string; holeIndex: number }>
+}
+
 interface ProcessResult {
   ir: TemplateIR
   verdicts: Array<'ACCEPT' | 'PLAIN'>
+  pendingComponents: PendingNvComponentInfo[]
+  consumedByComponent: ReadonlySet<number>
 }
 
 function processHtmlTemplate(
@@ -308,6 +316,8 @@ function processHtmlTemplate(
         meta: { frontEnd: 'nv-file' },
       },
       verdicts: [],
+      pendingComponents: [],
+      consumedByComponent: new Set<number>(),
     }
   }
 
@@ -339,6 +349,7 @@ function processHtmlTemplate(
     tagName: string
     propEntries: PropEntry[]
     propNames: string[]
+    reactiveHoles: Array<{ name: string; holeIndex: number }>
   }
   const pendingComponents: PendingNvComponent[] = []
   ;(function walk(node: Node): void {
@@ -355,6 +366,7 @@ function processHtmlTemplate(
         const tagName = compName
         const propEntries: PropEntry[] = []
         const propNames: string[] = []
+        const reactiveHoles: Array<{ name: string; holeIndex: number }> = []
 
         for (let k = 0; k < holeExprs.length; k++) {
           for (const atype of ['attr', 'prop', 'event'] as const) {
@@ -363,6 +375,7 @@ function processHtmlTemplate(
               el.removeAttribute(`data-nv-${atype}-${k}`)
               propEntries.push({ name: v, expr: stubExpr })
               propNames.push(v)
+              reactiveHoles.push({ name: v, holeIndex: k })
               consumedByComponent.add(k)
             }
           }
@@ -380,7 +393,7 @@ function processHtmlTemplate(
         const anchor = doc.createComment(`nv-comp-${compIndex}`)
         el.parentNode?.replaceChild(anchor, el)
         const anchorPath = computePath(anchor, frag)
-        pendingComponents.push({ anchorPath, tagName, propEntries, propNames })
+        pendingComponents.push({ anchorPath, tagName, propEntries, propNames, reactiveHoles })
         return // don't recurse into component children
       }
 
@@ -408,13 +421,21 @@ function processHtmlTemplate(
       )
   }
 
-  // Build allPaths: component anchors appended after hole paths
-  const allPaths: NodePath[] = [...bindingPaths]
+  // Build compacted allPaths: skip null slots (consumed holes have no binding path).
+  // holeCompactIdx[i] maps original hole index to its index in allPaths.
+  const holeCompactIdx: number[] = new Array(holeExprs.length).fill(-1)
+  const allPaths: NodePath[] = []
+  for (let i = 0; i < bindingPaths.length; i++) {
+    if (bindingPaths[i] !== null) {
+      holeCompactIdx[i] = allPaths.length
+      allPaths.push(bindingPaths[i] as NodePath)
+    }
+  }
 
   const bindings: Binding[] = []
   const verdicts: Array<'ACCEPT' | 'PLAIN'> = []
 
-  // Add component bindings (anchors beyond hole range)
+  // Add component bindings (anchors appended after hole paths)
   for (const { anchorPath, tagName, propEntries, propNames } of pendingComponents) {
     const pathIndex = allPaths.length
     allPaths.push(anchorPath)
@@ -441,7 +462,7 @@ function processHtmlTemplate(
     }
     const pos = positions[i] as PosKind
     const holeExpr = holeExprs[i] as ts.Expression
-    const pathIndex = i
+    const pathIndex = holeCompactIdx[i] as number
     verdicts.push(exprReadsSignal(holeExpr, signals) ? 'ACCEPT' : 'PLAIN')
 
     if (pos.kind === 'text') {
@@ -503,6 +524,12 @@ function processHtmlTemplate(
       meta: { frontEnd: 'nv-file' },
     },
     verdicts,
+    pendingComponents: pendingComponents.map(({ tagName, propNames, reactiveHoles }) => ({
+      tagName,
+      propNames,
+      reactiveHoles,
+    })),
+    consumedByComponent,
   }
 }
 
@@ -1319,13 +1346,15 @@ function computeThunkSource(
 }
 
 /**
- * Compute ThunkSource[] for all holes in a tagged-template expression.
+ * Compute ThunkSource[] for all non-consumed holes in a tagged-template expression.
+ * consumed = hole indices claimed by a component element (no binding is emitted for them).
  */
 function computeThunksForTemplate(
   tte: ts.TaggedTemplateExpression,
   doc: Document,
   symbols: ScriptSymbols,
   diagnostics: NvDiagnostic[],
+  consumed: ReadonlySet<number> = new Set(),
 ): ThunkSource[] {
   const template = tte.template
   if (ts.isNoSubstitutionTemplateLiteral(template)) return []
@@ -1340,9 +1369,13 @@ function computeThunksForTemplate(
     classifyPosition(strings[i] ?? '', strings[i + 1] ?? ''),
   )
 
-  return holeExprs.map((expr, i) =>
-    computeThunkSource(expr, positions[i] as PosKind, doc, symbols, diagnostics),
-  )
+  return holeExprs
+    .map((expr, i) =>
+      consumed.has(i)
+        ? null
+        : computeThunkSource(expr, positions[i] as PosKind, doc, symbols, diagnostics),
+    )
+    .filter((t): t is ThunkSource => t !== null)
 }
 
 /**
@@ -1471,7 +1504,28 @@ export function parseNvFileForEmit(
             body.tag.text !== 'html'
           )
             continue
-          bindingThunks = computeThunksForTemplate(body, doc, symbols, emitDiagnostics)
+          const { pendingComponents, consumedByComponent } = renderResult
+          const bodyHoleExprs: ts.Expression[] = ts.isNoSubstitutionTemplateLiteral(body.template)
+            ? []
+            : body.template.templateSpans.map((s) => s.expression)
+          const componentThunks: ThunkSource[] = pendingComponents.map((pc) => ({
+            kind: 'component' as const,
+            componentSrc: pc.tagName,
+            propSrcs: pc.reactiveHoles.map((rh) => ({
+              name: rh.name,
+              exprSrc: (bodyHoleExprs[rh.holeIndex] as ts.Expression).getText(),
+            })),
+            propNames: pc.propNames,
+            slots: [],
+          }))
+          const holeThunks = computeThunksForTemplate(
+            body,
+            doc,
+            symbols,
+            emitDiagnostics,
+            consumedByComponent,
+          )
+          bindingThunks = [...componentThunks, ...holeThunks]
           break
         }
       }

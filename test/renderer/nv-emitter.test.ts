@@ -851,3 +851,31 @@ const C = $component(() => {
   disposeE()
   disposeR()
 })
+
+// ── EM-13: component emit path — parseNvFileForEmit → emitModule round-trip ──
+
+test('EM-13  component emit path: parseNvFileForEmit + emitModule does not throw for <Counter .count="${n}"/>', () => {
+  const src2 = `
+const App = $component(() => {
+  $script(() => { const n = signal(0) })
+  $render(() => html\`<div><Counter .count="\${n}"/></div>\`)
+})`
+
+  const doc = makeDoc()
+  const results = parseNvFileForEmit(src2, 'app.nv', doc)
+  expect(results).toHaveLength(1)
+  expect(results[0]!.diagnostics.filter((d) => d.kind === 'error')).toHaveLength(0)
+
+  // The binding should include a component binding
+  const bindings = results[0]!.ir.bindings
+  expect(bindings.some((b) => b.kind === 'component')).toBe(true)
+
+  // bindingThunks must be parallel to ir.bindings
+  const thunks = results[0]!.emit!.bindingThunks
+  expect(thunks).toHaveLength(bindings.length)
+  expect(thunks[0]!.kind).toBe('component')
+
+  // emitModule must not throw
+  const emitted = emitModule(results)
+  expect(emitted).toContain("kind: 'component'")
+})
