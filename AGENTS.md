@@ -47,6 +47,33 @@ piece — but must structure the work so the missing decision can be filled in l
 rewrite, and must name the gate it stopped at. Fabricating an unmade decision is the costlier
 error; it looks like progress and has to be unwound.
 
+## "Spike" means executed verification, not analysis
+
+A *spike* runs throwaway code and reports what executed. A document that reasons about
+options — tiers, tradeoffs, proposed forms — is a *design doc*, not a spike; do not call it
+one. Do not mark anything "verified" on the strength of a stub or a structural argument: if
+a claim is about real-graph / real-runtime behavior, it must run against the real module
+(`core.ts`, not a hand-rolled stand-in) before it is logged as verified. "Structurally
+sound" is a hypothesis; only execution closes it. This is the "verify by running, not
+reading" rule applied to the word *spike* specifically — a near-miss this rule exists to
+prevent was a liveness claim proven against a mock get/set object and nearly logged as
+VERIFIED before the real-`core.ts` run was demanded.
+
+## Three artifact kinds, three fates
+
+- **Design doc** (reusable analysis, deferred-work ledger, worked forms) → lives in
+  `docs/design/`; referenced by the decision-log entry. Kept because a future session
+  re-reads it to make a decision or to pick up deferred work.
+- **Decision-log entry** → records the *event/finding* only (what was decided/verified and
+  why), not the reusable analysis. Append-only.
+- **Session instruction** (a brief handed to another session) → scaffolding. Once its
+  output is folded into a design doc or the log, **discard it** — do not file it in
+  `docs/design/`. Filing spent instructions clutters the durable-reference directory.
+
+When unsure which an artifact is, ask: *would a future session re-read this to make a
+decision?* → design doc. *Is it the record that a decision happened?* → log. *Was it a
+one-shot hand-off whose output is now captured elsewhere?* → discard.
+
 ## Decision-log workflow
 
 When work reaches a decision (locks something, opens a question, supersedes a prior
