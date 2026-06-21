@@ -1126,6 +1126,23 @@ describe('nv-parser — component element detection', () => {
     expect(preprocessed).not.toMatch(/const \{ count \} = props/)
   })
 
+  it('TC-C05-parser: alias prop destructure { count: c } = props → erases alias to source key accessor', () => {
+    const nvSource = [
+      'const Child = $component((props) => {',
+      '  $script(() => {',
+      '    const { count: c } = props',
+      '    const doubled = derived(() => c * 2)',
+      '  })',
+      '  $render(() => html`<span>${doubled}</span>`)',
+      '})',
+    ].join('\n')
+    const preprocessed = preprocessMutationWrites(nvSource, 'test.nv')
+    // Alias 'c' should be erased to 'props.count()' (source key drives the accessor)
+    expect(preprocessed).toContain('props.count()')
+    // The raw alias name 'c' should not appear as a bare accessor call
+    expect(preprocessed).not.toContain('c()')
+  })
+
   it('TC-C07-parser: child assigns to prop → diagnostic with "read-only" message', () => {
     const nvSource = [
       'const Counter = $component((props) => {',
