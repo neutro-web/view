@@ -86,6 +86,7 @@ export interface NvDiagnostic {
 export type ThunkSource =
   | { kind: 'text' | 'attr' | 'prop'; exprSrc: string }
   | { kind: 'event'; handlerSrc: string }
+  | { kind: 'slot-outlet'; name: string }
   | {
       kind: 'conditional'
       conditionSrc: string
@@ -1658,6 +1659,15 @@ function computeThunkSource(
   propsAccessors?: ReadonlyMap<string, string>,
 ): ThunkSource {
   if (pos.kind === 'text') {
+    // Slot outlet: expression is `slots.name` property access.
+    if (
+      ts.isPropertyAccessExpression(holeExpr) &&
+      ts.isIdentifier(holeExpr.expression) &&
+      holeExpr.expression.text === 'slots' &&
+      ts.isIdentifier(holeExpr.name)
+    ) {
+      return { kind: 'slot-outlet' as const, name: (holeExpr.name as ts.Identifier).text }
+    }
     // May be a ConditionalBinding (ternary with html`` branches)
     if (ts.isConditionalExpression(holeExpr)) {
       const { condition, whenTrue, whenFalse } = holeExpr
