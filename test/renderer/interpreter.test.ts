@@ -35,6 +35,7 @@ import { createHtmlTag } from '../../src/renderer/html-tag.js'
 import { mount } from '../../src/renderer/interpreter.js'
 import type {
   ChildBinding,
+  ComponentBinding,
   ConditionalBinding,
   EventBinding,
   ListBinding,
@@ -1736,5 +1737,221 @@ test('TC-MR-03b  emitted-mount: multi-root list item throws the SAME error messa
   ).toBe(true)
 
   dispose()
+  rmParent(parent)
+})
+
+// ── TC-C01: wireComponent — reactive prop ─────────────────────────────────────
+
+test('TC-C01  wireComponent: reactive prop — child updates when parent signal changes', () => {
+  const n = signal(0)
+  const parent = mkParent()
+
+  const CounterFactory = (props: { count: () => number }, _slots: unknown): TemplateIR => ({
+    id: 'counter',
+    shape: { html: '<span><!--nv-0--></span>', bindingPaths: [[0, 0]] },
+    bindings: [{ kind: 'text', pathIndex: 0, expr: () => String(props.count()) }],
+  })
+
+  const parentIR: TemplateIR = {
+    id: 'parent',
+    shape: { html: '<div><!--nv-comp-0--></div>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'component',
+        pathIndex: 0,
+        component: CounterFactory as ComponentBinding['component'],
+        props: [{ name: 'count', expr: () => n() }],
+        propNames: ['count'],
+        slots: [],
+      } satisfies ComponentBinding,
+    ],
+  }
+
+  const dispose = mount(parentIR, parent, document)
+  flushSync()
+
+  expect(parent.querySelector('span')?.textContent).toBe('0')
+  n.set(42)
+  flushSync()
+  expect(parent.querySelector('span')?.textContent).toBe('42')
+  dispose()
+  expect(parent.querySelector('span')).toBeNull()
+  rmParent(parent)
+})
+
+// ── TC-C02: wireComponent — static prop ───────────────────────────────────────
+
+test('TC-C02  wireComponent: static prop — constant accessor', () => {
+  const parent = mkParent()
+
+  const LabelFactory = (props: { label: () => string }, _slots: unknown): TemplateIR => ({
+    id: 'label',
+    shape: { html: '<span><!--nv-0--></span>', bindingPaths: [[0, 0]] },
+    bindings: [{ kind: 'text', pathIndex: 0, expr: () => props.label() }],
+  })
+
+  const parentIR: TemplateIR = {
+    id: 'parent',
+    shape: { html: '<div><!--nv-comp-0--></div>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'component',
+        pathIndex: 0,
+        component: LabelFactory as ComponentBinding['component'],
+        props: [{ name: 'label', expr: () => 'hello' }],
+        propNames: ['label'],
+        slots: [],
+      } satisfies ComponentBinding,
+    ],
+  }
+
+  const dispose = mount(parentIR, parent, document)
+  flushSync()
+  expect(parent.querySelector('span')?.textContent).toBe('hello')
+  dispose()
+  rmParent(parent)
+})
+
+// ── TC-C08: wireComponent — default slot ──────────────────────────────────────
+
+test('TC-C08  wireComponent: default slot content mounts in child slot position', () => {
+  const parent = mkParent()
+
+  const CardFactory = (_props: unknown, slots: { default?: TemplateIR }): TemplateIR => {
+    const slotIR = slots.default
+    return {
+      id: 'card',
+      shape: { html: '<div class="card"><!--nv-comp-0--></div>', bindingPaths: [[0, 0]] },
+      bindings: slotIR
+        ? [
+            {
+              kind: 'component',
+              pathIndex: 0,
+              component: () => slotIR,
+              props: [],
+              propNames: [],
+              slots: [],
+            } satisfies ComponentBinding,
+          ]
+        : [],
+    }
+  }
+
+  const slotContent: TemplateIR = {
+    id: 'slot-content',
+    shape: { html: '<p>hello slot</p>', bindingPaths: [] },
+    bindings: [],
+  }
+
+  const parentIR: TemplateIR = {
+    id: 'parent',
+    shape: { html: '<div><!--nv-comp-0--></div>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'component',
+        pathIndex: 0,
+        component: CardFactory as ComponentBinding['component'],
+        props: [],
+        propNames: [],
+        slots: [{ name: 'default', content: slotContent }],
+      } satisfies ComponentBinding,
+    ],
+  }
+
+  const dispose = mount(parentIR, parent, document)
+  flushSync()
+  expect(parent.querySelector('p')?.textContent).toBe('hello slot')
+  dispose()
+  expect(parent.querySelector('p')).toBeNull()
+  rmParent(parent)
+})
+
+// ── TC-C09: wireComponent — multi-root child ──────────────────────────────────
+
+test('TC-C09  wireComponent: multi-root child — all roots cleaned up on dispose', () => {
+  const parent = mkParent()
+
+  const MultiFactory = (_props: unknown, _slots: unknown): TemplateIR => ({
+    id: 'multi',
+    shape: { html: '<span>a</span><span>b</span>', bindingPaths: [] },
+    bindings: [],
+  })
+
+  const parentIR: TemplateIR = {
+    id: 'parent',
+    shape: { html: '<div><!--nv-comp-0--></div>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'component',
+        pathIndex: 0,
+        component: MultiFactory as ComponentBinding['component'],
+        props: [],
+        propNames: [],
+        slots: [],
+      } satisfies ComponentBinding,
+    ],
+  }
+
+  const dispose = mount(parentIR, parent, document)
+  flushSync()
+  expect(parent.querySelectorAll('span').length).toBe(2)
+  dispose()
+  expect(parent.querySelectorAll('span').length).toBe(0)
+  rmParent(parent)
+})
+
+// ── TC-C10: wireComponent — 1000-flip no-leak ─────────────────────────────────
+
+test('TC-C10  wireComponent: 1000-flip no-leak — component inside conditional', () => {
+  const show = signal(true)
+  const parent = mkParent()
+
+  const CounterFactory = (props: { n: () => number }): TemplateIR => ({
+    id: 'c',
+    shape: { html: '<span><!--nv-0--></span>', bindingPaths: [[0, 0]] },
+    bindings: [{ kind: 'text', pathIndex: 0, expr: () => String(props.n()) }],
+  })
+
+  const compBinding: ComponentBinding = {
+    kind: 'component',
+    pathIndex: 0,
+    component: CounterFactory as unknown as ComponentBinding['component'],
+    props: [{ name: 'n', expr: () => 0 }],
+    propNames: ['n'],
+    slots: [],
+  }
+
+  const compIR: TemplateIR = {
+    id: 'comp-ir',
+    shape: { html: '<div><!--nv-comp-0--></div>', bindingPaths: [[0, 0]] },
+    bindings: [compBinding],
+  }
+
+  const parentIR: TemplateIR = {
+    id: 'parent',
+    shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'conditional',
+        pathIndex: 0,
+        condition: () => Boolean(show()),
+        consequent: compIR,
+        alternate: null,
+      },
+    ],
+  }
+
+  const dispose = mount(parentIR, parent, document)
+  flushSync()
+
+  for (let i = 0; i < 1000; i++) {
+    show.set(i % 2 === 0)
+    flushSync()
+  }
+
+  // After 1000 flips (i=0..999), last iteration i=999: show = (999 % 2 === 0) = false
+  // Conditional is hidden; dispose cleans up the outer mount.
+  dispose()
+  expect(parent.childElementCount).toBe(0)
   rmParent(parent)
 })

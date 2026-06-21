@@ -45,11 +45,13 @@ import type {
   AttrBinding,
   Binding,
   ChildBinding,
+  ComponentBinding,
   ConditionalBinding,
   EventBinding,
   ListBinding,
   NodePath,
   PropBinding,
+  ReactiveExpr,
   TemplateIR,
   TextBinding,
   WritableSignal,
@@ -119,6 +121,10 @@ function wireBinding(binding: Binding, targetNode: Node, doc: Document): void {
     }
     case 'list': {
       wireList(binding, targetNode, doc)
+      break
+    }
+    case 'component': {
+      wireComponent(binding, targetNode, doc)
       break
     }
     case 'sync': {
@@ -415,6 +421,44 @@ function wireConditional(binding: ConditionalBinding, anchorNode: Node, doc: Doc
       }
     })
   })
+}
+
+// ── ComponentBinding ──────────────────────────────────────────────────────────
+
+function wireComponent(binding: ComponentBinding, anchorNode: Node, doc: Document): void {
+  const parent = anchorNode.parentNode
+  if (parent === null) {
+    throw new Error('[nv/interpreter] ComponentBinding: anchor has no parent')
+  }
+
+  // Build PropsObject: name → accessor thunk (already in binding.props)
+  const propsObj: Record<string, ReactiveExpr> = {}
+  for (const p of binding.props) {
+    propsObj[p.name] = p.expr
+  }
+
+  // Build SlotFns: name → TemplateIR
+  const slotsObj: Record<string, TemplateIR> = {}
+  for (const s of binding.slots) {
+    slotsObj[s.name] = s.content
+  }
+
+  // Mount the child factory in its own createRoot scope.
+  // Static component: owned by the current scope (no runWithOwner needed —
+  // same pattern as wireConditional's branch mounting).
+  const childDisposer = createRoot((dispose) => {
+    const childIR = binding.component(propsObj, slotsObj)
+    const { roots } = mountFragment(childIR, parent, doc, anchorNode)
+    onCleanup(() => {
+      for (const n of roots) {
+        if (n.parentNode !== null) n.parentNode.removeChild(n)
+      }
+    })
+    return dispose
+  })
+
+  // Bridge: if the parent region is torn down, dispose the child root.
+  onCleanup(() => childDisposer())
 }
 
 // ── Mount (the public API) ────────────────────────────────────────────────────
