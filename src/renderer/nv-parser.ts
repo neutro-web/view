@@ -1027,8 +1027,10 @@ export function preprocessMutationWrites(
       }
       // Detect props parameter name from $component((props) => ...)
       const propsParamName: string | undefined =
-        fn.parameters.length > 0 && ts.isIdentifier(fn.parameters[0]?.name)
-          ? fn.parameters[0]?.name.text
+        fn.parameters.length > 0 &&
+        fn.parameters[0] !== undefined &&
+        ts.isIdentifier(fn.parameters[0].name)
+          ? fn.parameters[0].name.text
           : undefined
       const symbols = collectScriptSymbols(blocks)
       for (const block of blocks)
