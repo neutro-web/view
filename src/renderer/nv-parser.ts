@@ -593,6 +593,73 @@ function collectBindingNames(
 }
 
 /**
+ * Build a local→accessorExpr map from a destructuring pattern on `props`.
+ *
+ * Input:  BindingName (ObjectBindingPattern) + full propNames array (for rest set-difference).
+ * Output: Map<localName, accessorExprString>
+ *
+ * Examples:
+ *   const { count } = props         → { count: 'props.count()' }
+ *   const { count: c } = props      → { c: 'props.count()' }
+ *   const { count, ...rest } = props → { count: 'props.count()', rest: 'REST:label,title' }
+ *
+ * Nested patterns produce a diagnostic (D1) and are not added to the map.
+ */
+export function buildPropsAccessorMap(
+  pattern: ts.BindingName,
+  propNames: readonly string[],
+  diagnostics: NvDiagnostic[],
+): Map<string, string> {
+  const map = new Map<string, string>()
+  if (!ts.isObjectBindingPattern(pattern)) return map
+
+  const destructuredKeys = new Set<string>()
+
+  for (const element of pattern.elements) {
+    if (!ts.isBindingElement(element)) continue
+
+    // Rest element: ...rest
+    if (element.dotDotDotToken !== undefined) {
+      const localName = ts.isIdentifier(element.name) ? element.name.text : null
+      if (localName !== null) {
+        const remainingKeys = propNames.filter((k) => !destructuredKeys.has(k))
+        // Store a sentinel that the erasure walker recognizes as a rest binding.
+        // Format: 'REST:key1,key2,...'
+        map.set(localName, `REST:${remainingKeys.join(',')}`)
+      }
+      continue
+    }
+
+    // Nested destructure → diagnostic (D1)
+    if (!ts.isIdentifier(element.name)) {
+      diagnostics.push({
+        kind: 'error',
+        message:
+          'Nested prop destructuring is not supported in v1; destructure one level (const { user } = props; user().name).',
+        start: element.getStart(),
+        end: element.getEnd(),
+      })
+      continue
+    }
+
+    // Regular element: { key } or { key: alias }
+    const propKey = element.propertyName
+      ? ts.isIdentifier(element.propertyName)
+        ? element.propertyName.text
+        : null
+      : element.name.text
+    const localName = element.name.text
+
+    if (propKey !== null) {
+      destructuredKeys.add(propKey)
+      map.set(localName, `props.${propKey}()`)
+    }
+  }
+
+  return map
+}
+
+/**
  * Recursively scan a function body for `var` declarations (function-scoped / hoisted),
  * stopping at nested function boundaries. Adds names colliding with reactive to `shadows`.
  * Does NOT stop at block boundaries — `var` anywhere in the function is in scope.

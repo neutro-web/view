@@ -28,7 +28,8 @@
  */
 
 import { JSDOM } from 'jsdom'
-import { expect, test } from 'vitest'
+import * as ts from 'typescript'
+import { describe, expect, it, test } from 'vitest'
 import { flushSync, signal } from '../../src/core/core.js'
 import { structurallyEqual } from '../../src/renderer/comparator.js'
 import { createHtmlTag } from '../../src/renderer/html-tag.js'
@@ -42,7 +43,11 @@ import type {
   TemplateIR,
   TextBinding,
 } from '../../src/renderer/ir.js'
-import { parseNvFile, preprocessMutationWrites } from '../../src/renderer/nv-parser.js'
+import {
+  buildPropsAccessorMap,
+  parseNvFile,
+  preprocessMutationWrites,
+} from '../../src/renderer/nv-parser.js'
 import type { NvDiagnostic } from '../../src/renderer/nv-parser.js'
 
 // ── jsdom + html tag setup ────────────────────────────────────────────────────
@@ -1002,4 +1007,84 @@ const Label = $component(() => {
   const pEl = labelShape.querySelector('p')
   expect(spanEl !== null, 'Counter IR has span').toBe(true)
   expect(pEl !== null, 'Label IR has p').toBe(true)
+})
+
+// ── buildPropsAccessorMap unit tests ─────────────────────────────────────────
+
+/**
+ * Parse a destructuring source like `const { count, label: l } = props` and
+ * return the BindingName of the first variable declaration.
+ */
+function parseBindingPattern(src: string): ts.BindingName {
+  const sf = ts.createSourceFile('tmp.ts', src, ts.ScriptTarget.Latest, true)
+  const stmt = sf.statements[0]
+  if (!ts.isVariableStatement(stmt!)) throw new Error('Expected variable statement')
+  const decl = stmt.declarationList.declarations[0]
+  if (!decl) throw new Error('No declaration')
+  return decl.name
+}
+
+describe('buildPropsAccessorMap', () => {
+  it('TC-A2-01: plain element maps local name to props.key()', () => {
+    const pattern = parseBindingPattern('const { count } = props')
+    const diags: NvDiagnostic[] = []
+    const map = buildPropsAccessorMap(pattern, ['count', 'label'], diags)
+    expect(diags).toHaveLength(0)
+    expect(map.get('count')).toBe('props.count()')
+    expect(map.size).toBe(1)
+  })
+
+  it('TC-A2-02: aliased element maps local alias to source key accessor', () => {
+    const pattern = parseBindingPattern('const { count: c, label: l } = props')
+    const diags: NvDiagnostic[] = []
+    const map = buildPropsAccessorMap(pattern, ['count', 'label'], diags)
+    expect(diags).toHaveLength(0)
+    expect(map.get('c')).toBe('props.count()')
+    expect(map.get('l')).toBe('props.label()')
+    expect(map.has('count')).toBe(false)
+    expect(map.has('label')).toBe(false)
+  })
+
+  it('TC-A2-03: rest element gets sentinel with remaining keys', () => {
+    const pattern = parseBindingPattern('const { count, ...rest } = props')
+    const diags: NvDiagnostic[] = []
+    const map = buildPropsAccessorMap(pattern, ['count', 'label', 'title'], diags)
+    expect(diags).toHaveLength(0)
+    expect(map.get('count')).toBe('props.count()')
+    expect(map.get('rest')).toBe('REST:label,title')
+  })
+
+  it('TC-A2-04: rest with no remaining keys produces empty REST sentinel', () => {
+    const pattern = parseBindingPattern('const { count, ...rest } = props')
+    const diags: NvDiagnostic[] = []
+    const map = buildPropsAccessorMap(pattern, ['count'], diags)
+    expect(map.get('rest')).toBe('REST:')
+  })
+
+  it('TC-A2-05: nested destructure emits D1 diagnostic and is skipped', () => {
+    const pattern = parseBindingPattern('const { user: { name } } = props')
+    const diags: NvDiagnostic[] = []
+    const map = buildPropsAccessorMap(pattern, ['user'], diags)
+    expect(diags).toHaveLength(1)
+    expect(diags[0]!.kind).toBe('error')
+    expect(diags[0]!.message).toContain('Nested prop destructuring')
+    expect(map.size).toBe(0)
+  })
+
+  it('TC-A2-06: non-object pattern returns empty map', () => {
+    const pattern = parseBindingPattern('const count = props')
+    const diags: NvDiagnostic[] = []
+    const map = buildPropsAccessorMap(pattern, ['count'], diags)
+    expect(map.size).toBe(0)
+    expect(diags).toHaveLength(0)
+  })
+
+  it('TC-A2-07: mixed plain and alias elements', () => {
+    const pattern = parseBindingPattern('const { count, label: l } = props')
+    const diags: NvDiagnostic[] = []
+    const map = buildPropsAccessorMap(pattern, ['count', 'label'], diags)
+    expect(map.get('count')).toBe('props.count()')
+    expect(map.get('l')).toBe('props.label()')
+    expect(map.size).toBe(2)
+  })
 })
