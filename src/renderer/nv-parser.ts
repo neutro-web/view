@@ -1942,6 +1942,12 @@ export function parseNvFileForEmit(
           const bodyHoleExprs: ts.Expression[] = ts.isNoSubstitutionTemplateLiteral(body.template)
             ? []
             : body.template.templateSpans.map((s) => s.expression)
+          const bodyStrings: string[] = ts.isNoSubstitutionTemplateLiteral(body.template)
+            ? [body.template.text]
+            : [body.template.head.text, ...body.template.templateSpans.map((s) => s.literal.text)]
+          const bodyPositions: PosKind[] = bodyHoleExprs.map((_, i) =>
+            classifyPosition(bodyStrings[i] ?? '', bodyStrings[i + 1] ?? ''),
+          )
           const componentThunks: ThunkSource[] = pendingComponents.map((pc) => ({
             kind: 'component' as const,
             componentSrc: pc.tagName,
@@ -1954,7 +1960,25 @@ export function parseNvFileForEmit(
               ),
             })),
             propNames: pc.propNames,
-            slots: [],
+            slots: pc.slots.map((slot, slotIdx) => {
+              const holeIndices = pc.slotHoleGroups[slotIdx] ?? []
+              const thunks: ThunkSource[] = holeIndices.map((holeIdx) => {
+                const holeExpr = bodyHoleExprs[holeIdx]
+                if (holeExpr === undefined) {
+                  throw new Error(`[nv/emitter] Slot hole index ${holeIdx} out of range`)
+                }
+                return computeThunkSource(
+                  holeExpr,
+                  bodyPositions[holeIdx] as PosKind,
+                  doc,
+                  symbols,
+                  emitDiagnostics,
+                  emitPropsParamName,
+                  emitPropsAccessors,
+                )
+              })
+              return { name: slot.name, holeIndices: [...holeIndices], thunks }
+            }),
           }))
           const holeThunks = computeThunksForTemplate(
             body,

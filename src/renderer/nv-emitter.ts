@@ -24,6 +24,7 @@ import type {
   ConditionalBinding,
   EventBinding,
   PropBinding,
+  SlotOutletBinding,
   TemplateIR,
 } from './ir.js'
 import type { NvComponentResult, ThunkSource } from './nv-parser.js'
@@ -144,9 +145,7 @@ function emitBindingLiteral(
       ].join('\n')
     }
     case 'slot-outlet':
-      throw new Error(
-        `[nv/emitter] v0: '${binding.kind}' binding is designed but not yet implemented. Deferred per IR §9.2.`,
-      )
+      return `{ kind: 'slot-outlet', ${pathEntry}, name: ${JSON.stringify((binding as SlotOutletBinding).name)} }`
     default:
       throw new Error(
         `[nv/emitter] Unsupported binding kind for emit: ${(binding as Binding).kind}`,
