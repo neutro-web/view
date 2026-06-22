@@ -38,6 +38,7 @@ import type {
   ComponentBinding,
   NodePath,
   ReactiveExpr,
+  SlotContent,
   SlotOutletBinding,
   TemplateIR,
 } from '../renderer/ir.js'
@@ -130,7 +131,7 @@ function emitSetup(
   ir: TemplateIR,
   verdicts: ReadonlyMap<number, BindingErasureVerdict>,
   slotContext?: {
-    slotsObj: Record<string, TemplateIR>
+    slotsObj: Record<string, SlotContent>
     capturedParentOwner: ReturnType<typeof getOwner>
   },
 ): { setup: SetupFn; diagnostics: string[] } {
@@ -473,10 +474,10 @@ function emitSetup(
               propsObj[p.name] = p.expr
             }
 
-            // Build slotsObj: pass slot TemplateIRs through to the factory.
-            const slotsObj: Record<string, TemplateIR> = {}
+            // Build slotsObj: pass slot factories through to the factory.
+            const slotsObj: Record<string, SlotContent> = {}
             for (const s of slotEntries) {
-              slotsObj[s.name] = s.content
+              slotsObj[s.name] = s.content // s.content is now SlotContent
             }
 
             // Capture parent owner BEFORE child's createRoot (D-slot-1).
@@ -508,20 +509,22 @@ function emitSetup(
         wireSpecs.push({
           accessor,
           wire(anchorNode, doc) {
-            const slotIR = slotContext?.slotsObj[slotName]
+            const content = slotContext?.slotsObj[slotName] // SlotContent | undefined
 
             const parent = anchorNode.parentNode
             if (parent === null)
               throw new Error('[nv/emit] SlotOutletBinding: anchor has no parent')
 
-            if (slotIR === undefined) {
-              // Unfilled slot: render fallback if authored, else nothing.
-              // D-slot-1 retained: fallback rendered at outlet scope under the
-              // captured parent owner (same ownership pattern as the filled case).
+            if (content === undefined) {
+              // Unfilled slot: render fallback. D-slot-1 unchanged.
               const fallbackIR = (binding as SlotOutletBinding).fallback
               if (fallbackIR === undefined) return
-              const fallbackOwner = slotContext?.capturedParentOwner ?? getOwner()
-              runWithOwner(fallbackOwner, () => {
+              // Carry-item convergence: slotContext is always defined when slot-outlet is reached
+              // (slot-outlet is only wired inside the component case which sets slotContext).
+              // Use slotContext! — the ?? arm was dead.
+              // biome-ignore lint/style/noNonNullAssertion: slotContext is always defined when slot-outlet is reached (only wired inside the component case which sets slotContext)
+              const owner = slotContext!.capturedParentOwner
+              runWithOwner(owner, () => {
                 const fallbackDisposer = createRoot((dispose) => {
                   const emptyVerdicts = new Map<number, BindingErasureVerdict>()
                   const { setup: fbSetup } = emitSetup(fallbackIR, emptyVerdicts)
@@ -538,9 +541,17 @@ function emitSetup(
               return
             }
 
-            // slotIR !== undefined implies slotContext is defined.
-            const filledOwner = slotContext?.capturedParentOwner ?? null
-            runWithOwner(filledOwner, () => {
+            // Build slotProps from binding.props
+            const slotProps: Record<string, ReactiveExpr> = {}
+            for (const p of (binding as SlotOutletBinding).props ?? []) {
+              slotProps[p.name] = p.expr
+            }
+            const slotIR = content(slotProps)
+
+            // Mount under same D-slot-1 owner — UNCHANGED
+            // biome-ignore lint/style/noNonNullAssertion: slotContext is always defined when slot-outlet is reached (only wired inside the component case which sets slotContext)
+            const owner = slotContext!.capturedParentOwner
+            runWithOwner(owner, () => {
               const slotDisposer = createRoot((dispose) => {
                 const emptyVerdicts = new Map<number, BindingErasureVerdict>()
                 const { setup: slotSetup } = emitSetup(slotIR, emptyVerdicts)

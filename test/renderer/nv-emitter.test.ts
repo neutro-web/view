@@ -773,7 +773,7 @@ describe('ComponentBinding literal emission', () => {
       component: (() => slotIr) as unknown as ComponentRef,
       props: [{ name: 'label', expr: (() => 'hello') as unknown as ReactiveExpr }],
       propNames: ['label'],
-      slots: [{ name: 'default', content: slotIr }],
+      slots: [{ name: 'default', content: () => slotIr }],
     }
     const ir: TemplateIR = {
       id: 'nv:test001',

@@ -1817,8 +1817,11 @@ test('TC-C02  wireComponent: static prop — constant accessor', () => {
 test('TC-C08  wireComponent: default slot content mounts in child slot position', () => {
   const parent = mkParent()
 
-  const CardFactory = (_props: unknown, slots: { default?: TemplateIR }): TemplateIR => {
-    const slotIR = slots.default
+  const CardFactory = (
+    _props: unknown,
+    slots: { default?: (p: Record<string, unknown>) => TemplateIR },
+  ): TemplateIR => {
+    const slotIR = slots.default?.({})
     return {
       id: 'card',
       shape: { html: '<div class="card"><!--nv-comp-0--></div>', bindingPaths: [[0, 0]] },
@@ -1853,7 +1856,7 @@ test('TC-C08  wireComponent: default slot content mounts in child slot position'
         component: CardFactory as ComponentBinding['component'],
         props: [],
         propNames: [],
-        slots: [{ name: 'default', content: slotContent }],
+        slots: [{ name: 'default', content: () => slotContent }],
       } satisfies ComponentBinding,
     ],
   }

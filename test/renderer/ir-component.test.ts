@@ -16,7 +16,7 @@ describe('ComponentBinding types', () => {
       slots: [
         {
           name: 'default',
-          content: { id: 's', shape: { html: '', bindingPaths: [] }, bindings: [] },
+          content: () => ({ id: 's', shape: { html: '', bindingPaths: [] }, bindings: [] }),
         },
       ] satisfies SlotEntry[],
     }

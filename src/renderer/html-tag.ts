@@ -37,6 +37,7 @@ import type {
   PropBinding,
   PropEntry,
   ReactiveExpr,
+  SlotContent,
   SlotEntry,
   SlotOutletBinding,
   TemplateIR,
@@ -310,7 +311,8 @@ function walkNodeList(nodes: Node[], exprs: unknown[], root: Node, doc: Document
               doc,
               `slot:${tagName}:default`,
             )
-            slots.push({ name: 'default', content: defaultIR })
+            const defaultContent: SlotContent = (_props) => defaultIR
+            slots.push({ name: 'default', content: defaultContent })
             for (const idx of holeIndices) consumed.add(idx)
           }
 
@@ -321,7 +323,8 @@ function walkNodeList(nodes: Node[], exprs: unknown[], root: Node, doc: Document
               doc,
               `slot:${tagName}:${slotName}`,
             )
-            slots.push({ name: slotName, content: namedIR })
+            const namedContent: SlotContent = (_props) => namedIR
+            slots.push({ name: slotName, content: namedContent })
             for (const idx of holeIndices) consumed.add(idx)
           }
         }

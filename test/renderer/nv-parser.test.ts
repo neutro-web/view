@@ -1232,7 +1232,7 @@ describe('TC-slot-warning: slot content in component element', () => {
     expect(compBinding).toBeDefined()
     expect(compBinding!.slots).toHaveLength(1)
     expect(compBinding!.slots[0]!.name).toBe('default')
-    expect(compBinding!.slots[0]!.content.shape.html).toContain('<p>hello</p>')
+    expect(compBinding!.slots[0]!.content({}).shape.html).toContain('<p>hello</p>')
   })
 
   it('dynamic slot content is captured as default slot with hole tracking', () => {
@@ -1289,7 +1289,7 @@ describe('TC-slot-warning: slot content in component element', () => {
     expect(compBinding).toBeDefined()
     expect(compBinding!.slots).toHaveLength(1)
     expect(compBinding!.slots[0]!.name).toBe('default')
-    expect(compBinding!.slots[0]!.content.shape.html).toContain('<p>hello</p>')
+    expect(compBinding!.slots[0]!.content({}).shape.html).toContain('<p>hello</p>')
   })
 
   it('Bug #2: shape.html replaces <Counter/> with anchor comment, not element tag', () => {

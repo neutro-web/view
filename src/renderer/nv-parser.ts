@@ -60,6 +60,7 @@ import type {
   PropBinding,
   PropEntry,
   ReactiveExpr,
+  SlotContent,
   SlotEntry,
   SlotOutletBinding,
   TemplateIR,
@@ -424,7 +425,8 @@ function walkNvNodeList(
               `slot:${tagName}:default`,
               signals,
             )
-            slots.push({ name: 'default', content: defaultIR })
+            const defaultContent: SlotContent = (_props) => defaultIR
+            slots.push({ name: 'default', content: defaultContent })
             slotHoleGroups.push(holeIndices)
             for (const idx of holeIndices) consumed.add(idx)
           }
@@ -437,7 +439,8 @@ function walkNvNodeList(
               `slot:${tagName}:${slotName}`,
               signals,
             )
-            slots.push({ name: slotName, content: namedIR })
+            const namedContent: SlotContent = (_props) => namedIR
+            slots.push({ name: slotName, content: namedContent })
             slotHoleGroups.push(holeIndices)
             for (const idx of holeIndices) consumed.add(idx)
           }

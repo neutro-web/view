@@ -1338,8 +1338,11 @@ test('TC-C03 emitted-mount: multi-prop — each updates independently', () => {
 test('TC-C08 emitted-mount: default slot content mounts in child slot position', () => {
   const { document } = new JSDOM('<!DOCTYPE html><body></body>').window
 
-  const CardFactory = (_props: unknown, slots: { default?: TemplateIR }): TemplateIR => {
-    const slotIR = slots.default
+  const CardFactory = (
+    _props: unknown,
+    slots: { default?: (p: Record<string, unknown>) => TemplateIR },
+  ): TemplateIR => {
+    const slotIR = slots.default?.({})
     return {
       id: 'card',
       shape: { html: '<div class="card"><!--nv-comp-0--></div>', bindingPaths: [[0, 0]] },
@@ -1374,7 +1377,7 @@ test('TC-C08 emitted-mount: default slot content mounts in child slot position',
         component: CardFactory as unknown as ComponentBinding['component'],
         props: [],
         propNames: [],
-        slots: [{ name: 'default', content: slotContent }],
+        slots: [{ name: 'default', content: () => slotContent }],
       } satisfies ComponentBinding,
     ],
   }

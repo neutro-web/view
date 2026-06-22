@@ -113,7 +113,10 @@ function emitBindingLiteral(
       const slotLiterals = cb.slots
         .map((s, idx) => {
           const slotThunks = thunk.slots[idx]?.thunks ?? []
-          return `{ name: ${JSON.stringify(s.name)}, content: ${emitIrLiteral(s.content, slotThunks, i2)} }`
+          // s.content is SlotContent (factory); call with empty props to get the raw IR for emission.
+          // The emitted literal wraps it back as a factory: (_props) => <ir literal>.
+          const slotIR = s.content({})
+          return `{ name: ${JSON.stringify(s.name)}, content: (_props) => ${emitIrLiteral(slotIR, slotThunks, i2)} }`
         })
         .join(', ')
       return [

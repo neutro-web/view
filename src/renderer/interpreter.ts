@@ -52,6 +52,7 @@ import type {
   NodePath,
   PropBinding,
   ReactiveExpr,
+  SlotContent,
   SlotOutletBinding,
   SyncBinding,
   TemplateIR,
@@ -99,7 +100,7 @@ function wireBinding(
   binding: Binding,
   targetNode: Node,
   doc: Document,
-  slotsObj?: Record<string, TemplateIR>,
+  slotsObj?: Record<string, SlotContent>,
   capturedParentOwner?: ReturnType<typeof getOwner>,
 ): void {
   switch (binding.kind) {
@@ -444,20 +445,18 @@ function wireSlotOutlet(
   binding: SlotOutletBinding,
   anchorNode: Node,
   doc: Document,
-  slotsObj: Record<string, TemplateIR>,
+  slotsObj: Record<string, SlotContent>,
   capturedParentOwner: ReturnType<typeof getOwner>,
 ): void {
-  const slotIR = slotsObj[binding.name]
+  const content = slotsObj[binding.name] // SlotContent | undefined
 
   const parent = anchorNode.parentNode
   if (parent === null) {
     throw new Error('[nv/interpreter] SlotOutletBinding: anchor has no parent')
   }
 
-  if (slotIR === undefined) {
-    // Unfilled slot: render fallback if authored, else nothing.
-    // D-slot-1 retained for increment 1: fallback is child-authored, rendered at
-    // outlet scope under the same captured parent owner as the filled case.
+  if (content === undefined) {
+    // Unfilled slot: render fallback. D-slot-1 unchanged.
     const fallbackIR = binding.fallback
     if (fallbackIR !== undefined) {
       runWithOwner(capturedParentOwner, () => {
@@ -476,8 +475,14 @@ function wireSlotOutlet(
     return
   }
 
-  // Render slot content under the parent's owner so reactive reads are owned by the parent,
-  // not the child. D-slot-1: parent-lexical ownership.
+  // Build slotProps from binding.props (empty object when props absent)
+  const slotProps: Record<string, ReactiveExpr> = {}
+  for (const p of binding.props ?? []) {
+    slotProps[p.name] = p.expr
+  }
+  const slotIR = content(slotProps)
+
+  // Mount slotIR under capturedParentOwner — D-slot-1 path UNCHANGED
   runWithOwner(capturedParentOwner, () => {
     const slotDisposer = createRoot((dispose) => {
       const { roots } = mountFragment(slotIR, parent, doc, anchorNode)
@@ -488,7 +493,6 @@ function wireSlotOutlet(
       })
       return dispose
     })
-    // Bridge: child teardown disposes slot root (removes slot DOM).
     onCleanup(() => slotDisposer())
   })
 }
@@ -507,10 +511,10 @@ function wireComponent(binding: ComponentBinding, anchorNode: Node, doc: Documen
     propsObj[p.name] = p.expr
   }
 
-  // Build SlotFns: name → TemplateIR
-  const slotsObj: Record<string, TemplateIR> = {}
+  // Build SlotFns: name → SlotContent (factory)
+  const slotsObj: Record<string, SlotContent> = {}
   for (const s of binding.slots) {
-    slotsObj[s.name] = s.content
+    slotsObj[s.name] = s.content // s.content is now SlotContent (factory)
   }
 
   // Capture parent owner BEFORE the child's createRoot (D-slot-1).
@@ -553,7 +557,7 @@ function mountFragment(
   doc: Document,
   before: Node | null = null,
   slotContext?: {
-    slotsObj: Record<string, TemplateIR>
+    slotsObj: Record<string, SlotContent>
     capturedParentOwner: ReturnType<typeof getOwner>
   },
 ): { roots: Node[] } {
