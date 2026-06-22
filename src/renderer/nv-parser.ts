@@ -219,7 +219,7 @@ type NvSlotHoleInfo =
 
 /**
  * Shared per-hole binding constructor for the .nv front-end.
- * Used by BOTH processHtmlTemplate and buildNvSlotSubIR so the two cannot diverge.
+ * Used by BOTH the top-level and slot-content walks so the two cannot diverge.
  */
 function buildNvHoleBinding(
   info: NvSlotHoleInfo,
@@ -288,20 +288,191 @@ function buildNvHoleBinding(
   }
 }
 
-// ── Slot sub-IR builder (nv-parser context) ───────────────────────────────────
+// ── Shared node-list walk (GATE-2 collapse, nv-parser) ─────────────────────────
+
+/** A component element discovered during the walk (anchor path + captured slots). */
+interface NvWalkedComponent {
+  anchorPath: NodePath
+  tagName: string
+  propEntries: PropEntry[]
+  propNames: string[]
+  reactiveHoles: Array<{ name: string; holeIndex: number }>
+  slots: SlotEntry[]
+  slotHoleGroups: number[][]
+}
+
+interface NvWalkResult {
+  holeInfos: NvSlotHoleInfo[]
+  holePaths: NodePath[]
+  components: NvWalkedComponent[]
+  consumed: Set<number>
+}
 
 /**
- * Build a TemplateIR from sentinel-DOM nodes (slot content in nv-parser context).
- * slotNodes: child nodes of the slot group (already in sentinel DOM form with <!--nv-i--> markers).
- * holeExprs: original hole expression array (length = total holes in parent template).
- * doc: Document for DOM operations.
- * slotId: stable ID for the sub-IR.
- * signals: signal names in scope (for slot-outlet / conditional detection).
- *
- * Returns the sub-IR (with stubExpr for all bindings — real exprs injected at mount time
- * via the emit path) and the found hole indices (to mark consumed in parent).
+ * Walk a list of DOM nodes for sentinels (relative to `root`). Detects text holes,
+ * attr/prop/event sentinels, AND component elements (capturing props + slot content
+ * recursively via the same walk). This is the single walk shared by the top-level
+ * template and slot content — the GATE-2 collapse (component-as-slot-child for free).
  */
-function buildNvSlotSubIR(
+function walkNvNodeList(
+  nodes: Node[],
+  holeExprs: ts.Expression[],
+  doc: Document,
+  root: Node,
+  signals: ReadonlySet<string>,
+): NvWalkResult {
+  const stubExpr = (() => undefined) as ReactiveExpr<unknown>
+  const holeInfos: NvSlotHoleInfo[] = []
+  const holePaths: NodePath[] = []
+  const components: NvWalkedComponent[] = []
+  const consumed = new Set<number>()
+
+  function walk(node: Node): void {
+    if (node.nodeType === 8) {
+      const m = (node as Comment).data.match(/^nv-(\d+)$/)
+      if (m !== null) {
+        const idx = Number.parseInt(m[1] as string, 10)
+        holeInfos.push({ kind: 'text', origIdx: idx })
+        holePaths.push(computePath(node, root))
+      }
+    } else if (node.nodeType === 1) {
+      const el = node as Element
+
+      // Component element detection via data-nv-component sentinel.
+      const compName = el.getAttribute('data-nv-component')
+      if (compName !== null) {
+        el.removeAttribute('data-nv-component')
+        const tagName = compName
+        const propEntries: PropEntry[] = []
+        const propNames: string[] = []
+        const reactiveHoles: Array<{ name: string; holeIndex: number }> = []
+
+        for (let k = 0; k < holeExprs.length; k++) {
+          for (const atype of ['attr', 'prop', 'event'] as const) {
+            const v = el.getAttribute(`data-nv-${atype}-${k}`)
+            if (v !== null) {
+              el.removeAttribute(`data-nv-${atype}-${k}`)
+              propEntries.push({ name: v, expr: stubExpr })
+              propNames.push(v)
+              reactiveHoles.push({ name: v, holeIndex: k })
+              consumed.add(k)
+            }
+          }
+        }
+
+        // Gather static (plain) attributes on the component element.
+        const staticAttrs = Array.from(el.attributes)
+        for (const attr of staticAttrs) {
+          const val = attr.value
+          propEntries.push({ name: attr.name, expr: () => val })
+          if (!propNames.includes(attr.name)) propNames.push(attr.name)
+        }
+
+        // Capture slot content via the SAME walk (component-as-slot-child).
+        const slots: SlotEntry[] = []
+        const slotHoleGroups: number[][] = []
+        if (el.childNodes.length > 0) {
+          const defaultNodes: Node[] = []
+          const namedGroups = new Map<string, Node[]>()
+
+          for (const child of Array.from(el.childNodes)) {
+            if (
+              child.nodeType === 1 &&
+              (child as Element).tagName.toLowerCase() === 'slot' &&
+              (child as Element).hasAttribute('name')
+            ) {
+              const slotName = (child as Element).getAttribute('name') as string
+              namedGroups.set(slotName, Array.from((child as Element).childNodes))
+            } else {
+              defaultNodes.push(child)
+            }
+          }
+
+          const hasDefaultContent = defaultNodes.some(
+            (n) => n.nodeType !== 3 || (n as Text).data.trim() !== '',
+          )
+          if (hasDefaultContent || defaultNodes.some((n) => n.nodeType === 8)) {
+            const { ir: defaultIR, holeIndices } = buildNvSlotContentIR(
+              defaultNodes,
+              holeExprs,
+              doc,
+              `slot:${tagName}:default`,
+              signals,
+            )
+            slots.push({ name: 'default', content: defaultIR })
+            slotHoleGroups.push(holeIndices)
+            for (const idx of holeIndices) consumed.add(idx)
+          }
+
+          for (const [slotName, slotChildNodes] of namedGroups) {
+            const { ir: namedIR, holeIndices } = buildNvSlotContentIR(
+              slotChildNodes,
+              holeExprs,
+              doc,
+              `slot:${tagName}:${slotName}`,
+              signals,
+            )
+            slots.push({ name: slotName, content: namedIR })
+            slotHoleGroups.push(holeIndices)
+            for (const idx of holeIndices) consumed.add(idx)
+          }
+        }
+
+        const compIndex = components.length
+        const anchor = doc.createComment(`nv-comp-${compIndex}`)
+        el.parentNode?.replaceChild(anchor, el)
+        const anchorPath = computePath(anchor, root)
+        components.push({
+          anchorPath,
+          tagName,
+          propEntries,
+          propNames,
+          reactiveHoles,
+          slots,
+          slotHoleGroups,
+        })
+        return // don't recurse into component children
+      }
+
+      for (let k = 0; k < holeExprs.length; k++) {
+        for (const atype of ['attr', 'prop', 'event'] as const) {
+          const v = el.getAttribute(`data-nv-${atype}-${k}`)
+          if (v !== null) {
+            holeInfos.push(
+              atype === 'attr'
+                ? { kind: 'attr', origIdx: k, name: v }
+                : atype === 'prop'
+                  ? { kind: 'prop', origIdx: k, name: v }
+                  : { kind: 'event', origIdx: k, name: v },
+            )
+            holePaths.push(computePath(el, root))
+            el.removeAttribute(`data-nv-${atype}-${k}`)
+          }
+        }
+      }
+    }
+    let child = node.firstChild
+    while (child !== null) {
+      walk(child)
+      child = child.nextSibling
+    }
+  }
+
+  for (const n of nodes) walk(n)
+  return { holeInfos, holePaths, components, consumed }
+}
+
+// ── Slot content IR builder (collapse: uses walkNvNodeList) ────────────────────
+
+/**
+ * Build a TemplateIR from sentinel-DOM nodes (slot content), via the SAME
+ * walkNvNodeList used for the top-level template. Component elements in slot
+ * content produce ComponentBindings (component-as-slot-child).
+ *
+ * pathIndex within the sub-IR is COMPACT (0-based, encounter order); hole bindings
+ * first, component bindings appended. Returns the GLOBAL hole indices consumed.
+ */
+function buildNvSlotContentIR(
   slotNodes: Node[],
   holeExprs: ts.Expression[],
   doc: Document,
@@ -322,46 +493,21 @@ function buildNvSlotSubIR(
   for (const n of slotNodes) {
     fragWrapper.appendChild(n.cloneNode(true))
   }
-  const fragRoot = fragWrapper
 
-  // Track kind + origIdx per hole (fixes B1/B3: sub-builder now kind-correct).
-  const holeInfos: NvSlotHoleInfo[] = []
-  const slotPaths: NodePath[] = []
-  ;(function walk(node: Node): void {
-    if (node.nodeType === 8) {
-      const m = (node as Comment).data.match(/^nv-(\d+)$/)
-      if (m !== null) {
-        const idx = Number.parseInt(m[1] as string, 10)
-        holeInfos.push({ kind: 'text', origIdx: idx })
-        slotPaths.push(computePath(node, fragRoot))
-      }
-    } else if (node.nodeType === 1) {
-      const el = node as Element
-      for (let k = 0; k < holeExprs.length; k++) {
-        for (const atype of ['attr', 'prop', 'event'] as const) {
-          const name = el.getAttribute(`data-nv-${atype}-${k}`)
-          if (name !== null) {
-            holeInfos.push({ kind: atype, origIdx: k, name })
-            slotPaths.push(computePath(el, fragRoot))
-            el.removeAttribute(`data-nv-${atype}-${k}`)
-          }
-        }
-      }
-    }
-    let child = node.firstChild
-    while (child !== null) {
-      walk(child)
-      child = child.nextSibling
-    }
-  })(fragRoot)
+  const { holeInfos, holePaths, components, consumed } = walkNvNodeList(
+    Array.from(fragWrapper.childNodes),
+    holeExprs,
+    doc,
+    fragWrapper,
+    signals,
+  )
 
   const rawHtml = fragWrapper.innerHTML.replace(
     /\s+data-nv-(?:attr|prop|event|component)-\d+="[^"]*"/g,
     '',
   )
 
-  // Build compact bindings via shared constructor (fixes B1: was always TextBinding).
-  const holeIndices = holeInfos.map((h) => h.origIdx)
+  const allPaths: NodePath[] = [...holePaths]
   const bindings: Binding[] = holeInfos.map((info, compactIdx) =>
     buildNvHoleBinding(
       info,
@@ -373,15 +519,43 @@ function buildNvSlotSubIR(
       stubHandler,
     ),
   )
+  for (const c of components) {
+    const pathIndex = allPaths.length
+    allPaths.push(c.anchorPath)
+    bindings.push(makeUnresolvedNvComponentBinding(pathIndex, c))
+  }
+
+  const holeIndices = [...holeInfos.map((h) => h.origIdx), ...consumed].filter(
+    (v, i, a) => a.indexOf(v) === i,
+  )
 
   return {
     ir: {
       id: slotId,
-      shape: { html: rawHtml, bindingPaths: slotPaths },
+      shape: { html: rawHtml, bindingPaths: allPaths },
       bindings,
       meta: { frontEnd: 'nv-file' },
     },
     holeIndices,
+  }
+}
+
+/** Build a ComponentBinding whose factory throws if invoked (resolve via emit path). */
+function makeUnresolvedNvComponentBinding(
+  pathIndex: number,
+  c: NvWalkedComponent,
+): ComponentBinding {
+  return {
+    kind: 'component',
+    pathIndex,
+    component: (_props, _slots) => {
+      throw new Error(
+        `[nv] ComponentBinding for <${c.tagName}> has no resolved factory. Use the emit path (parseNvFileForEmit + emitModule) to resolve component factories from imports.`,
+      )
+    },
+    props: c.propEntries,
+    propNames: c.propNames,
+    slots: c.slots,
   }
 }
 
@@ -525,139 +699,19 @@ function processHtmlTemplate(
   const stubHandler = (() => (_e: Event) => undefined) as HandlerExpr
 
   const bindingPaths: NodePath[] = new Array(holeExprs.length).fill(null)
-  const consumedByComponent = new Set<number>()
-
-  interface PendingNvComponent {
-    anchorPath: NodePath
-    tagName: string
-    propEntries: PropEntry[]
-    propNames: string[]
-    reactiveHoles: Array<{ name: string; holeIndex: number }>
-    slots: SlotEntry[]
-    slotHoleGroups: number[][]
-  }
-  const pendingComponents: PendingNvComponent[] = []
   const processdiagnostics: NvDiagnostic[] = []
-  ;(function walk(node: Node): void {
-    if (node.nodeType === 8) {
-      const m = (node as Comment).data.match(/^nv-(\d+)$/)
-      if (m !== null) bindingPaths[Number.parseInt(m[1] as string, 10)] = computePath(node, frag)
-    } else if (node.nodeType === 1) {
-      const el = node as Element
 
-      // Component element detection via data-nv-component sentinel
-      const compName = el.getAttribute('data-nv-component')
-      if (compName !== null) {
-        el.removeAttribute('data-nv-component')
-        const tagName = compName
-        const propEntries: PropEntry[] = []
-        const propNames: string[] = []
-        const reactiveHoles: Array<{ name: string; holeIndex: number }> = []
-
-        for (let k = 0; k < holeExprs.length; k++) {
-          for (const atype of ['attr', 'prop', 'event'] as const) {
-            const v = el.getAttribute(`data-nv-${atype}-${k}`)
-            if (v !== null) {
-              el.removeAttribute(`data-nv-${atype}-${k}`)
-              propEntries.push({ name: v, expr: stubExpr })
-              propNames.push(v)
-              reactiveHoles.push({ name: v, holeIndex: k })
-              consumedByComponent.add(k)
-            }
-          }
-        }
-
-        // Gather static (plain) attributes on the component element
-        const staticAttrs = Array.from(el.attributes)
-        for (const attr of staticAttrs) {
-          const val = attr.value
-          propEntries.push({ name: attr.name, expr: () => val })
-          if (!propNames.includes(attr.name)) propNames.push(attr.name)
-        }
-
-        // Capture slot content before replacing element with anchor.
-        // Named slots: children that are <slot name="x"> elements.
-        // Default slot: all other children.
-        const slots: SlotEntry[] = []
-        const slotHoleGroups: number[][] = []
-        if (el.childNodes.length > 0) {
-          const defaultNodes: Node[] = []
-          const namedGroups = new Map<string, Node[]>()
-
-          for (const child of Array.from(el.childNodes)) {
-            if (
-              child.nodeType === 1 &&
-              (child as Element).tagName.toLowerCase() === 'slot' &&
-              (child as Element).hasAttribute('name')
-            ) {
-              const slotName = (child as Element).getAttribute('name') as string
-              namedGroups.set(slotName, Array.from((child as Element).childNodes))
-            } else {
-              defaultNodes.push(child)
-            }
-          }
-
-          const hasDefaultContent = defaultNodes.some(
-            (n) => n.nodeType !== 3 || (n as Text).data.trim() !== '',
-          )
-          if (hasDefaultContent || defaultNodes.some((n) => n.nodeType === 8)) {
-            const { ir: defaultIR, holeIndices } = buildNvSlotSubIR(
-              defaultNodes,
-              holeExprs,
-              doc,
-              `slot:${tagName}:default`,
-              signals,
-            )
-            slots.push({ name: 'default', content: defaultIR })
-            slotHoleGroups.push(holeIndices)
-            for (const idx of holeIndices) consumedByComponent.add(idx)
-          }
-
-          for (const [slotName, nodes] of namedGroups) {
-            const { ir: namedIR, holeIndices } = buildNvSlotSubIR(
-              nodes,
-              holeExprs,
-              doc,
-              `slot:${tagName}:${slotName}`,
-              signals,
-            )
-            slots.push({ name: slotName, content: namedIR })
-            slotHoleGroups.push(holeIndices)
-            for (const idx of holeIndices) consumedByComponent.add(idx)
-          }
-        }
-        const compIndex = pendingComponents.length
-        const anchor = doc.createComment(`nv-comp-${compIndex}`)
-        el.parentNode?.replaceChild(anchor, el)
-        const anchorPath = computePath(anchor, frag)
-        pendingComponents.push({
-          anchorPath,
-          tagName,
-          propEntries,
-          propNames,
-          reactiveHoles,
-          slots,
-          slotHoleGroups,
-        })
-        return // don't recurse into component children
-      }
-
-      for (let k = 0; k < holeExprs.length; k++) {
-        for (const atype of ['attr', 'prop', 'event'] as const) {
-          const v = el.getAttribute(`data-nv-${atype}-${k}`)
-          if (v !== null) {
-            bindingPaths[k] = computePath(el, frag)
-            el.removeAttribute(`data-nv-${atype}-${k}`)
-          }
-        }
-      }
-    }
-    let child = node.firstChild
-    while (child !== null) {
-      walk(child)
-      child = child.nextSibling
-    }
-  })(frag)
+  // DFS walk to find sentinels — SAME walk used for slot content (GATE-2 collapse).
+  const {
+    holeInfos,
+    holePaths,
+    components: pendingComponents,
+    consumed: consumedByComponent,
+  } = walkNvNodeList(Array.from(frag.childNodes), holeExprs, doc, frag, signals)
+  // Map encounter-order hole paths back to GLOBAL hole indices (top-level convention).
+  for (let h = 0; h < holeInfos.length; h++) {
+    bindingPaths[holeInfos[h]?.origIdx as number] = holePaths[h] as NodePath
+  }
 
   for (let i = 0; i < holeExprs.length; i++) {
     if (!consumedByComponent.has(i) && bindingPaths[i] === null)
