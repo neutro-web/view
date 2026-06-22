@@ -54,7 +54,7 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4**._
 - **Perf-validation phase:** COMPLETE. All three tripwires resolved (createSignals
   cleared structural-accepted; FALSE-heavy characterized watch-item; cross-engine
   closed). No redesign triggered.
-- **Tests:** 502 green (slot increment 2, 2026-06-22). `tsc --strict` + DOM lib, biome, build all clean.
+- **Tests:** 559 green (`each` authoring increment, 2026-06-22). `tsc --strict` + DOM lib, biome, build all clean.
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state graph-coloring, push-down
@@ -107,18 +107,34 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4**._
 - Multi-root list items (single-root guard today; close before promoting multi-root).
 - `roots[0] as Node` biome-laundering cleanup (cosmetic).
 - kind-split (parked behind real-app wide-graph evidence).
-- **`each` iteration construct — UNBLOCKED, authoring not yet commissioned:** keyed-each,
-  the only loop nv will have. Spike resolved [2026-06-22]: per-row body reuses inc-2
-  `SlotEntry.content` via a `valueSig`/`indexSig`→thunk adapter (Variant A, TC-10f node
-  identity preserved); D-slot-2 invocation-scoped **confirmed already true for item bodies**
-  (D-slot-1 retained for component slots); move-min NOT commissioned (O(N) reconcile
-  acceptable). Surfaces: `.nv` `<each .of= key= let={item,index}>`, tagged-template
-  `each(items, key, ({item,index}) => html\`...\`)` → identical `ListBinding` IR.
+- **`each` authoring: LANDED, architect-verified** (branch feat/each-authoring).
+  Variant A adapter at `ListBinding` construction in both FEs; reconcile loops
+  byte-unchanged; `ListBinding` IR shape unchanged (no version bump, doc-only).
+  Tagged-template path behaviorally proven (TC-EA-02..09, G1/G2/G4 gates pass).
+  **`.nv <each>` is structural-only — behavioral e2e DEFERRED to increment 3.**
+  Named debt: D-each-1 (tagged-template `bindingPaths` carries `null` at consumed
+  EachSentinel holes; FE `bindingPaths.length` differs for `each`; safe under
+  pathIndex-keyed access, breaks on positional scans).
+
+- **Increment 3 (queued, not commissioned):** `.nv <each>` behavioral e2e —
+  bundle→eval→mount→assert, closing the G3 reduction above.
 
 ### Named near-term debt
-- **Comparator `props`/`fallback` blindness (named debt):** `ir-equivalence.ts`
-  `slot-outlet` comparison covers `.name` only, not `props[]`/`fallback`. Resolve with
-  the comparator extension `each` needs.
+- **Comparator `slot-outlet` `props` blindness — CLOSED [2026-06-22]:** `bindingEqual`
+  now compares `props[i].name` in addition to `.name` (landed with `each` authoring,
+  `ir-equivalence.ts`). `fallback` comparison remains unimplemented (not yet
+  failable — no test uses differing fallbacks cross-FE).
+- **D-each-1:** tagged-template FE leaves `null` at consumed EachSentinel hole
+  indices in `shape.bindingPaths`; `.nv` compacts them out. Safe under
+  `pathIndex`-keyed access (all current consumers); breaks on positional scans.
+- **D-each-2:** `parseNvFile` parse-path `ListBinding` is a non-functional stub
+  (items/key/itemTemplate placeholders) — structural-IR use only; no mount path.
+- **D-each-3:** `.nv <each>` missing-`let={}` diagnostic fires but source positions
+  are stubbed `start: 0, end: 0`.
+- **D-each-4:** nested `<each>` inside slot content silently produces no
+  `ListBinding` (`buildNvSlotContentIR` ignores returned `lists`).
+- **D-each-5:** `signal()` imported in `nv-emitter.ts` for stub-IR extraction in
+  the list emit case (plan-mandated, couples emitter to core at runtime).
 
 ### Naming
 - `neutro/view` / `nv` working name; package under `@neutro` (view engine is
@@ -775,3 +791,68 @@ body is a `SlotEntry` via the thunk adapter. D2 comparator debt rides this incre
 
 **Cites.** *Slot increment 2 LANDED [2026-06-22]* (re-phase basis); *D-slot-2 in increment 2
 — superseded [2026-06-22]* (the re-phase this spike discharges).
+
+---
+
+### 2026-06-22 — `each` authoring increment ARCHITECT-VERIFIED (verifies 2026-06-22 LANDED)
+
+**Event:** Architect verification of the `each` authoring increment (branch
+`feat/each-authoring`), previously reported LANDED by CC. Verified by reading
+placed files (html-tag.ts, nv-parser.ts, nv-emitter.ts, interpreter.ts,
+emitted-mount.ts, ir-equivalence.ts, each-authoring.test.ts), not CC summary.
+
+**Verified (each item failable on inspection):**
+- **G0:** Reconcile loops byte-equivalent pre/post in both back-ends (interpreter
+  `wireList`, emitted-mount list case) — both still call `itemTemplate(vs,is)`;
+  adapter is NOT in the loop. `src/core/` untouched (0 lines). No forked each-body
+  builder — both FEs reuse shared slot machinery (`buildNvSlotContentIR` /
+  tagged-template `each()` consumed at construction).
+- **Variant A adapter at construction:** both FEs wrap as
+  `(vs,is) => factory({ item:()=>vs(), index:()=>is() })`. nv-emitter emits the
+  same shape via an IIFE binding `slotProps`. Thunks read through the same signals.
+- **G1 transparency:** TC-EA-04 asserts `lisAfter[i] === lisBefore[i]` (node
+  identity, update-not-rebuild) on BOTH back-ends.
+- **G2 FE-equivalence:** TC-EA-G2 → `irStructurallyEqual` via the new comparator
+  `'list'` case (recurses item body with shared stub signals); `pathsEqual` filters
+  null placeholders. Not a comparator exception.
+- **G4 fail-shows-teeth:** TC-EA-G4 snapshot adapter (`vs()` not `()=>vs()`) freezes
+  DOM on value change → confirms the pin has teeth.
+- **Anti-vacuous:** all new tests assert DOM/structural output; no `expect(true)`.
+- **Contract:** `ListBinding` shape in ir.ts UNCHANGED (no field added). Doc-only
+  changelog. reactive-core v0.4.2 and template-ir v0.4 UNCHANGED. No version bump.
+
+**Test count:** CC reported 559 (was 556). [Architect note: count not independently
+re-run in-stream — sandbox/CC owns the real run. Accepted as reported pending next
+CC run; not a gate.]
+
+**Accepted reduction (G3 narrowing) — REQUIRES the increment-3 close:**
+`.nv` behavioral e2e is DEFERRED. TC-EA-11 checks `.nv` body IR *shape* via
+`parseNvFile` + `itemTemplate(stub,stub)` inspection — NOT mount→assert-DOM. G3
+(behavioral differential) is therefore satisfied for the tagged-template path only;
+`.nv` is structural-only. The `.nv` parse-path ListBinding is an explicit stub
+(`items: () => []`, "Never call mount()"), so no public mount path exercises
+`.nv <each>` behaviorally today — closing it requires bundle→eval→mount (itself
+increment-3 scope). **Decision: accept the reduction; defer `.nv` behavioral to
+increment 3.** Logged explicitly rather than closing silently as full G3.
+
+**Named debt logged (non-blocking):**
+- **D-each-1 (tagged-template `bindingPaths` null):** the tagged-template FE leaves
+  `null` at consumed-EachSentinel hole indices in `shape.bindingPaths`; `.nv`
+  compacts them out. Consequence: `bindingPaths.length` is NOT equal across FEs for
+  `each` templates. Current consumers (interpreter `mountFragment`, emitted-mount
+  `emitSetup`) index by `binding.pathIndex` and are safe; `pathsEqual` filters nulls
+  so G2 holds. **Failure condition:** any future consumer that iterates
+  `shape.bindingPaths` positionally (not by `pathIndex`), or any gate asserting raw
+  cross-FE `bindingPaths.length` equality for `each`, will break.
+- **D-each-2:** `parseNvFile` parse-path ListBinding is a non-functional stub
+  (items/key/itemTemplate placeholders) — structural-IR use only.
+- **D-each-3:** `.nv <each>` missing-`let` warns, but warning source positions are
+  stubbed `start: 0, end: 0`.
+- **D-each-4:** nested `<each>` inside slot content silently produces no ListBinding
+  (`buildNvSlotContentIR` ignores the returned `lists`).
+- **D-each-5:** `signal()` imported in nv-emitter solely for stub-IR extraction in
+  the list emit case (plan-mandated).
+
+**Verdict:** PASS. `each` authoring moves from "unblocked" to "LANDED, verified
+(tagged-template behavioral; `.nv` structural-only, behavioral deferred to inc 3)".
+Current State header edits applied.
