@@ -101,8 +101,8 @@ for (const pattern of PATTERNS) {
             const s = arr.slice()
             for (let i = s.length - 1; i > 0; i--) {
               const j = (i * 1103515245 + 12345) % (i + 1)
-              const tmp = s[i]
-              s[i] = s[j < 0 ? -j : j]
+              const tmp = s[i]!
+              s[i] = s[j < 0 ? -j : j]!
               s[j < 0 ? -j : j] = tmp
             }
             reordered = s
