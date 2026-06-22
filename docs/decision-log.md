@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.3.3**._
+_Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4**._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
 > `nv-decision-log-archive.md` (moved 2026-06-21). This snapshot is the resolved
@@ -46,19 +46,15 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.3.3**._
 - **Build pipeline `.nv → .js`:** Mode A, landed. Executable-module gate closed.
 - **Component API v1:** LANDED. Composition works end-to-end through the compiled
   path (A2 factory-shape convergence).
-- **Slot consumption — increments 1 + 1.5 LANDED (2026-06-22):** inc 1 = GATE-2 walk-collapse,
-  component-as-slot-child, fallback (`SlotOutletBinding.fallback?`); inc 1.5 = emit-path
-  thunk-builder collapse (`computeBindingThunks`) + component-in-conditional-branch fix +
-  dead-code deletion. Template-IR v0.3.3. D-slot-1 retained. Increment 2 (scoped-slot IR shape
-  + `let={...}` authoring, D-slot-1 retained) queued; **D-slot-2 ownership flip re-phased to
-  land with `each`** (its leak gate needs real multi-row invocations — see 2026-06-22 re-phase).
+- **Slot consumption — increments 1 + 1.5 + 2 LANDED (2026-06-22):** inc 2 = scoped-slot
+  IR shape (`SlotEntry.content` → factory; `SlotOutletBinding.props?`); `let={...}` authoring
+  both FEs; D-slot-1 RETAINED. Template-IR → v0.4. reactive-core v0.4.2 unchanged. D-slot-2
+  re-phased to `each`.
 - **Real-browser gate:** PASSED across Blink/Gecko/WebKit (36/36). Phase 0 closed.
 - **Perf-validation phase:** COMPLETE. All three tripwires resolved (createSignals
   cleared structural-accepted; FALSE-heavy characterized watch-item; cross-engine
   closed). No redesign triggered.
-- **Tests:** 496 green across all files (post-inc-1.5, 2026-06-22). `tsc --strict`
-  + DOM lib, biome, build all clean. (Prior "3237" figure was inflated by vitest collecting
-  `.claude/worktrees/**`; `.claude/**` excluded so the count-delta gate reads the honest baseline.)
+- **Tests:** 502 green (slot increment 2, 2026-06-22). `tsc --strict` + DOM lib, biome, build all clean.
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state graph-coloring, push-down
@@ -666,3 +662,30 @@ component-as-slot-child: design APPROVED [2026-06-22]*. Cites *Slot increment 1.
 
 **Status.** Re-phasing DECIDED. Increment 2 (shape + authoring, D-slot-1 retained) commissioned.
 D-slot-2 flip queued behind `each`.
+
+### 2026-06-22 — Slot increment 2 LANDED: scoped-slot IR shape + `let={...}` authoring (D-slot-1 retained)
+
+**Gate.** All gates passed: `tsc --noEmit` clean, `vitest run` N/N, `biome check` clean.
+Fail-shows-teeth pairs confirmed (props-detection, expose-thunk-vs-value). Anti-vacuous sweep clean.
+D-slot-1 retained proof: `git show` confirms `runWithOwner(capturedParentOwner, ...)` unchanged in both back-ends.
+No `src/core/` edits.
+
+**What landed:**
+- **`SlotEntry.content` → factory (hard-cut):** `(props: SlotProps) => TemplateIR`. Every existing
+  `SlotEntry` literal wrapped. Unscoped fills become `(_props) => ir`. No back-compat union.
+- **`SlotOutletBinding.props?`:** child-exposed accessor thunks (one-directional; same transparent-thunk
+  mechanism as component props). Absent → empty object passed to factory.
+- **`let={...}` authoring (`.nv` parent fill):** `<slot name="row" let={item, index}>` → `SlotEntry.content`
+  factory; `item`/`index` erase to `slotProps.item()`/`slotProps.index()` in emitted JS.
+- **`slot(name, factory)` authoring (tagged-template parent fill):** sentinel detected by `walkNodeList`
+  inside component element; factory stored directly as `SlotEntry.content`.
+- **`slots()` outlet gains props (tagged-template child):** `slots('row', { item: () => sig() })` →
+  `SlotOutletBinding.props`. Mirrors `.nv`'s `{slots.row({ item: item })}` call form.
+- **FE-equivalence:** both front-ends produce structurally identical scoped-slot IRs.
+- **D-slot-1 RETAINED.** `runWithOwner(capturedParentOwner, ...)` byte-identical to pre-change.
+  reactive-core v0.4.2 unchanged.
+- **Carry item closed:** `emitted-mount.ts` slot-outlet `?? getOwner()` / `?? null` dead fallback converged.
+- **Template-IR v0.3.3 → v0.4** (content-factory + `props`).
+
+**Cites.** *Scoped slots design APPROVED [2026-06-22]*; *D-slot-2 ownership flip re-phased to `each`
+[2026-06-22]* (D-slot-2 is NOT in this increment — phasing decision is the reason D-slot-1 is retained here).
