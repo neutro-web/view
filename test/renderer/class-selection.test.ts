@@ -410,3 +410,34 @@ test('TC-CL-G4-string  string-form class="..." stays AttrBinding, not classlist'
     expect(div.classList.contains('active')).toBe(false)
   })
 })
+
+// ── TC-CL-G7b: .nv dynamic (computed) key falls back to AttrBinding, not ClassListBinding ──
+
+test('TC-CL-G7b  .nv dynamic computed key falls back to AttrBinding without throwing', () => {
+  const { document } = new JSDOM('').window
+  // A computed property key [dynamicKey]: bool — key not statically known at parse time.
+  // The parser must detect this and fall back to AttrBinding rather than emitting a
+  // broken ClassListBinding or throwing.
+  // Use the $component/.nv source format (same as TC-CL-08 / TC-CL-G2).
+  // The object literal with a computed key [dynamicKey] is the expression inside the hole.
+  const source =
+    'const Comp = $component(() => {\n' +
+    '  $script(() => {\n' +
+    '    const dynamicKey = "active"\n' +
+    '    const isActive = signal(false)\n' +
+    '  })\n' +
+    '  $render(() => html`<div class="${{ [dynamicKey]: isActive() }}"></div>`)\n' +
+    '})\n'
+  // Must not throw
+  let results: ReturnType<typeof parseNvFile>
+  expect(() => {
+    results = parseNvFile(source, 'dyn.nv', document)
+  }).not.toThrow()
+
+  const ir = results![0]!.ir
+  // The class hole must produce AttrBinding (full-reassign fallback), not classlist
+  const classBinding = ir.bindings.find((b) => b.kind === 'attr' || b.kind === 'classlist')
+  expect(classBinding).toBeDefined()
+  // Critical: must NOT be classlist — dynamic key cannot be safely per-key-toggled
+  expect(classBinding!.kind).toBe('attr')
+})

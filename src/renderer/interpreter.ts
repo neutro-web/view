@@ -227,6 +227,7 @@ function wireClassList(binding: ClassListBinding, el: Node): void {
 
   if (toggleEntries.length === 0) return
 
+  // TODO(threshold): tune T=6 against real-app ReactiveNode-width evidence; see kind-split watch-item
   if (toggleEntries.length <= 6) {
     // One effect per key (fine-grained)
     for (const e of toggleEntries) {
