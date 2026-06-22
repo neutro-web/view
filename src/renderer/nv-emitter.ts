@@ -112,11 +112,16 @@ function emitBindingLiteral(
         .join(', ')
       const slotLiterals = cb.slots
         .map((s, idx) => {
-          const slotThunks = thunk.slots[idx]?.thunks ?? []
+          const slotThunkEntry = thunk.slots[idx]
+          const slotHoleThunks = slotThunkEntry?.thunks ?? []
           // s.content is SlotContent (factory); call with empty props to get the raw IR for emission.
-          // The emitted literal wraps it back as a factory: (_props) => <ir literal>.
+          // The emitted literal wraps it back as a factory: (slotProps) => <ir literal> when scoped,
+          // or (_props) => <ir literal> when unscoped.
           const slotIR = s.content({})
-          return `{ name: ${JSON.stringify(s.name)}, content: (_props) => ${emitIrLiteral(slotIR, slotThunks, i2)} }`
+          const letNames = slotThunkEntry?.letNames ?? []
+          const factoryParam = letNames.length > 0 ? 'slotProps' : '_props'
+          const irLiteral = emitIrLiteral(slotIR, slotHoleThunks, i2)
+          return `{ name: ${JSON.stringify(s.name)}, content: (${factoryParam}) => ${irLiteral} }`
         })
         .join(', ')
       return [
@@ -130,6 +135,21 @@ function emitBindingLiteral(
     case 'slot-outlet': {
       const sob = binding as SlotOutletBinding
       const parts = [`kind: 'slot-outlet'`, pathEntry, `name: ${JSON.stringify(sob.name)}`]
+      if (sob.props !== undefined && sob.props.length > 0) {
+        if (thunk.kind !== 'slot-outlet')
+          throw new Error('[nv/emitter] SlotOutletBinding thunk kind mismatch')
+        const propLiterals = sob.props
+          .map((p, idx) => {
+            const propThunk = thunk.props?.[idx]
+            if (!propThunk)
+              throw new Error(
+                `[nv/emitter] Missing prop thunk for slot-outlet prop '${p.name}' at index ${idx}`,
+              )
+            return `{ name: ${JSON.stringify(p.name)}, expr: () => (${propThunk.exprSrc}) }`
+          })
+          .join(', ')
+        parts.push(`props: [${propLiterals}]`)
+      }
       if (sob.fallback !== undefined) {
         if (thunk.kind !== 'slot-outlet')
           throw new Error('[nv/emitter] SlotOutletBinding thunk kind mismatch')

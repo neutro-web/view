@@ -87,7 +87,12 @@ export interface NvDiagnostic {
 export type ThunkSource =
   | { kind: 'text' | 'attr' | 'prop'; exprSrc: string }
   | { kind: 'event'; handlerSrc: string }
-  | { kind: 'slot-outlet'; name: string; fallbackThunks?: ThunkSource[]; propSrcs?: Array<{ name: string; exprSrc: string }> }
+  | {
+      kind: 'slot-outlet'
+      name: string
+      props?: Array<{ name: string; exprSrc: string }>
+      fallbackThunks?: ThunkSource[]
+    }
   | {
       kind: 'conditional'
       conditionSrc: string
@@ -99,7 +104,12 @@ export type ThunkSource =
       componentSrc: string
       propSrcs: Array<{ name: string; exprSrc: string }>
       propNames: readonly string[]
-      slots: Array<{ name: string; holeIndices: number[]; thunks: ThunkSource[] }>
+      slots: Array<{
+        name: string
+        holeIndices: number[]
+        thunks: ThunkSource[]
+        letNames?: readonly string[]
+      }>
     }
 
 /** Emit payload attached to NvComponentResult when using parseNvFileForEmit. */
@@ -443,7 +453,11 @@ function walkNvNodeList(
               // Extract let={item, index} attribute for scoped slots
               const letAttr = slotEl.getAttribute('let')
               if (letAttr) {
-                const identifiers = letAttr.replace(/[{}]/g, '').split(',').map((s) => s.trim()).filter(Boolean)
+                const identifiers = letAttr
+                  .replace(/[{}]/g, '')
+                  .split(',')
+                  .map((s) => s.trim())
+                  .filter(Boolean)
                 namedLetNames.set(slotName, identifiers)
               }
             } else {
@@ -455,7 +469,11 @@ function walkNvNodeList(
             (n) => n.nodeType !== 3 || (n as Text).data.trim() !== '',
           )
           if (hasDefaultContent || defaultNodes.some((n) => n.nodeType === 8)) {
-            const { ir: defaultIR, holeIndices, letNames: defaultLetNames } = buildNvSlotContentIR(
+            const {
+              ir: defaultIR,
+              holeIndices,
+              letNames: defaultLetNames,
+            } = buildNvSlotContentIR(
               defaultNodes,
               holeExprs,
               doc,
@@ -471,7 +489,11 @@ function walkNvNodeList(
 
           for (const [slotName, slotChildNodes] of namedGroups) {
             const slotLet = namedLetNames.get(slotName) ?? []
-            const { ir: namedIR, holeIndices, letNames: namedLetNamesResult } = buildNvSlotContentIR(
+            const {
+              ir: namedIR,
+              holeIndices,
+              letNames: namedLetNamesResult,
+            } = buildNvSlotContentIR(
               slotChildNodes,
               holeExprs,
               doc,
@@ -1854,7 +1876,7 @@ function computeThunkSource(
       return {
         kind: 'slot-outlet' as const,
         name: slotName,
-        ...(propSrcs.length > 0 && { propSrcs }),
+        ...(propSrcs.length > 0 && { props: propSrcs }),
       }
     }
     // Slot outlet: expression is `slots.name` property access.
@@ -2022,9 +2044,10 @@ function computeBindingThunks(
       // Build slotPropsAccessors: letNames → 'slotProps.name()' (for emit path)
       const slotLet = pc.slotLetNames?.[slotIdx] ?? []
       const slotPropsParam = 'slotProps'
-      const slotPropsAccessors: Map<string, string> | undefined = slotLet.length > 0
-        ? new Map(slotLet.map((n) => [n, `${slotPropsParam}.${n}()`]))
-        : undefined
+      const slotPropsAccessors: Map<string, string> | undefined =
+        slotLet.length > 0
+          ? new Map(slotLet.map((n) => [n, `${slotPropsParam}.${n}()`]))
+          : undefined
       const mergedPropsAccessors = slotPropsAccessors
         ? new Map([...(propsAccessors ?? []), ...slotPropsAccessors])
         : propsAccessors
@@ -2043,7 +2066,12 @@ function computeBindingThunks(
           mergedPropsAccessors,
         )
       })
-      return { name: slot.name, holeIndices: [...holeIndices], thunks }
+      return {
+        name: slot.name,
+        holeIndices: [...holeIndices],
+        thunks,
+        ...(slotLet.length > 0 && { letNames: slotLet }),
+      }
     }),
   }))
 
