@@ -176,7 +176,7 @@ function emitBindingLiteral(
         `{ kind: 'list', ${pathEntry},`,
         `${i2}items: () => (${thunk.itemsSrc}),`,
         `${i2}key: ${thunk.keySrc},`,
-        `${i2}itemTemplate: (valueSig, indexSig) => ((slotProps) => ${bodyLiteral})(${slotPropsBody}) }`,
+        `${i2}itemTemplate: (valueSig, indexSig) => ((slotProps) => (${bodyLiteral}))(${slotPropsBody}) }`,
       ].join('\n')
     }
     default:
