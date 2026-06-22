@@ -11,6 +11,7 @@ import { structurallyEqual } from '../../src/renderer/comparator.js'
 import type {
   AttrBinding,
   Binding,
+  ClassListBinding,
   ConditionalBinding,
   EventBinding,
   ListBinding,
@@ -100,6 +101,31 @@ function bindingEqual(a: Binding, b: Binding, i: number, aIr: TemplateIR, bIr: T
             equal: false,
             reason: `${p}.props[${j}].name: ${aProps[j]!.name} vs ${bProps[j]!.name}`,
           }
+      }
+      break
+    }
+    case 'classlist': {
+      const bcl = b as ClassListBinding
+      const aEntries = (a as ClassListBinding).entries
+      const bEntries = bcl.entries
+      if (aEntries.length !== bEntries.length)
+        return {
+          equal: false,
+          reason: `${p}.entries.length: ${aEntries.length} vs ${bEntries.length}`,
+        }
+      for (let j = 0; j < aEntries.length; j++) {
+        const ae = aEntries[j]!
+        const be = bEntries[j]!
+        if (ae.kind !== be.kind)
+          return { equal: false, reason: `${p}.entries[${j}].kind: ${ae.kind} vs ${be.kind}` }
+        if (ae.kind === 'static' && be.kind === 'static') {
+          if (ae.token !== be.token)
+            return { equal: false, reason: `${p}.entries[${j}].token: ${ae.token} vs ${be.token}` }
+        } else if (ae.kind === 'toggle' && be.kind === 'toggle') {
+          if (ae.key !== be.key)
+            return { equal: false, reason: `${p}.entries[${j}].key: ${ae.key} vs ${be.key}` }
+          // expr thunks are not compared (same policy as other expr fields)
+        }
       }
       break
     }

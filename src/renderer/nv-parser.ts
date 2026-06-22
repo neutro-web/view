@@ -52,6 +52,8 @@ import * as ts from 'typescript'
 import type {
   AttrBinding,
   Binding,
+  ClassListBinding,
+  ClassListEntry,
   ComponentBinding,
   ConditionalBinding,
   EventBinding,
@@ -118,6 +120,12 @@ export type ThunkSource =
       keySrc: string
       bodyThunks: ThunkSource[]
       letNames: string[]
+    }
+  | {
+      kind: 'classlist'
+      entries: Array<
+        { kind: 'static'; token: string } | { kind: 'toggle'; key: string; boolSrc: string }
+      >
     }
 
 /** Emit payload attached to NvComponentResult when using parseNvFileForEmit. */
@@ -338,6 +346,75 @@ function buildNvHoleBinding(
     }
   }
   if (info.kind === 'attr') {
+    // ClassListBinding: class attr with object or array literal → structured class binding
+    if (info.name === 'class') {
+      if (ts.isObjectLiteralExpression(holeExpr)) {
+        const entries: ClassListEntry[] = []
+        let hasComputed = false
+        for (const prop of holeExpr.properties) {
+          if (
+            ts.isComputedPropertyName(prop.name ?? (undefined as never)) ||
+            ts.isShorthandPropertyAssignment(prop)
+          ) {
+            hasComputed = true
+            break
+          }
+          if (ts.isPropertyAssignment(prop)) {
+            if (ts.isComputedPropertyName(prop.name)) {
+              hasComputed = true
+              break
+            }
+            const key = prop.name.getText()
+            for (const token of key.split(/\s+/).filter(Boolean)) {
+              entries.push({ kind: 'toggle', key: token, expr: stubExpr as () => unknown })
+            }
+          }
+        }
+        if (!hasComputed) {
+          const b: ClassListBinding = { kind: 'classlist', pathIndex, entries }
+          return b
+        }
+      } else if (ts.isArrayLiteralExpression(holeExpr)) {
+        const entries: ClassListEntry[] = []
+        let hasComputed = false
+        for (const element of holeExpr.elements) {
+          if (ts.isStringLiteral(element) || ts.isNoSubstitutionTemplateLiteral(element)) {
+            for (const token of element.text.split(/\s+/).filter(Boolean)) {
+              entries.push({ kind: 'static', token })
+            }
+          } else if (ts.isObjectLiteralExpression(element)) {
+            for (const prop of element.properties) {
+              if (
+                ts.isComputedPropertyName(prop.name ?? (undefined as never)) ||
+                ts.isShorthandPropertyAssignment(prop)
+              ) {
+                hasComputed = true
+                break
+              }
+              if (ts.isPropertyAssignment(prop)) {
+                if (ts.isComputedPropertyName(prop.name)) {
+                  hasComputed = true
+                  break
+                }
+                const key = prop.name.getText()
+                for (const token of key.split(/\s+/).filter(Boolean)) {
+                  entries.push({ kind: 'toggle', key: token, expr: stubExpr as () => unknown })
+                }
+              }
+            }
+            if (hasComputed) break
+          } else {
+            // Non-literal element in array → fall back to AttrBinding
+            hasComputed = true
+            break
+          }
+        }
+        if (!hasComputed) {
+          const b: ClassListBinding = { kind: 'classlist', pathIndex, entries }
+          return b
+        }
+      }
+    }
     return {
       kind: 'attr',
       pathIndex,
@@ -2108,6 +2185,78 @@ function computeThunkSource(
     return { kind: 'text', exprSrc: eraseSignalReadsInNode(holeExpr, symbols.all, propsAccessors) }
   }
   if (pos.kind === 'attr') {
+    // ClassListBinding: class attr with object or array literal → structured classlist thunk
+    if (pos.name === 'class') {
+      if (ts.isObjectLiteralExpression(holeExpr)) {
+        const entries: Array<
+          { kind: 'static'; token: string } | { kind: 'toggle'; key: string; boolSrc: string }
+        > = []
+        let hasComputed = false
+        for (const prop of holeExpr.properties) {
+          if (ts.isShorthandPropertyAssignment(prop)) {
+            hasComputed = true
+            break
+          }
+          if (ts.isPropertyAssignment(prop)) {
+            if (ts.isComputedPropertyName(prop.name)) {
+              hasComputed = true
+              break
+            }
+            const key = prop.name.getText()
+            const boolSrc = eraseSignalReadsInNode(prop.initializer, symbols.all, propsAccessors)
+            for (const token of key.split(/\s+/).filter(Boolean)) {
+              entries.push({ kind: 'toggle', key: token, boolSrc })
+            }
+          } else {
+            hasComputed = true
+            break
+          }
+        }
+        if (!hasComputed) return { kind: 'classlist', entries }
+      } else if (ts.isArrayLiteralExpression(holeExpr)) {
+        const entries: Array<
+          { kind: 'static'; token: string } | { kind: 'toggle'; key: string; boolSrc: string }
+        > = []
+        let hasComputed = false
+        for (const element of holeExpr.elements) {
+          if (ts.isStringLiteral(element) || ts.isNoSubstitutionTemplateLiteral(element)) {
+            for (const token of element.text.split(/\s+/).filter(Boolean)) {
+              entries.push({ kind: 'static', token })
+            }
+          } else if (ts.isObjectLiteralExpression(element)) {
+            for (const prop of element.properties) {
+              if (ts.isShorthandPropertyAssignment(prop)) {
+                hasComputed = true
+                break
+              }
+              if (ts.isPropertyAssignment(prop)) {
+                if (ts.isComputedPropertyName(prop.name)) {
+                  hasComputed = true
+                  break
+                }
+                const key = prop.name.getText()
+                const boolSrc = eraseSignalReadsInNode(
+                  prop.initializer,
+                  symbols.all,
+                  propsAccessors,
+                )
+                for (const token of key.split(/\s+/).filter(Boolean)) {
+                  entries.push({ kind: 'toggle', key: token, boolSrc })
+                }
+              } else {
+                hasComputed = true
+                break
+              }
+            }
+            if (hasComputed) break
+          } else {
+            hasComputed = true
+            break
+          }
+        }
+        if (!hasComputed) return { kind: 'classlist', entries }
+      }
+    }
     return { kind: 'attr', exprSrc: eraseSignalReadsInNode(holeExpr, symbols.all, propsAccessors) }
   }
   if (pos.kind === 'prop') {

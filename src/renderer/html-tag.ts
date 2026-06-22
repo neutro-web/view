@@ -30,6 +30,7 @@
 import type {
   AttrBinding,
   Binding,
+  ClassListBinding,
   ComponentBinding,
   EventBinding,
   HandlerExpr,
@@ -110,6 +111,80 @@ export function slot(name: string, factory: SlotContent): SlotFillSentinel {
   return { __nvSlotFill: name, factory }
 }
 
+// ── Classes sentinel ──────────────────────────────────────────────────────────
+
+/** Opaque sentinel returned by `classes(...)` — carries structured class entries. */
+export interface ClassesSentinel {
+  readonly __nvClasses: true
+  readonly entries: ReadonlyArray<
+    { kind: 'static'; token: string } | { kind: 'toggle'; key: string; expr: () => unknown }
+  >
+}
+
+function isClassesSentinel(v: unknown): v is ClassesSentinel {
+  return typeof v === 'object' && v !== null && (v as ClassesSentinel).__nvClasses === true
+}
+
+/**
+ * Build a ClassesSentinel from a mix of strings, object toggle-maps, arrays, or falsy values.
+ *
+ * - String args: split on whitespace → static entries
+ * - Object args: each key (split on whitespace for multi-token) → toggle entry; value must be `() => boolean`
+ * - Array args: recursively process each element (same rules as above)
+ * - Falsy args (null, undefined, false): skipped
+ *
+ * Usage inside html``:
+ *   html`<div class="${classes('btn', { active: () => isActive() })}">`
+ */
+export function classes(
+  ...args: Array<
+    | string
+    | Record<string, () => unknown>
+    | Array<string | Record<string, () => unknown>>
+    | null
+    | undefined
+    | false
+  >
+): ClassesSentinel {
+  const entries: Array<
+    { kind: 'static'; token: string } | { kind: 'toggle'; key: string; expr: () => unknown }
+  > = []
+
+  function processArg(
+    arg:
+      | string
+      | Record<string, () => unknown>
+      | Array<string | Record<string, () => unknown>>
+      | null
+      | undefined
+      | false,
+  ): void {
+    if (!arg) return
+    if (typeof arg === 'string') {
+      for (const token of arg.split(/\s+/).filter(Boolean)) {
+        entries.push({ kind: 'static', token })
+      }
+    } else if (Array.isArray(arg)) {
+      for (const element of arg) {
+        processArg(element)
+      }
+    } else {
+      for (const [key, expr] of Object.entries(arg)) {
+        if (!expr) continue
+        for (const token of key.split(/\s+/).filter(Boolean)) {
+          entries.push({ kind: 'toggle', key: token, expr })
+        }
+      }
+    }
+  }
+
+  for (const arg of args) {
+    processArg(arg)
+  }
+
+  return { __nvClasses: true, entries }
+}
+
 // ── Each sentinel ─────────────────────────────────────────────────────────────
 
 /** Opaque sentinel returned by `each(items, key, factory)` — the tagged-template list form. */
@@ -141,6 +216,56 @@ export function each(
   factory: SlotContent,
 ): EachSentinel {
   return { __nvEach: true, items, key, factory }
+}
+
+// ── Class name builder ────────────────────────────────────────────────────────
+
+/**
+ * Pure class-string builder: concatenates truthy class tokens, space-joined.
+ *
+ * Args are: string | Record<string, unknown> | Array<...> | null | undefined | false | 0
+ * - Strings: include if non-empty
+ * - Objects: include each key whose value is truthy
+ * - Arrays: recurse (flatten/process each element)
+ * - Falsy (null, undefined, false, 0, ''): skip entirely
+ *
+ * Returns a single space-joined string of truthy tokens.
+ *
+ * Usage:
+ *   cx('btn', { primary: true, disabled: false }) // 'btn primary'
+ *   cx('a', ['b', { c: true }]) // 'a b c'
+ *   cx({ active: true }, null, false, undefined) // 'active'
+ */
+type CxArg = string | Record<string, unknown> | CxArg[] | null | undefined | false | 0
+
+export function cx(...args: CxArg[]): string {
+  const tokens: string[] = []
+
+  for (const arg of args) {
+    if (arg === null || arg === undefined || arg === false || arg === 0 || arg === '') {
+      continue
+    }
+    if (typeof arg === 'string') {
+      if (arg.length > 0) {
+        tokens.push(arg)
+      }
+    } else if (Array.isArray(arg)) {
+      // Recurse into arrays
+      const nested = cx(...(arg as CxArg[]))
+      if (nested.length > 0) {
+        tokens.push(nested)
+      }
+    } else if (typeof arg === 'object') {
+      // Record: include keys whose values are truthy
+      for (const [key, value] of Object.entries(arg)) {
+        if (value) {
+          tokens.push(key)
+        }
+      }
+    }
+  }
+
+  return tokens.join(' ')
 }
 
 function isSlotSentinel(v: unknown): v is SlotSentinel {
@@ -227,6 +352,14 @@ function buildHtmlHoleBinding(holeKind: HoleKind, pathIndex: number, origExpr: u
     return b
   }
   if (holeKind.kind === 'attr') {
+    if (holeKind.name === 'class' && isClassesSentinel(origExpr)) {
+      return {
+        kind: 'classlist',
+        pathIndex,
+        entries: (origExpr as ClassesSentinel).entries,
+      } satisfies ClassListBinding
+    }
+    // existing AttrBinding path unchanged
     const b: AttrBinding = { kind: 'attr', pathIndex, name: holeKind.name, expr }
     return b
   }
@@ -681,13 +814,14 @@ function buildHtmlStrings(
  */
 export function createHtmlTag(document: Document) {
   return function html(strings: TemplateStringsArray, ...exprs: unknown[]): TemplateIR {
-    // Validate: all expressions must be functions (thunks) OR slot sentinels OR slot-fill sentinels.
+    // Validate: all expressions must be functions (thunks) OR slot sentinels OR slot-fill sentinels OR classes sentinels.
     for (let i = 0; i < exprs.length; i++) {
       if (
         typeof exprs[i] !== 'function' &&
         !isSlotSentinel(exprs[i]) &&
         !isSlotFillSentinel(exprs[i]) &&
-        !isEachSentinel(exprs[i])
+        !isEachSentinel(exprs[i]) &&
+        !isClassesSentinel(exprs[i])
       ) {
         throw new TypeError(
           `[nv/html] Expression at hole ${i} is not a function. Wrap reactive values in thunks: \${() => signal()} not \${signal()}. Received: ${typeof exprs[i]}`,

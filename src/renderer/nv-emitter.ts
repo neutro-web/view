@@ -21,6 +21,7 @@ import { signal } from '../core/core.js'
 import type {
   AttrBinding,
   Binding,
+  ClassListBinding,
   ComponentBinding,
   ConditionalBinding,
   EventBinding,
@@ -178,6 +179,26 @@ function emitBindingLiteral(
         `${i2}key: ${thunk.keySrc},`,
         `${i2}itemTemplate: (valueSig, indexSig) => ((slotProps) => (${bodyLiteral}))(${slotPropsBody}) }`,
       ].join('\n')
+    }
+    case 'classlist': {
+      if (thunk.kind !== 'classlist')
+        throw new Error('[nv/emitter] ClassListBinding thunk kind mismatch')
+      const clb = binding as ClassListBinding
+      const entryLiterals = clb.entries
+        .map((entry, idx) => {
+          const thunkEntry = thunk.entries[idx]
+          if (!thunkEntry)
+            throw new Error(`[nv/emitter] Missing classlist entry thunk at index ${idx}`)
+          if (entry.kind === 'static') {
+            return `{ kind: 'static', token: ${JSON.stringify(entry.token)} }`
+          }
+          // toggle entry: emit expr as a thunk
+          if (thunkEntry.kind !== 'toggle')
+            throw new Error('[nv/emitter] ClassListBinding entry kind mismatch')
+          return `{ kind: 'toggle', key: ${JSON.stringify(entry.key)}, expr: () => (${thunkEntry.boolSrc}) }`
+        })
+        .join(', ')
+      return `{ kind: 'classlist', ${pathEntry}, entries: [${entryLiterals}] }`
     }
     default:
       throw new Error(
