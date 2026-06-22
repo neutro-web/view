@@ -173,7 +173,6 @@ test('TC-EA-05  each(): reorder — index accessor updates without rebuild', () 
     const ir = html`<ul>${each(
       () => items() as readonly unknown[],
       (item) => (item as Item).id,
-      // biome-ignore lint/style/noNonNullAssertion: SlotProps index signature, item and index are always present
       ({ item: _item, index: _index }) => {
         const item = _item!
         const index = _index!
