@@ -221,7 +221,7 @@ test('TC-EA-06  each(): unmount — no reactive leaks', () => {
   const parent = mkParent()
   const dispose = mount(ir, parent, document)
   flushSync()
-  expect(__test.observerCount(items) >= 1).toBe(true)
+  expect(__test.observerCount(items)).toBeGreaterThanOrEqual(1)
   dispose()
   expect(__test.observerCount(items)).toBe(0)
   expect(parent.querySelectorAll('li').length).toBe(0)
