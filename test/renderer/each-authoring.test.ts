@@ -337,3 +337,106 @@ test('TC-EA-E1  emit: .nv <each> emits module with list binding + adapter', asyn
   // Verify items thunk erases signal read
   expect(moduleText).toContain('items()')
 })
+
+// TC-EA-08: removal — middle, start, and full clear
+test('TC-EA-08  each(): removal — middle, start, and full clear', () => {
+  const items = signal<Item[]>([
+    { id: 1, label: 'A' },
+    { id: 2, label: 'B' },
+    { id: 3, label: 'C' },
+  ])
+  const ir = html`<ul>${each(
+    () => items() as readonly unknown[],
+    (item) => (item as Item).id,
+    ({ item }) => html`<li>${() => (item!() as Item).label}</li>`,
+  )}</ul>`
+
+  withBothBackends(ir, (parent) => {
+    // Remove from middle
+    items.set([
+      { id: 1, label: 'A' },
+      { id: 3, label: 'C' },
+    ])
+    flushSync()
+    let lis = parent.querySelectorAll('li')
+    expect(lis.length).toBe(2)
+    expect(lis[0]!.textContent).toBe('A')
+    expect(lis[1]!.textContent).toBe('C')
+
+    // Remove from start
+    items.set([{ id: 3, label: 'C' }])
+    flushSync()
+    lis = parent.querySelectorAll('li')
+    expect(lis.length).toBe(1)
+    expect(lis[0]!.textContent).toBe('C')
+
+    // Full clear
+    items.set([])
+    flushSync()
+    expect(parent.querySelectorAll('li').length).toBe(0)
+  })
+})
+
+// TC-EA-09: empty list → populate — zero-to-nonzero transition
+test('TC-EA-09  each(): empty list → populate — zero-to-nonzero transition', () => {
+  const items = signal<Item[]>([])
+  const ir = html`<ul>${each(
+    () => items() as readonly unknown[],
+    (item) => (item as Item).id,
+    ({ item }) => html`<li>${() => (item!() as Item).label}</li>`,
+  )}</ul>`
+
+  withBothBackends(ir, (parent) => {
+    // Initial: empty
+    expect(parent.querySelectorAll('li').length).toBe(0)
+
+    // Populate
+    items.set([
+      { id: 1, label: 'X' },
+      { id: 2, label: 'Y' },
+    ])
+    flushSync()
+    const lis = parent.querySelectorAll('li')
+    expect(lis.length).toBe(2)
+    expect(lis[0]!.textContent).toBe('X')
+    expect(lis[1]!.textContent).toBe('Y')
+
+    // Clear again
+    items.set([])
+    flushSync()
+    expect(parent.querySelectorAll('li').length).toBe(0)
+  })
+})
+
+// TC-EA-11: .nv <each>: body IR contains text binding for item expression
+test('TC-EA-11  .nv <each>: body IR contains text binding for item expression', () => {
+  const source =
+    'const List = $component(() => {\n' +
+    '  $script(() => {\n' +
+    '    const items = signal([])\n' +
+    '  })\n' +
+    '  $render(() => html`<ul>' +
+    '<each .of="${items}" key="${(item) => item.id}" let={item}>' +
+    '<li>${item}</li>' +
+    '</each>' +
+    '</ul>`)\n' +
+    '})\n'
+
+  const results = parseNvFile(source, 'list.nv', document)
+  expect(results.length).toBe(1)
+  const ir = results[0]!.ir
+
+  const listBinding = ir.bindings.find((b) => b.kind === 'list')
+  expect(listBinding).toBeDefined()
+  expect(listBinding!.kind).toBe('list')
+
+  // Call itemTemplate with stub signals to get the body IR structure
+  const stubVs = signal<unknown>(null)
+  const stubIs = signal<number>(0)
+  const bodyIR = listBinding!.itemTemplate(stubVs, stubIs)
+
+  // Body IR must have at least one binding — proves the body was actually parsed, not just the anchor
+  expect(bodyIR.bindings.length).toBeGreaterThan(0)
+  // The ${item} hole in <li>${item}</li> becomes a text binding
+  expect(bodyIR.bindings.some((b) => b.kind === 'text')).toBe(true)
+})

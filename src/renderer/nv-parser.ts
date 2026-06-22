@@ -938,6 +938,16 @@ function processHtmlTemplate(
 
   // Add list bindings from <each> elements (anchor paths appended after component paths)
   for (const wl of pendingLists) {
+    // Diagnostic: no let={} bindings — body expressions cannot reference item or index reactively
+    if (wl.letNames.length === 0) {
+      processdiagnostics.push({
+        kind: 'warning',
+        message:
+          '<each> has no let={} bindings. Item and index will not be accessible in the body template. Add let={item} or let={item, index}.',
+        start: 0,
+        end: 0,
+      })
+    }
     const pathIndex = allPaths.length
     allPaths.push(wl.anchorPath)
     // PARSE-PATH ONLY: This ListBinding is for structural IR shape checking (parseNvFile path).
