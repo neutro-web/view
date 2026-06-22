@@ -1,6 +1,6 @@
 /**
  * nv Template IR — Type Definitions
- * Source of truth: nv-template-ir.md v0.3.1 (arch-approved 2026-06-21)
+ * Source of truth: nv-template-ir.md v0.4.1 (arch-approved 2026-06-22)
  * Stream: (3) Renderer/templating
  *
  * These types are the contract between the two front-ends and two back-ends.
@@ -233,6 +233,26 @@ export type SlotOutletBinding = BaseBinding & {
   fallback?: TemplateIR
 }
 
+// ── ClassListBinding (v0.4.1) ─────────────────────────────────────────────────
+
+/**
+ * A single entry in a class list binding.
+ * static: always-on token (added once at setup)
+ * toggle: conditionally toggled token (reactive, one effect per key or one looping effect)
+ */
+export type ClassListEntry =
+  | { kind: 'static'; token: string }
+  | { kind: 'toggle'; key: string; expr: () => unknown }
+
+/**
+ * Structured class binding: separates static tokens from reactive toggles.
+ * Back-end: static entries → classList.add() once; toggle entries → effect() per key (≤6) or loop (>6).
+ */
+export type ClassListBinding = BaseBinding & {
+  kind: 'classlist'
+  entries: readonly ClassListEntry[]
+}
+
 export type Binding =
   | TextBinding
   | AttrBinding
@@ -244,3 +264,4 @@ export type Binding =
   | SyncBinding
   | ComponentBinding
   | SlotOutletBinding
+  | ClassListBinding

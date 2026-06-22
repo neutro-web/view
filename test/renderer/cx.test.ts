@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { cx } from '../../src/renderer/html-tag'
+import { cx } from '../../src/renderer/html-tag.js'
 
 describe('cx', () => {
   it('should return empty string for no args', () => {

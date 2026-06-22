@@ -35,6 +35,8 @@
 import { createRoot, effect, getOwner, onCleanup, runWithOwner, signal } from '../core/core.js'
 import type {
   Binding,
+  ClassListBinding,
+  ClassListEntry,
   ComponentBinding,
   NodePath,
   ReactiveExpr,
@@ -184,6 +186,48 @@ function emitSetup(
               if (v == null || v === false) el.removeAttribute(name)
               else el.setAttribute(name, v === true ? '' : String(v))
             })
+          },
+        })
+        break
+      }
+
+      case 'classlist': {
+        const entries = (binding as ClassListBinding).entries
+        wireSpecs.push({
+          accessor,
+          wire(targetNode) {
+            const el = targetNode as Element
+
+            // Static entries: add once at setup
+            for (const entry of entries) {
+              if (entry.kind === 'static') {
+                el.classList.add(entry.token)
+              }
+            }
+
+            const toggleEntries = entries.filter(
+              (e): e is Extract<ClassListEntry, { kind: 'toggle' }> => e.kind === 'toggle',
+            )
+
+            if (toggleEntries.length === 0) return
+
+            if (toggleEntries.length <= 6) {
+              // One effect per key (fine-grained)
+              for (const e of toggleEntries) {
+                const key = e.key
+                const expr = e.expr
+                effect(() => {
+                  el.classList.toggle(key, !!expr())
+                })
+              }
+            } else {
+              // One looping effect for >6 toggles
+              effect(() => {
+                for (const e of toggleEntries) {
+                  el.classList.toggle(e.key, !!e.expr())
+                }
+              })
+            }
           },
         })
         break

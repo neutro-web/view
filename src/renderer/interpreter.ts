@@ -45,6 +45,8 @@ import type {
   AttrBinding,
   Binding,
   ChildBinding,
+  ClassListBinding,
+  ClassListEntry,
   ComponentBinding,
   ConditionalBinding,
   EventBinding,
@@ -143,6 +145,10 @@ function wireBinding(
       wireSlotOutlet(binding, targetNode, doc, slotsObj, capturedParentOwner)
       break
     }
+    case 'classlist': {
+      wireClassList(binding, targetNode)
+      break
+    }
     case 'sync': {
       throw new Error(
         `[nv/interpreter] v0: '${binding.kind}' binding is designed but not yet implemented in the interpreter. Deferred per IR §9.2.`,
@@ -195,6 +201,49 @@ function wireAttr(binding: AttrBinding, el: Node): void {
       element.setAttribute(name, v === true ? '' : String(v))
     }
   })
+}
+
+// ── ClassListBinding ──────────────────────────────────────────────────────────
+
+function wireClassList(binding: ClassListBinding, el: Node): void {
+  if (el.nodeType !== 1 /* ELEMENT_NODE */) {
+    throw new Error(
+      `[nv/interpreter] ClassListBinding expects an Element node; got nodeType ${el.nodeType}`,
+    )
+  }
+  const element = el as Element
+
+  // Static entries: add once at setup (no effect needed)
+  for (const entry of binding.entries) {
+    if (entry.kind === 'static') {
+      element.classList.add(entry.token)
+    }
+  }
+
+  // Toggle entries: reactive
+  const toggleEntries = binding.entries.filter(
+    (e): e is Extract<ClassListEntry, { kind: 'toggle' }> => e.kind === 'toggle',
+  )
+
+  if (toggleEntries.length === 0) return
+
+  if (toggleEntries.length <= 6) {
+    // One effect per key (fine-grained)
+    for (const e of toggleEntries) {
+      const key = e.key
+      const expr = e.expr
+      effect(() => {
+        element.classList.toggle(key, !!expr())
+      })
+    }
+  } else {
+    // One looping effect for >6 toggles
+    effect(() => {
+      for (const e of toggleEntries) {
+        element.classList.toggle(e.key, !!e.expr())
+      }
+    })
+  }
 }
 
 // ── PropBinding ───────────────────────────────────────────────────────────────
