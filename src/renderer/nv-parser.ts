@@ -210,6 +210,84 @@ function computePath(node: Node, root: Node): NodePath {
   return path
 }
 
+/** Slot-walk hole info for the .nv front-end — kind + origIdx (name for non-text). */
+type NvSlotHoleInfo =
+  | { kind: 'text'; origIdx: number }
+  | { kind: 'attr'; origIdx: number; name: string }
+  | { kind: 'prop'; origIdx: number; name: string }
+  | { kind: 'event'; origIdx: number; name: string }
+
+/**
+ * Shared per-hole binding constructor for the .nv front-end.
+ * Used by BOTH processHtmlTemplate and buildNvSlotSubIR so the two cannot diverge.
+ */
+function buildNvHoleBinding(
+  info: NvSlotHoleInfo,
+  pathIndex: number,
+  holeExpr: ts.Expression,
+  doc: Document,
+  signals: ReadonlySet<string>,
+  stubExpr: ReactiveExpr<unknown>,
+  stubHandler: HandlerExpr,
+): Binding {
+  if (info.kind === 'text') {
+    // Check slot outlet: expression is `slots.name` property access.
+    const isSlotOutlet =
+      ts.isPropertyAccessExpression(holeExpr) &&
+      ts.isIdentifier(holeExpr.expression) &&
+      holeExpr.expression.text === 'slots' &&
+      ts.isIdentifier(holeExpr.name)
+    if (isSlotOutlet) {
+      const slotName = (holeExpr.name as ts.Identifier).text
+      const b: SlotOutletBinding = { kind: 'slot-outlet', pathIndex, name: slotName }
+      return b
+    }
+    // Check conditional: ternary with html`` branches.
+    if (ts.isConditionalExpression(holeExpr)) {
+      const { whenTrue, whenFalse } = holeExpr
+      const isHtmlTTE = (e: ts.Expression): e is ts.TaggedTemplateExpression =>
+        ts.isTaggedTemplateExpression(e) && ts.isIdentifier(e.tag) && e.tag.text === 'html'
+      const isNullish = (e: ts.Expression): boolean =>
+        e.kind === ts.SyntaxKind.NullKeyword ||
+        (ts.isIdentifier(e) && (e.text === 'null' || e.text === 'undefined'))
+      if (isHtmlTTE(whenTrue) && (isHtmlTTE(whenFalse) || isNullish(whenFalse))) {
+        const b: ConditionalBinding = {
+          kind: 'conditional',
+          pathIndex,
+          condition: stubExpr as ReactiveExpr<boolean>,
+          consequent: processHtmlTemplate(whenTrue, doc, signals).ir,
+          alternate: isHtmlTTE(whenFalse) ? processHtmlTemplate(whenFalse, doc, signals).ir : null,
+        }
+        return b
+      }
+    }
+    return {
+      kind: 'text',
+      pathIndex,
+      expr: stubExpr as ReactiveExpr<string | number | boolean | null | undefined>,
+    }
+  }
+  if (info.kind === 'attr') {
+    return {
+      kind: 'attr',
+      pathIndex,
+      name: info.name,
+      expr: stubExpr as ReactiveExpr<string | number | boolean | null | undefined>,
+    }
+  }
+  if (info.kind === 'prop') {
+    return { kind: 'prop', pathIndex, name: info.name, expr: stubExpr }
+  }
+  // event
+  return {
+    kind: 'event',
+    pathIndex,
+    eventName: info.name,
+    handler: stubHandler,
+    handlerKind: 'reactive',
+  }
+}
+
 // ── Slot sub-IR builder (nv-parser context) ───────────────────────────────────
 
 /**
@@ -218,6 +296,7 @@ function computePath(node: Node, root: Node): NodePath {
  * holeExprs: original hole expression array (length = total holes in parent template).
  * doc: Document for DOM operations.
  * slotId: stable ID for the sub-IR.
+ * signals: signal names in scope (for slot-outlet / conditional detection).
  *
  * Returns the sub-IR (with stubExpr for all bindings — real exprs injected at mount time
  * via the emit path) and the found hole indices (to mark consumed in parent).
@@ -227,8 +306,10 @@ function buildNvSlotSubIR(
   holeExprs: ts.Expression[],
   doc: Document,
   slotId: string,
+  signals: ReadonlySet<string>,
 ): { ir: TemplateIR; holeIndices: number[] } {
   const stubExpr = (() => undefined) as ReactiveExpr<unknown>
+  const stubHandler = (() => (_e: Event) => undefined) as HandlerExpr
 
   if (slotNodes.length === 0) {
     return {
@@ -243,22 +324,24 @@ function buildNvSlotSubIR(
   }
   const fragRoot = fragWrapper
 
-  const holeIndices: number[] = []
+  // Track kind + origIdx per hole (fixes B1/B3: sub-builder now kind-correct).
+  const holeInfos: NvSlotHoleInfo[] = []
   const slotPaths: NodePath[] = []
   ;(function walk(node: Node): void {
     if (node.nodeType === 8) {
       const m = (node as Comment).data.match(/^nv-(\d+)$/)
       if (m !== null) {
         const idx = Number.parseInt(m[1] as string, 10)
-        holeIndices.push(idx)
+        holeInfos.push({ kind: 'text', origIdx: idx })
         slotPaths.push(computePath(node, fragRoot))
       }
     } else if (node.nodeType === 1) {
       const el = node as Element
       for (let k = 0; k < holeExprs.length; k++) {
         for (const atype of ['attr', 'prop', 'event'] as const) {
-          if (el.getAttribute(`data-nv-${atype}-${k}`) !== null) {
-            holeIndices.push(k)
+          const name = el.getAttribute(`data-nv-${atype}-${k}`)
+          if (name !== null) {
+            holeInfos.push({ kind: atype, origIdx: k, name })
             slotPaths.push(computePath(el, fragRoot))
             el.removeAttribute(`data-nv-${atype}-${k}`)
           }
@@ -277,14 +360,19 @@ function buildNvSlotSubIR(
     '',
   )
 
-  const bindings: Binding[] = holeIndices.map((_, compactIdx) => {
-    const b: TextBinding = {
-      kind: 'text',
-      pathIndex: compactIdx,
-      expr: stubExpr as ReactiveExpr<string | number | boolean | null | undefined>,
-    }
-    return b
-  })
+  // Build compact bindings via shared constructor (fixes B1: was always TextBinding).
+  const holeIndices = holeInfos.map((h) => h.origIdx)
+  const bindings: Binding[] = holeInfos.map((info, compactIdx) =>
+    buildNvHoleBinding(
+      info,
+      compactIdx,
+      holeExprs[info.origIdx] as ts.Expression,
+      doc,
+      signals,
+      stubExpr,
+      stubHandler,
+    ),
+  )
 
   return {
     ir: {
@@ -518,6 +606,7 @@ function processHtmlTemplate(
               holeExprs,
               doc,
               `slot:${tagName}:default`,
+              signals,
             )
             slots.push({ name: 'default', content: defaultIR })
             slotHoleGroups.push(holeIndices)
@@ -530,6 +619,7 @@ function processHtmlTemplate(
               holeExprs,
               doc,
               `slot:${tagName}:${slotName}`,
+              signals,
             )
             slots.push({ name: slotName, content: namedIR })
             slotHoleGroups.push(holeIndices)
@@ -622,69 +712,17 @@ function processHtmlTemplate(
     const pathIndex = holeCompactIdx[i] as number
     verdicts.push(exprReadsSignal(holeExpr, signals) ? 'ACCEPT' : 'PLAIN')
 
-    if (pos.kind === 'text') {
-      // Check if this hole is a slot outlet: expression is `slots.name` property access.
-      const isSlotOutlet =
-        ts.isPropertyAccessExpression(holeExpr) &&
-        ts.isIdentifier(holeExpr.expression) &&
-        holeExpr.expression.text === 'slots' &&
-        ts.isIdentifier(holeExpr.name)
+    // Convert PosKind → NvSlotHoleInfo (event uses eventName field; normalize to name).
+    const info: NvSlotHoleInfo =
+      pos.kind === 'event'
+        ? { kind: 'event', origIdx: i, name: pos.eventName }
+        : pos.kind === 'text'
+          ? { kind: 'text', origIdx: i }
+          : { kind: pos.kind, origIdx: i, name: pos.name }
 
-      if (isSlotOutlet && ts.isPropertyAccessExpression(holeExpr)) {
-        const slotName = (holeExpr.name as ts.Identifier).text
-        const b: SlotOutletBinding = { kind: 'slot-outlet', pathIndex, name: slotName }
-        bindings.push(b)
-        continue
-      }
-
-      if (ts.isConditionalExpression(holeExpr)) {
-        const { whenTrue, whenFalse } = holeExpr
-        const isHtmlTTE = (e: ts.Expression): e is ts.TaggedTemplateExpression =>
-          ts.isTaggedTemplateExpression(e) && ts.isIdentifier(e.tag) && e.tag.text === 'html'
-        const isNullish = (e: ts.Expression): boolean =>
-          e.kind === ts.SyntaxKind.NullKeyword ||
-          (ts.isIdentifier(e) && (e.text === 'null' || e.text === 'undefined'))
-        if (isHtmlTTE(whenTrue) && (isHtmlTTE(whenFalse) || isNullish(whenFalse))) {
-          const b: ConditionalBinding = {
-            kind: 'conditional',
-            pathIndex,
-            condition: stubExpr as ReactiveExpr<boolean>,
-            consequent: processHtmlTemplate(whenTrue, doc, signals).ir,
-            alternate: isHtmlTTE(whenFalse)
-              ? processHtmlTemplate(whenFalse, doc, signals).ir
-              : null,
-          }
-          bindings.push(b)
-          continue
-        }
-      }
-      const b: TextBinding = {
-        kind: 'text',
-        pathIndex,
-        expr: stubExpr as ReactiveExpr<string | number | boolean | null | undefined>,
-      }
-      bindings.push(b)
-    } else if (pos.kind === 'attr') {
-      const b: AttrBinding = {
-        kind: 'attr',
-        pathIndex,
-        name: pos.name,
-        expr: stubExpr as ReactiveExpr<string | number | boolean | null | undefined>,
-      }
-      bindings.push(b)
-    } else if (pos.kind === 'prop') {
-      const b: PropBinding = { kind: 'prop', pathIndex, name: pos.name, expr: stubExpr }
-      bindings.push(b)
-    } else {
-      const b: EventBinding = {
-        kind: 'event',
-        pathIndex,
-        eventName: pos.eventName,
-        handler: stubHandler,
-        handlerKind: 'reactive',
-      }
-      bindings.push(b)
-    }
+    bindings.push(
+      buildNvHoleBinding(info, pathIndex, holeExpr, doc, signals, stubExpr, stubHandler),
+    )
   }
 
   // Re-serialize shape from post-walk fragment (component elements replaced by anchors)

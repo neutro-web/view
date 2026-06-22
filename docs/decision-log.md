@@ -443,3 +443,20 @@ clarification. No semantic change. Apply when the fix lands.
 stale earlier-session drafts `decision-log-b1-b2.md` (frames B2 as an open
 source-string-vs-marker question, no B3, no shared-constructor) and
 `cc-handoff-b1-b2-corpus.md` (Option-B-shaped, no B3) — discard both.
+
+### 2026-06-21 — Slot-builder defects B1/B2/B3 LANDED
+
+**Gate.** All gates passed: `tsc --noEmit` clean, `vitest run` 3223/3223, `biome check` clean.
+Fail-shows-teeth pair confirmed: B1 regression drops 6 tests; restore → 34/34.
+Anti-vacuous sweeps: 0 `expect(true/false).toBe`, 0 `expect(!...` patterns.
+`git diff --stat HEAD` confirms exactly 4 files changed:
+`html-tag.ts`, `nv-parser.ts`, `index.ts` (renderer barrel), `slot-consumption.test.ts`.
+
+**Corpus delta.** 29 → 34 tests in `slot-consumption.test.ts` (+5). Suite-wide: 3218 → 3223.
+
+**Decisions confirmed on land.** All LOCKED as designed (see prior entry):
+- `slots()` sentinel `{ __nvSlotOutlet: string }` — structural detection, no `.toString()`
+- Option A shared constructor — `buildHtmlHoleBinding` / `buildNvHoleBinding` used by both top-level walk and slot sub-builder
+- `.nv` front-end unchanged — `slots.name` PropertyAccessExpression path untouched
+
+**References.** Prior entry `2026-06-21 — Slot-builder defects B1/B2/B3 designed and LOCKED (decision log)`.

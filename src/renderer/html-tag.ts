@@ -44,6 +44,30 @@ import type {
   TextBinding,
 } from './ir.js'
 
+// ── Slot outlet sentinel (B2 fix) ─────────────────────────────────────────────
+
+/** Opaque sentinel returned by `slots(name)` — the tagged-template outlet form. */
+export interface SlotSentinel {
+  readonly __nvSlotOutlet: string
+}
+
+/**
+ * Create a slot outlet sentinel for the tagged-template side.
+ * Write `${slots('header')}` where the child component renders the named slot.
+ * Mirrors `.nv`'s `{slots.header}` bare-read; both produce `SlotOutletBinding`.
+ */
+export function slots(name: string): SlotSentinel {
+  return { __nvSlotOutlet: name }
+}
+
+function isSlotSentinel(v: unknown): v is SlotSentinel {
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    typeof (v as Record<string, unknown>).__nvSlotOutlet === 'string'
+  )
+}
+
 // ── Hole classification ───────────────────────────────────────────────────────
 
 type HoleKind =
@@ -51,6 +75,13 @@ type HoleKind =
   | { kind: 'attr'; name: string }
   | { kind: 'event'; name: string }
   | { kind: 'prop'; name: string }
+
+/** Slot-walk hole info — tracks kind + origIdx so buildSlotSubIR can use buildHtmlHoleBinding. */
+type SlotHoleInfo =
+  | { kind: 'text'; origIdx: number }
+  | { kind: 'attr'; origIdx: number; name: string }
+  | { kind: 'prop'; origIdx: number; name: string }
+  | { kind: 'event'; origIdx: number; name: string }
 
 /**
  * Determine the binding kind for the hole between strings[i] and strings[i+1].
@@ -86,6 +117,46 @@ function classifyHole(prevString: string, nextString: string): HoleKind {
     return { kind: 'attr', name: m[1]! }
   }
   return { kind: 'text' }
+}
+
+// ── Shared per-hole binding constructor ───────────────────────────────────────
+
+/**
+ * Build one Binding from a classified hole. Used by BOTH the main hole loop
+ * and buildSlotSubIR so the two cannot produce divergent kinds.
+ */
+function buildHtmlHoleBinding(holeKind: HoleKind, pathIndex: number, origExpr: unknown): Binding {
+  type PrimitiveExpr = ReactiveExpr<string | number | boolean | null | undefined>
+  const expr = origExpr as PrimitiveExpr
+  if (holeKind.kind === 'text') {
+    if (isSlotSentinel(origExpr)) {
+      const b: SlotOutletBinding = {
+        kind: 'slot-outlet',
+        pathIndex,
+        name: origExpr.__nvSlotOutlet,
+      }
+      return b
+    }
+    const b: TextBinding = { kind: 'text', pathIndex, expr }
+    return b
+  }
+  if (holeKind.kind === 'attr') {
+    const b: AttrBinding = { kind: 'attr', pathIndex, name: holeKind.name, expr }
+    return b
+  }
+  if (holeKind.kind === 'prop') {
+    const b: PropBinding = { kind: 'prop', pathIndex, name: holeKind.name, expr }
+    return b
+  }
+  // event
+  const b: EventBinding = {
+    kind: 'event',
+    pathIndex,
+    eventName: holeKind.name,
+    handler: expr as unknown as HandlerExpr,
+    handlerKind: 'reactive',
+  }
+  return b
 }
 
 // ── DOM path utilities ────────────────────────────────────────────────────────
@@ -142,25 +213,26 @@ function buildSlotSubIR(
   }
   const fragRoot = fragWrapper
 
-  const holeIndices: number[] = []
+  const holeInfos: SlotHoleInfo[] = []
   const slotPaths: NodePath[] = []
 
-  // Walk fragRoot to find sentinels.
+  // Walk fragRoot — record kind + origIdx for each hole (fixes B1/B3: sub-builder now kind-correct).
   ;(function walk(node: Node): void {
     if (node.nodeType === 8 /* COMMENT_NODE */) {
       const m = (node as Comment).data.match(/^nv-(\d+)$/)
       if (m !== null) {
         // biome-ignore lint/style/noNonNullAssertion: regex match guarantees group
         const idx = Number.parseInt(m[1]!, 10)
-        holeIndices.push(idx)
+        holeInfos.push({ kind: 'text', origIdx: idx })
         slotPaths.push(computePath(node, fragRoot))
       }
     } else if (node.nodeType === 1 /* ELEMENT_NODE */) {
       const el = node as Element
       for (let k = 0; k < exprs.length; k++) {
         for (const atype of ['attr', 'prop', 'event'] as const) {
-          if (el.getAttribute(`data-nv-${atype}-${k}`) !== null) {
-            holeIndices.push(k)
+          const name = el.getAttribute(`data-nv-${atype}-${k}`)
+          if (name !== null) {
+            holeInfos.push({ kind: atype, origIdx: k, name })
             slotPaths.push(computePath(el, fragRoot))
             el.removeAttribute(`data-nv-${atype}-${k}`)
           }
@@ -180,13 +252,15 @@ function buildSlotSubIR(
     '',
   )
 
-  // Build compact bindings (pathIndex aligned with slotPaths).
-  type PrimitiveExpr = ReactiveExpr<string | number | boolean | null | undefined>
-  const bindings: Binding[] = holeIndices.map((origIdx, compactIdx) => {
-    const expr = exprs[origIdx] as PrimitiveExpr
-    const b: TextBinding = { kind: 'text', pathIndex: compactIdx, expr }
-    return b
-  })
+  // Build compact bindings via shared constructor (fixes B1: was always TextBinding).
+  const holeIndices = holeInfos.map((h) => h.origIdx)
+  const bindings: Binding[] = holeInfos.map((info, compactIdx) =>
+    buildHtmlHoleBinding(
+      info.kind === 'text' ? { kind: 'text' } : { kind: info.kind, name: info.name },
+      compactIdx,
+      exprs[info.origIdx],
+    ),
+  )
 
   return {
     ir: {
@@ -298,9 +372,9 @@ function buildHtmlStrings(
  */
 export function createHtmlTag(document: Document) {
   return function html(strings: TemplateStringsArray, ...exprs: unknown[]): TemplateIR {
-    // Validate: all expressions must be functions (thunks)
+    // Validate: all expressions must be functions (thunks) OR slot sentinels.
     for (let i = 0; i < exprs.length; i++) {
-      if (typeof exprs[i] !== 'function') {
+      if (typeof exprs[i] !== 'function' && !isSlotSentinel(exprs[i])) {
         throw new TypeError(
           `[nv/html] Expression at hole ${i} is not a function. Wrap reactive values in thunks: \${() => signal()} not \${signal()}. Received: ${typeof exprs[i]}`,
         )
@@ -497,43 +571,7 @@ export function createHtmlTag(document: Document) {
       if (consumedByComponent.has(i)) continue
       // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
       const hole = holes[i]!
-      // The tagged-template front-end can only validate that exprs[i] is a function
-      // (checked above). The generic type parameter is asserted here — the runtime
-      // effect will produce wrong output (non-string in a DOM text position) if the
-      // caller passes a thunk that returns a non-primitive, but that is a caller error,
-      // not a type system error. The TextBinding/AttrBinding expr types narrow to
-      // primitives; we cast to satisfy tsc while keeping the guard above.
-      type PrimitiveExpr = ReactiveExpr<string | number | boolean | null | undefined>
-      const expr = exprs[i] as PrimitiveExpr
-      if (hole.kind === 'text') {
-        // Check if this hole is a slot outlet: () => slots.name
-        const exprFn = exprs[i] as { toString(): string }
-        const slotOutletMatch = exprFn.toString().match(/^\s*\(\s*\)\s*=>\s*slots\.(\w+)\s*$/)
-        if (slotOutletMatch !== null) {
-          // biome-ignore lint/style/noNonNullAssertion: regex match guarantees group
-          const slotName = slotOutletMatch[1]!
-          const b: SlotOutletBinding = { kind: 'slot-outlet', pathIndex: i, name: slotName }
-          bindings.push(b)
-        } else {
-          const b: TextBinding = { kind: 'text', pathIndex: i, expr }
-          bindings.push(b)
-        }
-      } else if (hole.kind === 'attr') {
-        const b: AttrBinding = { kind: 'attr', pathIndex: i, name: hole.name, expr }
-        bindings.push(b)
-      } else if (hole.kind === 'event') {
-        const b: EventBinding = {
-          kind: 'event',
-          pathIndex: i,
-          eventName: hole.name,
-          handler: expr as unknown as HandlerExpr,
-          handlerKind: 'reactive',
-        }
-        bindings.push(b)
-      } else if (hole.kind === 'prop') {
-        const b: PropBinding = { kind: 'prop', pathIndex: i, name: hole.name, expr }
-        bindings.push(b)
-      }
+      bindings.push(buildHtmlHoleBinding(hole, i, exprs[i]))
     }
 
     const shape: TemplateShape = {

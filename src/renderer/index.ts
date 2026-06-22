@@ -2,7 +2,8 @@
 // live DOM with fine-grained bindings. Web Components are a compile target, not
 // the model. (Compiler back-end for the IR is deferred — see ROADMAP.)
 export { mount } from './interpreter.js'
-export { createHtmlTag } from './html-tag.js'
+export { createHtmlTag, slots } from './html-tag.js'
+export type { SlotSentinel } from './html-tag.js'
 export { structurallyEqual } from './comparator.js'
 
 export type {

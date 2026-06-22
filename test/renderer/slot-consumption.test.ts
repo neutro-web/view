@@ -7,9 +7,14 @@ import { JSDOM } from 'jsdom'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { emitMount } from '../../src/compiler/emitted-mount.js'
 import { createRoot, flushSync, signal } from '../../src/core/core.js'
-import { createHtmlTag } from '../../src/renderer/html-tag.js'
+import { createHtmlTag, slots } from '../../src/renderer/html-tag.js'
 import { mount } from '../../src/renderer/interpreter.js'
-import type { ComponentBinding, TemplateIR } from '../../src/renderer/ir.js'
+import type {
+  ComponentBinding,
+  ConditionalBinding,
+  SlotOutletBinding,
+  TemplateIR,
+} from '../../src/renderer/ir.js'
 import { parseNvFile } from '../../src/renderer/nv-parser.js'
 import { irStructurallyEqual } from './ir-equivalence.js'
 
@@ -533,5 +538,455 @@ describe('G4.6 — Child-dispose: parent signal live, disposed region does NOT m
     expect(textAfter).not.toBe('after-child-dispose')
 
     disposes.parent()
+  })
+})
+
+// ── §8.2 corpus extension — Slot-builder defects B1/B2/B3 ─────────────────────
+
+describe('§8.2-B1 — slot-with-prop-hole: sub-builder emits PropBinding, not TextBinding', () => {
+  it('FE: html-tag slot sub-IR has PropBinding for .prop= hole', () => {
+    const html = createHtmlTag(doc)
+    const cls = signal('primary')
+    const ir = html`<Card><slot name="body"><span .className="${() => cls()}">hi</span></slot></Card>`
+    const comp = ir.bindings.find((b) => b.kind === 'component') as ComponentBinding | undefined
+    expect(comp).toBeDefined()
+    const body = comp!.slots.find((s) => s.name === 'body')
+    expect(body).toBeDefined()
+    expect(body!.content.bindings[0]?.kind).toBe('prop')
+  })
+
+  it('FE: nv-parser slot sub-IR has PropBinding for .prop= hole', () => {
+    const nvSrc = [
+      'export const P = $component(() => {',
+      '  $script(() => { const cls = signal("primary") })',
+      '  $render(() => html`<Card><slot name="body"><span .className="${cls}">hi</span></slot></Card>`)',
+      '})',
+    ].join('\n')
+    const nvIR = parseNvFile(nvSrc, 'test.nv', doc)[0]?.ir
+    expect(nvIR).toBeDefined()
+    const nvComp = nvIR!.bindings.find((b) => b.kind === 'component') as
+      | ComponentBinding
+      | undefined
+    expect(nvComp).toBeDefined()
+    const nvBody = nvComp!.slots.find((s) => s.name === 'body')
+    expect(nvBody).toBeDefined()
+    expect(nvBody!.content.bindings[0]?.kind).toBe('prop')
+  })
+
+  it('FE-equivalence: both front-ends produce identical prop-hole slot sub-IRs', () => {
+    const html = createHtmlTag(doc)
+    const cls = signal('primary')
+    const htmlIR = html`<Card><slot name="body"><span .className="${() => cls()}">hi</span></slot></Card>`
+    const htmlComp = htmlIR.bindings.find((b) => b.kind === 'component') as
+      | ComponentBinding
+      | undefined
+    const htmlBody = htmlComp!.slots.find((s) => s.name === 'body')!
+
+    const nvSrc = [
+      'export const P = $component(() => {',
+      '  $script(() => { const cls = signal("primary") })',
+      '  $render(() => html`<Card><slot name="body"><span .className="${cls}">hi</span></slot></Card>`)',
+      '})',
+    ].join('\n')
+    const nvIR = parseNvFile(nvSrc, 'test.nv', doc)[0]?.ir!
+    const nvComp = nvIR.bindings.find((b) => b.kind === 'component') as ComponentBinding | undefined
+    const nvBody = nvComp!.slots.find((s) => s.name === 'body')!
+
+    const r = irStructurallyEqual(doc, htmlBody.content, nvBody.content)
+    expect(r.equal, `prop-slot sub-IR divergence: ${r.reason}`).toBe(true)
+  })
+
+  it('interpreter: prop hole in slot content sets and updates DOM property', () => {
+    const cls = signal('initial')
+    const slotIR: TemplateIR = {
+      id: 'slot:b1prop:body',
+      shape: { html: '<span>hi</span>', bindingPaths: [[0]] },
+      bindings: [{ kind: 'prop', pathIndex: 0, name: 'className', expr: () => cls() }],
+    }
+    const childIR: TemplateIR = {
+      id: 'child:b1prop',
+      shape: { html: '<!--nv-0-->', bindingPaths: [[0]] },
+      bindings: [{ kind: 'slot-outlet', pathIndex: 0, name: 'body' }],
+    }
+    const ir: TemplateIR = {
+      id: 'parent:b1prop:i',
+      shape: { html: '<!--nv-comp-0-->', bindingPaths: [[0]] },
+      bindings: [
+        {
+          kind: 'component',
+          pathIndex: 0,
+          component: () => childIR,
+          props: [],
+          propNames: [],
+          slots: [{ name: 'body', content: slotIR }],
+        },
+      ],
+    }
+    mountI(ir)
+    expect(container.querySelector('span')?.className).toBe('initial')
+    cls.set('updated')
+    flushSync()
+    expect(container.querySelector('span')?.className).toBe('updated')
+  })
+
+  it('compiler: prop hole in slot content sets and updates DOM property', () => {
+    const cls = signal('initial')
+    const slotIR: TemplateIR = {
+      id: 'slot:b1prop:body',
+      shape: { html: '<span>hi</span>', bindingPaths: [[0]] },
+      bindings: [{ kind: 'prop', pathIndex: 0, name: 'className', expr: () => cls() }],
+    }
+    const childIR: TemplateIR = {
+      id: 'child:b1prop',
+      shape: { html: '<!--nv-0-->', bindingPaths: [[0]] },
+      bindings: [{ kind: 'slot-outlet', pathIndex: 0, name: 'body' }],
+    }
+    const ir: TemplateIR = {
+      id: 'parent:b1prop:c',
+      shape: { html: '<!--nv-comp-0-->', bindingPaths: [[0]] },
+      bindings: [
+        {
+          kind: 'component',
+          pathIndex: 0,
+          component: () => childIR,
+          props: [],
+          propNames: [],
+          slots: [{ name: 'body', content: slotIR }],
+        },
+      ],
+    }
+    mountC(ir)
+    expect(container.querySelector('span')?.className).toBe('initial')
+    cls.set('updated')
+    flushSync()
+    expect(container.querySelector('span')?.className).toBe('updated')
+  })
+})
+
+describe('§8.2-B1 — slot-with-event-hole: sub-builder emits EventBinding, not TextBinding', () => {
+  it('FE: html-tag slot sub-IR has EventBinding for @event= hole', () => {
+    const html = createHtmlTag(doc)
+    let clicks = 0
+    const ir = html`<Card><slot name="body"><button @click="${() => () => {
+      clicks++
+    }}">btn</button></slot></Card>`
+    const comp = ir.bindings.find((b) => b.kind === 'component') as ComponentBinding | undefined
+    expect(comp).toBeDefined()
+    const body = comp!.slots.find((s) => s.name === 'body')
+    expect(body).toBeDefined()
+    expect(body!.content.bindings[0]?.kind).toBe('event')
+    void clicks
+  })
+
+  it('FE: nv-parser slot sub-IR has EventBinding for @event= hole', () => {
+    const nvSrc = [
+      'export const P = $component(() => {',
+      '  $script(() => { const handler = signal(() => {}) })',
+      '  $render(() => html`<Card><slot name="body"><button @click="${handler}">btn</button></slot></Card>`)',
+      '})',
+    ].join('\n')
+    const nvIR = parseNvFile(nvSrc, 'test.nv', doc)[0]?.ir
+    expect(nvIR).toBeDefined()
+    const nvComp = nvIR!.bindings.find((b) => b.kind === 'component') as
+      | ComponentBinding
+      | undefined
+    expect(nvComp).toBeDefined()
+    const nvBody = nvComp!.slots.find((s) => s.name === 'body')
+    expect(nvBody).toBeDefined()
+    expect(nvBody!.content.bindings[0]?.kind).toBe('event')
+  })
+
+  it('FE-equivalence: both front-ends produce identical event-hole slot sub-IRs', () => {
+    const html = createHtmlTag(doc)
+    let clicks = 0
+    const htmlIR = html`<Card><slot name="body"><button @click="${() => () => {
+      clicks++
+    }}">btn</button></slot></Card>`
+    const htmlComp = htmlIR.bindings.find((b) => b.kind === 'component') as
+      | ComponentBinding
+      | undefined
+    const htmlBody = htmlComp!.slots.find((s) => s.name === 'body')!
+    void clicks
+
+    const nvSrc = [
+      'export const P = $component(() => {',
+      '  $script(() => { const handler = signal(() => {}) })',
+      '  $render(() => html`<Card><slot name="body"><button @click="${handler}">btn</button></slot></Card>`)',
+      '})',
+    ].join('\n')
+    const nvIR = parseNvFile(nvSrc, 'test.nv', doc)[0]?.ir!
+    const nvComp = nvIR.bindings.find((b) => b.kind === 'component') as ComponentBinding | undefined
+    const nvBody = nvComp!.slots.find((s) => s.name === 'body')!
+
+    const r = irStructurallyEqual(doc, htmlBody.content, nvBody.content)
+    expect(r.equal, `event-slot sub-IR divergence: ${r.reason}`).toBe(true)
+  })
+
+  it('interpreter: event hole in slot content fires handler on dispatch', () => {
+    let clicks = 0
+    const evtSlotIR: TemplateIR = {
+      id: 'slot:b1evt:body',
+      shape: { html: '<button>btn</button>', bindingPaths: [[0]] },
+      bindings: [
+        {
+          kind: 'event',
+          pathIndex: 0,
+          eventName: 'click',
+          handler: () => () => {
+            clicks++
+          },
+          handlerKind: 'reactive',
+        },
+      ],
+    }
+    const childIR: TemplateIR = {
+      id: 'child:b1evt',
+      shape: { html: '<!--nv-0-->', bindingPaths: [[0]] },
+      bindings: [{ kind: 'slot-outlet', pathIndex: 0, name: 'body' }],
+    }
+    const ir: TemplateIR = {
+      id: 'parent:b1evt:i',
+      shape: { html: '<!--nv-comp-0-->', bindingPaths: [[0]] },
+      bindings: [
+        {
+          kind: 'component',
+          pathIndex: 0,
+          component: () => childIR,
+          props: [],
+          propNames: [],
+          slots: [{ name: 'body', content: evtSlotIR }],
+        },
+      ],
+    }
+    mountI(ir)
+    const btn = container.querySelector('button')
+    expect(btn).toBeDefined()
+    btn!.dispatchEvent(new dom.window.Event('click'))
+    expect(clicks).toBe(1)
+  })
+
+  it('compiler: event hole in slot content fires handler on dispatch', () => {
+    let clicks = 0
+    const evtSlotIR: TemplateIR = {
+      id: 'slot:b1evt:body',
+      shape: { html: '<button>btn</button>', bindingPaths: [[0]] },
+      bindings: [
+        {
+          kind: 'event',
+          pathIndex: 0,
+          eventName: 'click',
+          handler: () => () => {
+            clicks++
+          },
+          handlerKind: 'reactive',
+        },
+      ],
+    }
+    const childIR: TemplateIR = {
+      id: 'child:b1evt',
+      shape: { html: '<!--nv-0-->', bindingPaths: [[0]] },
+      bindings: [{ kind: 'slot-outlet', pathIndex: 0, name: 'body' }],
+    }
+    const ir: TemplateIR = {
+      id: 'parent:b1evt:c',
+      shape: { html: '<!--nv-comp-0-->', bindingPaths: [[0]] },
+      bindings: [
+        {
+          kind: 'component',
+          pathIndex: 0,
+          component: () => childIR,
+          props: [],
+          propNames: [],
+          slots: [{ name: 'body', content: evtSlotIR }],
+        },
+      ],
+    }
+    mountC(ir)
+    const btn = container.querySelector('button')
+    expect(btn).toBeDefined()
+    btn!.dispatchEvent(new dom.window.Event('click'))
+    expect(clicks).toBe(1)
+  })
+})
+
+describe('§8.2-B2 — outlet-via-slots-sentinel: slots("name") produces SlotOutletBinding', () => {
+  it('FE: html-tag ${slots("name")} in child template produces SlotOutletBinding', () => {
+    const html = createHtmlTag(doc)
+    const childIR = html`<div>${slots('header')}</div>`
+    expect(childIR.bindings[0]?.kind).toBe('slot-outlet')
+    expect((childIR.bindings[0] as SlotOutletBinding).name).toBe('header')
+  })
+
+  it('FE: nv-parser ${slots.header} in child template produces SlotOutletBinding', () => {
+    const nvSrc = [
+      'export const Child = $component(() => {',
+      '  $render(() => html`<div>${slots.header}</div>`)',
+      '})',
+    ].join('\n')
+    const nvIR = parseNvFile(nvSrc, 'test.nv', doc)[0]?.ir
+    expect(nvIR).toBeDefined()
+    expect(nvIR!.bindings[0]?.kind).toBe('slot-outlet')
+    expect((nvIR!.bindings[0] as SlotOutletBinding).name).toBe('header')
+  })
+
+  it('FE-equivalence: html-tag slots() and nv-parser slots.x produce identical child IRs', () => {
+    const html = createHtmlTag(doc)
+    const htmlChildIR = html`<div>${slots('header')}</div>`
+
+    const nvSrc = [
+      'export const Child = $component(() => {',
+      '  $render(() => html`<div>${slots.header}</div>`)',
+      '})',
+    ].join('\n')
+    const nvChildIR = parseNvFile(nvSrc, 'test.nv', doc)[0]?.ir!
+
+    const r = irStructurallyEqual(doc, htmlChildIR, nvChildIR)
+    expect(r.equal, `outlet-sentinel IR divergence: ${r.reason}`).toBe(true)
+  })
+
+  it('interpreter: slots() outlet renders filled slot content in child', () => {
+    const headerContentIR: TemplateIR = {
+      id: 'slot:b2:header',
+      shape: { html: '<strong>Title</strong>', bindingPaths: [] },
+      bindings: [],
+    }
+    const childIR: TemplateIR = {
+      id: 'child:b2',
+      shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0, 0]] },
+      bindings: [{ kind: 'slot-outlet', pathIndex: 0, name: 'header' }],
+    }
+    const ir: TemplateIR = {
+      id: 'parent:b2:i',
+      shape: { html: '<!--nv-comp-0-->', bindingPaths: [[0]] },
+      bindings: [
+        {
+          kind: 'component',
+          pathIndex: 0,
+          component: () => childIR,
+          props: [],
+          propNames: [],
+          slots: [{ name: 'header', content: headerContentIR }],
+        },
+      ],
+    }
+    mountI(ir)
+    expect(container.querySelector('strong')?.textContent).toBe('Title')
+  })
+
+  it('compiler: slots() outlet renders filled slot content in child', () => {
+    const headerContentIR: TemplateIR = {
+      id: 'slot:b2:header',
+      shape: { html: '<strong>Title</strong>', bindingPaths: [] },
+      bindings: [],
+    }
+    const childIR: TemplateIR = {
+      id: 'child:b2',
+      shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0, 0]] },
+      bindings: [{ kind: 'slot-outlet', pathIndex: 0, name: 'header' }],
+    }
+    const ir: TemplateIR = {
+      id: 'parent:b2:c',
+      shape: { html: '<!--nv-comp-0-->', bindingPaths: [[0]] },
+      bindings: [
+        {
+          kind: 'component',
+          pathIndex: 0,
+          component: () => childIR,
+          props: [],
+          propNames: [],
+          slots: [{ name: 'header', content: headerContentIR }],
+        },
+      ],
+    }
+    mountC(ir)
+    expect(container.querySelector('strong')?.textContent).toBe('Title')
+  })
+})
+
+describe('§8.2-B3 — outlet-inside-slot-content: slot sub-builder detects slots() outlet', () => {
+  it('FE: html-tag slot sub-IR has SlotOutletBinding when slot content contains slots() sentinel', () => {
+    const html = createHtmlTag(doc)
+    const ir = html`<Outer><slot name="body">${slots('inner')}</slot></Outer>`
+    const comp = ir.bindings.find((b) => b.kind === 'component') as ComponentBinding | undefined
+    expect(comp).toBeDefined()
+    const body = comp!.slots.find((s) => s.name === 'body')
+    expect(body).toBeDefined()
+    expect(body!.content.bindings[0]?.kind).toBe('slot-outlet')
+    expect((body!.content.bindings[0] as SlotOutletBinding).name).toBe('inner')
+  })
+
+  it('FE: nv-parser slot sub-IR has SlotOutletBinding when slot content contains slots.x outlet', () => {
+    const nvSrc = [
+      'export const P = $component(() => {',
+      '  $render(() => html`<Outer><slot name="body">${slots.inner}</slot></Outer>`)',
+      '})',
+    ].join('\n')
+    const nvIR = parseNvFile(nvSrc, 'test.nv', doc)[0]?.ir
+    expect(nvIR).toBeDefined()
+    const nvComp = nvIR!.bindings.find((b) => b.kind === 'component') as
+      | ComponentBinding
+      | undefined
+    expect(nvComp).toBeDefined()
+    const nvBody = nvComp!.slots.find((s) => s.name === 'body')
+    expect(nvBody).toBeDefined()
+    expect(nvBody!.content.bindings[0]?.kind).toBe('slot-outlet')
+    expect((nvBody!.content.bindings[0] as SlotOutletBinding).name).toBe('inner')
+  })
+
+  it('FE-equivalence: both front-ends agree on outlet-inside-slot-content sub-IR', () => {
+    const html = createHtmlTag(doc)
+    const htmlIR = html`<Outer><slot name="body">${slots('inner')}</slot></Outer>`
+    const htmlComp = htmlIR.bindings.find((b) => b.kind === 'component') as
+      | ComponentBinding
+      | undefined
+    const htmlBody = htmlComp!.slots.find((s) => s.name === 'body')!
+
+    const nvSrc = [
+      'export const P = $component(() => {',
+      '  $render(() => html`<Outer><slot name="body">${slots.inner}</slot></Outer>`)',
+      '})',
+    ].join('\n')
+    const nvIR = parseNvFile(nvSrc, 'test.nv', doc)[0]?.ir!
+    const nvComp = nvIR.bindings.find((b) => b.kind === 'component') as ComponentBinding | undefined
+    const nvBody = nvComp!.slots.find((s) => s.name === 'body')!
+
+    const r = irStructurallyEqual(doc, htmlBody.content, nvBody.content)
+    expect(r.equal, `outlet-in-slot-content sub-IR divergence: ${r.reason}`).toBe(true)
+  })
+})
+
+describe('§8.2-B3 — conditional-inside-slot-content: nv-parser slot sub-builder detects ternary conditional', () => {
+  it('FE: nv-parser slot sub-IR has ConditionalBinding when slot content contains conditional', () => {
+    const nvSrc = [
+      'export const P = $component(() => {',
+      '  $script(() => { const show = signal(true) })',
+      '  $render(() => html`<Outer><slot name="body">${show ? html`<p>Yes</p>` : html`<p>No</p>`}</slot></Outer>`)',
+      '})',
+    ].join('\n')
+    const nvIR = parseNvFile(nvSrc, 'test.nv', doc)[0]?.ir
+    expect(nvIR).toBeDefined()
+    const nvComp = nvIR!.bindings.find((b) => b.kind === 'component') as
+      | ComponentBinding
+      | undefined
+    expect(nvComp).toBeDefined()
+    const nvBody = nvComp!.slots.find((s) => s.name === 'body')
+    expect(nvBody).toBeDefined()
+    expect(nvBody!.content.bindings[0]?.kind).toBe('conditional')
+    const cond = nvBody!.content.bindings[0] as ConditionalBinding
+    expect(cond.consequent.shape.html).toBe('<p>Yes</p>')
+    expect(cond.alternate?.shape.html).toBe('<p>No</p>')
+  })
+
+  it('FE: html-tag slot content with expression hole produces TextBinding (html-tag has no conditional support)', () => {
+    // html-tag does not support conditional in slot sub-IR — text binding is expected here.
+    const html = createHtmlTag(doc)
+    const show = true
+    const ir = html`<Outer><slot name="body">${() => show}</slot></Outer>`
+    void show
+    const comp = ir.bindings.find((b) => b.kind === 'component') as ComponentBinding | undefined
+    expect(comp).toBeDefined()
+    const body = comp!.slots.find((s) => s.name === 'body')
+    expect(body).toBeDefined()
+    expect(body!.content.bindings[0]?.kind).toBe('text')
   })
 })
