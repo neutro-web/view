@@ -234,7 +234,7 @@ test('TC-EA-G2  FE-equivalence: .nv <each> and each() produce irStructurallyEqua
   const ttIr = html`<ul>${each(
     () => items() as readonly unknown[],
     (item) => (item as Item).id,
-    ({ item }) => html`<li>${() => (item() as Item).label}</li>`,
+    ({ item }) => html`<li>${() => (item!() as Item).label}</li>`,
   )}</ul>`
 
   // .nv version (parse path)
