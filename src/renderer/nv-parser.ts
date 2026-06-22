@@ -442,9 +442,25 @@ function walkNvNodeList(
           throw new Error('[nv] <each> requires .of="${...}" and key="${...}" attributes')
         }
 
-        // Extract let-bound names from let={item, index}
-        const letAttr = el.getAttribute('let') ?? ''
-        const letNames = letAttr
+        // Extract let-bound names from let={item, index}.
+        // JSDOM parses `let={item, index}` (unquoted) as two attributes because
+        // of the comma: let="{item," and index}=""
+        // To handle both quoted and unquoted forms, we reassemble the full value
+        // by collecting all broken continuation attributes (attr names ending with '}').
+        const rawLet = el.getAttribute('let') ?? ''
+        // Collect all attribute names that look like broken continuations:
+        // jsdom turns `index}` into an attr name with value "".
+        const brokenParts: string[] = []
+        for (const attr of Array.from(el.attributes)) {
+          if (attr.name !== 'let' && attr.name.endsWith('}') && attr.value === '') {
+            brokenParts.push(attr.name.slice(0, -1).trim()) // strip trailing '}'
+          }
+        }
+        // rawLet may be "{item," (broken) or "{item, index}" (quoted, complete)
+        // Concatenate any broken continuation parts.
+        const fullLetValue =
+          brokenParts.length > 0 ? `${rawLet}, ${brokenParts.join(', ')}` : rawLet
+        const letNames = fullLetValue
           .replace(/[{}]/g, '')
           .split(',')
           .map((s) => s.trim())
@@ -1206,7 +1222,12 @@ function eraseSignalReadsInNode(
           })
           return
         }
-        if (ts.isPropertyAccessExpression(p) && (p.expression === n || p.name === n)) return
+        // For propsAccessors (accessor !== undefined), allow rewriting the object position
+        // in a property access (e.g. `item.label` → `slotProps.item().label`).
+        // Only skip the property-name position (p.name === n) unconditionally.
+        // For plain signal reads (no accessor), skip both positions to avoid double rewrites.
+        if (ts.isPropertyAccessExpression(p) && p.name === n) return
+        if (ts.isPropertyAccessExpression(p) && p.expression === n && accessor === undefined) return
         if (ts.isVariableDeclaration(p) && p.name === n) return
         if (ts.isParameter(p) && p.name === n) return
         if (ts.isShorthandPropertyAssignment(p)) return

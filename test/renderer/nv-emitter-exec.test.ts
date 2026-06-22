@@ -1075,3 +1075,343 @@ export { mount } from '@neutro/view/renderer'
     disposeB()
   })
 })
+
+// ── EX-EACH-01..05: each authoring — .nv behavioral e2e ──────────────────────
+
+/**
+ * Shared builder for each-authoring exec tests.
+ * Emits a List component with .nv <each>, bundles it, and exports
+ * flushSync + signal from core so callers share one scheduler instance.
+ */
+async function buildListBundle(source: string): Promise<string> {
+  const js = emitModule(parseNvFileForEmit(source, 'list.nv', sharedDoc))
+  const withExports = `${js}\nexport { flushSync, signal } from '@neutro/view/core'\n`
+  const entryFile = tmpPath('.js')
+  const outFile = tmpPath('.bundle.mjs')
+  fs.writeFileSync(entryFile, withExports, 'utf8')
+  await esbuild.build({
+    entryPoints: [entryFile],
+    bundle: true,
+    format: 'esm',
+    outfile: outFile,
+    platform: 'node',
+    plugins: [
+      {
+        name: 'neutro-alias',
+        setup(build) {
+          build.onResolve({ filter: /^@neutro\/view\/core$/ }, () => ({ path: coreIndexPath }))
+          build.onResolve({ filter: /^@neutro\/view\/renderer$/ }, () => ({
+            path: rendererIndexPath,
+          }))
+        },
+      },
+    ],
+  })
+  return outFile
+}
+
+type ListBundleModule = {
+  List: ComponentFactory
+  flushSync(): void
+  signal<T>(v: T): { (): T; set(v: T): void }
+}
+
+// ── EX-EACH-01: initial render ────────────────────────────────────────────────
+
+describe('EX-EACH-01  initial render: <each> mounts N items with correct text', () => {
+  const source = `
+const List = $component(() => {
+  $script(() => {
+    const items = signal([
+      { id: 1, label: 'Alpha' },
+      { id: 2, label: 'Beta' },
+      { id: 3, label: 'Gamma' },
+    ])
+  })
+  $render(() => html\`<ul><each .of="\${items}" key="\${(i) => i.id}" let={item}><li>\${item.label}</li></each></ul>\`)
+})`
+
+  test('EX-EACH-01  initial render — 3 <li> in correct order', async () => {
+    const outFile = await buildListBundle(source)
+    const mod = (await import(outFile)) as ListBundleModule
+    const doc = makeDoc()
+    const parent = makeParent(doc)
+    const dispose = mod.List.mount(parent, doc)
+    mod.flushSync()
+
+    const lis = parent.querySelectorAll('li')
+    expect(lis.length).toBe(3)
+    expect(lis[0]!.textContent).toBe('Alpha')
+    expect(lis[1]!.textContent).toBe('Beta')
+    expect(lis[2]!.textContent).toBe('Gamma')
+
+    dispose()
+  })
+})
+
+// ── EX-EACH-02: item reactivity + node identity (Variant-A proof) ─────────────
+
+describe('EX-EACH-02  item reactivity: value-change updates DOM; node identity preserved (Variant-A .nv proof)', () => {
+  /**
+   * We drive items reactivity via an external signal threaded as a prop so the
+   * test controls it directly — same pattern as TC-C04-exec / TC-C05-exec.
+   * The component accepts `items` as a prop (prop-erasure → () => extItems())
+   */
+  const source = `
+const List = $component((props) => {
+  $script(() => {
+    const { items } = props
+  })
+  $render(() => html\`<ul><each .of="\${items}" key="\${(i) => i.id}" let={item}><li>\${item.label}</li></each></ul>\`)
+})`
+
+  test('EX-EACH-02  value change at kept key — text updates, node identity preserved', async () => {
+    const outFile = await buildListBundle(source)
+    type Mod = {
+      List: {
+        (props: Record<string, () => unknown>, slots?: Record<string, unknown>): unknown
+        mount(
+          p: Element,
+          d: Document,
+          props?: Record<string, () => unknown>,
+          slots?: Record<string, unknown>,
+        ): () => void
+      }
+      flushSync(): void
+      signal<T>(v: T): { (): T; set(v: T): void }
+    }
+    const mod = (await import(outFile)) as Mod
+
+    type Item = { id: number; label: string }
+    const extItems = mod.signal<Item[]>([
+      { id: 1, label: 'A' },
+      { id: 2, label: 'B' },
+    ])
+
+    const doc = makeDoc()
+    const parent = makeParent(doc)
+    const dispose = mod.List.mount(parent, doc, { items: () => extItems() })
+    mod.flushSync()
+
+    const lisBefore = Array.from(parent.querySelectorAll('li'))
+    expect(lisBefore.length).toBe(2)
+    expect(lisBefore[0]!.textContent).toBe('A')
+    expect(lisBefore[1]!.textContent).toBe('B')
+
+    // Drive value change at the same key (id:1 stays, label changes)
+    extItems.set([
+      { id: 1, label: 'A-updated' },
+      { id: 2, label: 'B' },
+    ])
+    mod.flushSync()
+
+    const lisAfter = Array.from(parent.querySelectorAll('li'))
+    expect(lisAfter[0]!.textContent).toBe('A-updated')
+    expect(lisAfter[1]!.textContent).toBe('B')
+    // G1: node identity — same DOM elements reused (Variant-A transparency)
+    expect(lisAfter[0]!, 'node identity: <li> at index 0 must be same element').toBe(lisBefore[0]!)
+    expect(lisAfter[1]!, 'node identity: <li> at index 1 must be same element').toBe(lisBefore[1]!)
+
+    dispose()
+  })
+})
+
+// ── EX-EACH-03: index reactivity on reorder ───────────────────────────────────
+
+describe('EX-EACH-03  reorder — index accessor updates; node identity preserved', () => {
+  const source = `
+const List = $component((props) => {
+  $script(() => {
+    const { items } = props
+  })
+  $render(() => html\`<ul><each .of="\${items}" key="\${(i) => i.id}" let={item, index}><li>\${item.label + '#' + index}</li></each></ul>\`)
+})`
+
+  test('EX-EACH-03  reorder — index updates, same nodes reused', async () => {
+    const outFile = await buildListBundle(source)
+    type Mod = {
+      List: {
+        (props: Record<string, () => unknown>, slots?: Record<string, unknown>): unknown
+        mount(
+          p: Element,
+          d: Document,
+          props?: Record<string, () => unknown>,
+          slots?: Record<string, unknown>,
+        ): () => void
+      }
+      flushSync(): void
+      signal<T>(v: T): { (): T; set(v: T): void }
+    }
+    const mod = (await import(outFile)) as Mod
+
+    type Item = { id: number; label: string }
+    const extItems = mod.signal<Item[]>([
+      { id: 1, label: 'A' },
+      { id: 2, label: 'B' },
+      { id: 3, label: 'C' },
+    ])
+
+    const doc = makeDoc()
+    const parent = makeParent(doc)
+    const dispose = mod.List.mount(parent, doc, { items: () => extItems() })
+    mod.flushSync()
+
+    const lisBefore = Array.from(parent.querySelectorAll('li'))
+    expect(lisBefore[0]!.textContent).toBe('A#0')
+    expect(lisBefore[1]!.textContent).toBe('B#1')
+    expect(lisBefore[2]!.textContent).toBe('C#2')
+
+    // Reorder: C → A → B
+    extItems.set([
+      { id: 3, label: 'C' },
+      { id: 1, label: 'A' },
+      { id: 2, label: 'B' },
+    ])
+    mod.flushSync()
+
+    const lisAfter = Array.from(parent.querySelectorAll('li'))
+    expect(lisAfter[0]!.textContent).toBe('C#0')
+    expect(lisAfter[1]!.textContent).toBe('A#1')
+    expect(lisAfter[2]!.textContent).toBe('B#2')
+
+    // Node identity: nodes reused after reorder
+    expect(
+      lisAfter.every((li) => lisBefore.some((lb) => lb === li)),
+      'DOM nodes should be reused (identity preserved) after reorder',
+    ).toBe(true)
+
+    dispose()
+  })
+})
+
+// ── EX-EACH-04: add / remove / clear ─────────────────────────────────────────
+
+describe('EX-EACH-04  add / remove / clear — <li> count and content at each step', () => {
+  const source = `
+const List = $component((props) => {
+  $script(() => {
+    const { items } = props
+  })
+  $render(() => html\`<ul><each .of="\${items}" key="\${(i) => i.id}" let={item}><li>\${item.label}</li></each></ul>\`)
+})`
+
+  test('EX-EACH-04  append, remove-middle, clear', async () => {
+    const outFile = await buildListBundle(source)
+    type Mod = {
+      List: {
+        (props: Record<string, () => unknown>, slots?: Record<string, unknown>): unknown
+        mount(
+          p: Element,
+          d: Document,
+          props?: Record<string, () => unknown>,
+          slots?: Record<string, unknown>,
+        ): () => void
+      }
+      flushSync(): void
+      signal<T>(v: T): { (): T; set(v: T): void }
+    }
+    const mod = (await import(outFile)) as Mod
+
+    type Item = { id: number; label: string }
+    const extItems = mod.signal<Item[]>([
+      { id: 1, label: 'A' },
+      { id: 2, label: 'B' },
+    ])
+
+    const doc = makeDoc()
+    const parent = makeParent(doc)
+    const dispose = mod.List.mount(parent, doc, { items: () => extItems() })
+    mod.flushSync()
+
+    // Initial: 2 items
+    expect(parent.querySelectorAll('li').length).toBe(2)
+
+    // Append
+    extItems.set([
+      { id: 1, label: 'A' },
+      { id: 2, label: 'B' },
+      { id: 3, label: 'C' },
+    ])
+    mod.flushSync()
+    const lisAfterAppend = parent.querySelectorAll('li')
+    expect(lisAfterAppend.length).toBe(3)
+    expect(lisAfterAppend[2]!.textContent).toBe('C')
+
+    // Remove middle (id:2)
+    extItems.set([
+      { id: 1, label: 'A' },
+      { id: 3, label: 'C' },
+    ])
+    mod.flushSync()
+    const lisAfterRemove = parent.querySelectorAll('li')
+    expect(lisAfterRemove.length).toBe(2)
+    expect(lisAfterRemove[0]!.textContent).toBe('A')
+    expect(lisAfterRemove[1]!.textContent).toBe('C')
+
+    // Full clear
+    extItems.set([])
+    mod.flushSync()
+    expect(parent.querySelectorAll('li').length).toBe(0)
+
+    dispose()
+  })
+})
+
+// ── EX-EACH-05: unmount no-leak ───────────────────────────────────────────────
+
+describe('EX-EACH-05  unmount — DOM removed, no reactive leak', () => {
+  const source = `
+const List = $component((props) => {
+  $script(() => {
+    const { items } = props
+  })
+  $render(() => html\`<ul><each .of="\${items}" key="\${(i) => i.id}" let={item}><li>\${item.label}</li></each></ul>\`)
+})`
+
+  test('EX-EACH-05  dispose → DOM cleared (no <li> elements, container child count 0)', async () => {
+    const outFile = await buildListBundle(source)
+    type Mod = {
+      List: {
+        (props: Record<string, () => unknown>, slots?: Record<string, unknown>): unknown
+        mount(
+          p: Element,
+          d: Document,
+          props?: Record<string, () => unknown>,
+          slots?: Record<string, unknown>,
+        ): () => void
+      }
+      flushSync(): void
+      signal<T>(v: T): { (): T; set(v: T): void }
+    }
+    const mod = (await import(outFile)) as Mod
+
+    type Item = { id: number; label: string }
+    const extItems = mod.signal<Item[]>([
+      { id: 1, label: 'A' },
+      { id: 2, label: 'B' },
+    ])
+
+    const doc = makeDoc()
+    const parent = makeParent(doc)
+    const dispose = mod.List.mount(parent, doc, { items: () => extItems() })
+    mod.flushSync()
+
+    // Confirm initial state
+    expect(parent.querySelectorAll('li').length).toBe(2)
+
+    // Dispose and assert DOM teardown
+    dispose()
+    expect(parent.childElementCount).toBe(0)
+    expect(parent.querySelectorAll('li').length).toBe(0)
+
+    // Confirm no reactive leak: setting items after dispose must not cause any effect
+    // (observer-count probe: __test.observerCount(extItems) requires the signal from the
+    // same module instance — not accessible across bundle boundary; DOM-teardown assertion
+    // is the primary proof. Observer-count is logged as residual.)
+    extItems.set([{ id: 99, label: 'ghost' }])
+    mod.flushSync()
+    // DOM stays empty after post-dispose signal mutation
+    expect(parent.childElementCount).toBe(0)
+    expect(parent.querySelectorAll('li').length).toBe(0)
+  })
+})
