@@ -550,11 +550,12 @@ Concretely:
 The delimiter difference (`{}` in `.nv`, `${}` in tagged template) is a front-end
 lexing detail and MUST be erased before producing the IR.
 
-**Outlet detection (v0.3.2 note).** The two front-ends detect slot outlets via different
+**Outlet detection (v0.3.2/v0.3.3 note).** The two front-ends detect slot outlets via different
 mechanisms but produce identical `SlotOutletBinding` nodes. The `.nv` front-end detects
-a `slots.name` `PropertyAccessExpression` in the AST. The tagged-template front-end
-detects a `slots('name')` sentinel object (`{ __nvSlotOutlet: string }`) by structural
-property check — immune to minification. Both paths produce `{ kind: 'slot-outlet', pathIndex, name }`.
+a `slots.name` `PropertyAccessExpression` in the AST (or `slots.x ?? html\`...\`` for an
+outlet with fallback). The tagged-template front-end detects a `slots('name', opts?)` sentinel
+object (`{ __nvSlotOutlet: string, __nvFallback?: TemplateIR }`) by structural property check —
+immune to minification. Both paths produce `{ kind: 'slot-outlet', pathIndex, name, fallback? }`.
  
 **How to verify.** The differential conformance suite (§8) covers this
 implicitly: both back-ends are tested against the same corpus, and the corpus
