@@ -54,7 +54,8 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.3.3**._
 - **Perf-validation phase:** COMPLETE. All three tripwires resolved (createSignals
   cleared structural-accepted; FALSE-heavy characterized watch-item; cross-engine
   closed). No redesign triggered.
-- **Tests:** 3203 green at last report. `tsc --strict` + DOM lib, biome, build all clean.
+- **Tests:** 3237 green at last report (slot increment 1, 2026-06-22). `tsc --strict`
+  + DOM lib, biome, build all clean.
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state graph-coloring, push-down
@@ -549,3 +550,30 @@ Fail-shows-teeth pair confirmed (interpreter fallback-renders test). Anti-vacuou
 **Cites.** *Scoped slots design APPROVED [2026-06-22]* (increment 1 commissioned);
 *Slot-builder defects B1/B2/B3 LANDED [2026-06-21]* (removed degraded-copy at constructor
 level; this collapse removes it at the walk level).
+
+### 2026-06-22 — Slot increment 1: architect verification against placed files
+
+**Verification, not a new decision.** Increment 1 (LANDED entry above) verified by reading
+the four placed seam files, per "verify by reading placed files, never green counts."
+
+- **Collapse real, not parallel.** `html-tag.ts` + `nv-parser.ts`: slot content routes
+  through shared `walkNodeList`/`walkNvNodeList` via `buildSlotContentIR`/`buildNvSlotContentIR`;
+  per-hole constructors (`buildHtmlHoleBinding`/`buildNvHoleBinding`) reused by the recursion.
+  No `buildSlotSubIR`/`buildNvSlotSubIR` survive. The .nv IR-kind == emit-kind invariant holds.
+- **Component-as-slot-child real** on both front-ends (walk detects `data-nv-component` in slot
+  subtrees, recurses incl. nested-slot capture).
+- **Fallback owned correctly.** Interpreter `wireSlotOutlet` + emitted-mount slot-outlet case:
+  unfilled → `fallback` rendered under `capturedParentOwner` (D-slot-1); filled path unchanged;
+  back-ends at parity. Differential corpus exercises both back-ends with teeth.
+- **Docs consistent** at Template-IR v0.3.3 across template-ir / implementation-state / log.
+
+**Carry items confirmed (all non-blocking, fold into increment 2 — shared seams):**
+1. emitted-mount dead `?? getOwner()`/`?? null` owner-fallback in slot-outlet (slot-outlet only
+   reached via component case, which always sets `slotContext`; `??` arms never fire). Filled
+   (`?? null`) vs unfilled (`?? getOwner()`) asymmetry — converge on one expression.
+2. double `isHtmlTTE` DRY (nv-parser: `buildNvHoleBinding` + `computeThunkSource`).
+3. `nv-emitter` component-in-slot thunk + .nv fallback emit-path e2e — **the real gap**: parser
+   side wires `ThunkSource` fallback/component-slot variants, but `.nv → emitted-JS` for these is
+   untested. Increment 2 gate must include explicit e2e items.
+
+**Status.** Increment 1 formally closed. Increment 2 (scoped slots + D-slot-2) open.
