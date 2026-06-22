@@ -2,7 +2,7 @@
  
 **Stream:** (3) Renderer/templating  
 **Contract reference:** nv Reactive Core Runtime Contract v0.4.2  
-**Status:** Approved — v0.3.3 (2026-06-22). Slot increment 1 landed.  
+**Status:** Approved — v0.4 (2026-06-22). Increment 2 (scoped-slot shape + authoring) landed.  
 **Changelog:**  
 - v0.2 (2026-06-17): initial approved IR spec — six binding kinds (PoC scope) + two designed-deferred (List, Sync).  
 - v0.2.1 (2026-06-20): multi-root template shapes; list item single-root constraint noted.  
@@ -10,6 +10,7 @@
 - v0.3.1 (2026-06-21): add SlotOutletBinding (kind:'slot-outlet', name, no expr); named + reactive slot capture on both front-ends.
 - v0.3.2 (2026-06-21): doc-only. Tagged-template front-end now uses `slots('name')` sentinel for outlet detection; `.nv` front-end keeps `slots.name` AST detection. Both mechanisms produce identical `SlotOutletBinding` — IR shape unchanged. See §6.1.
 - v0.3.3 (2026-06-22): additive `fallback?: TemplateIR` on `SlotOutletBinding`; walk-collapse (GATE-2) — slot content now processed by the same recursive walk as top-level content; component-as-slot-child falls out. reactive-core v0.4.2 unchanged. D-slot-1 retained.
+- v0.4 (2026-06-22): `SlotEntry.content` → factory `(props: SlotProps) => TemplateIR` (hard-cut, no union). `SlotOutletBinding.props?: readonly PropEntry[]` — child-exposed accessor thunks. `SlotFns` updated accordingly. `let={...}` authoring on both front-ends. D-slot-1 retained. reactive-core v0.4.2 unchanged.
  
 ---
  
@@ -435,7 +436,9 @@ passing props as live accessor thunks and slot content as `TemplateIR` instances
  
 ```typescript
 type PropsObject = { readonly [name: string]: ReactiveExpr }
-type SlotFns     = { readonly [name: string]: TemplateIR }
+type SlotProps   = PropsObject                           // reuse existing { [name]: ReactiveExpr }
+type SlotContent = (props: SlotProps) => TemplateIR
+type SlotFns     = { readonly [name: string]: SlotContent }
 type ComponentRef = (props: PropsObject, slots: SlotFns) => TemplateIR
  
 type ComponentBinding = BaseBinding & {
@@ -447,7 +450,7 @@ type ComponentBinding = BaseBinding & {
 }
  
 type PropEntry = { name: string; expr: ReactiveExpr }
-type SlotEntry = { name: string; content: TemplateIR }
+type SlotEntry = { name: string; content: SlotContent }
 ```
  
 Target node: Comment anchor (same as child/conditional/list). The parent's `shape.html` holds only the anchor; the child's DOM comes from its factory.
@@ -912,11 +915,13 @@ type SyncBinding = BaseBinding & {  // DESIGNED, DEFERRED
  
 // ── ComponentBinding (v0.3) ──────────────────────────────────────────────────
 type PropsObject  = { readonly [name: string]: ReactiveExpr }
-type SlotFns      = { readonly [name: string]: TemplateIR }
+type SlotProps    = PropsObject                           // reuse existing { [name]: ReactiveExpr }
+type SlotContent  = (props: SlotProps) => TemplateIR
+type SlotFns      = { readonly [name: string]: SlotContent }
 type ComponentRef = (props: PropsObject, slots: SlotFns) => TemplateIR
  
 type PropEntry = { name: string; expr: ReactiveExpr }
-type SlotEntry = { name: string; content: TemplateIR }
+type SlotEntry = { name: string; content: SlotContent }
  
 type ComponentBinding = BaseBinding & {
   kind: 'component'
@@ -926,11 +931,12 @@ type ComponentBinding = BaseBinding & {
   slots: readonly SlotEntry[]
 };
  
-// ── SlotOutletBinding (v0.3.1; v0.3.3 adds fallback) ────────────────────────
+// ── SlotOutletBinding (v0.3.1; v0.3.3 adds fallback; v0.4 adds props) ────────
 type SlotOutletBinding = BaseBinding & {
   kind:      'slot-outlet';
   name:      string;
-  fallback?: TemplateIR;  // v0.3.3: rendered when the parent does not fill this slot
+  props?:    readonly PropEntry[];   // child-exposed accessor thunks
+  fallback?: TemplateIR;
 };
  
 type Binding =
