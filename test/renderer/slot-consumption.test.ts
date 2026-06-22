@@ -1369,7 +1369,7 @@ describe('§scoped-slot-FE-equivalence — both FEs produce identical scoped-slo
     const htmlOutlet = htmlChildIR.bindings[0] as SlotOutletBinding
     expect(htmlOutlet.kind).toBe('slot-outlet')
     expect(htmlOutlet.props).toHaveLength(1)
-    expect(htmlOutlet.props![0].name).toBe('item')
+    expect(htmlOutlet.props![0]!.name).toBe('item')
 
     // nv-parser child: slots.row({ item: item }) call form
     const nvSrc = [
@@ -1382,7 +1382,7 @@ describe('§scoped-slot-FE-equivalence — both FEs produce identical scoped-slo
     const nvOutlet = nvChildIR.bindings[0] as SlotOutletBinding
     expect(nvOutlet.kind).toBe('slot-outlet')
     expect(nvOutlet.props).toHaveLength(1)
-    expect(nvOutlet.props![0].name).toBe('item')
+    expect(nvOutlet.props![0]!.name).toBe('item')
   })
 
   it('fills: slot() factory and nv let={} produce identical SlotEntry shapes', () => {
@@ -1394,8 +1394,8 @@ describe('§scoped-slot-FE-equivalence — both FEs produce identical scoped-slo
       | ComponentBinding
       | undefined
     expect(htmlComp?.slots).toHaveLength(1)
-    expect(htmlComp?.slots[0].name).toBe('row')
-    expect(typeof htmlComp?.slots[0].content).toBe('function')
+    expect(htmlComp!.slots[0]!.name).toBe('row')
+    expect(typeof htmlComp!.slots[0]!.content).toBe('function')
 
     // nv-parser parent: <slot name="row" let={item}>
     const nvSrc = [
@@ -1409,8 +1409,8 @@ describe('§scoped-slot-FE-equivalence — both FEs produce identical scoped-slo
       | ComponentBinding
       | undefined
     expect(nvComp?.slots).toHaveLength(1)
-    expect(nvComp?.slots[0].name).toBe('row')
-    expect(typeof nvComp?.slots[0].content).toBe('function')
+    expect(nvComp!.slots[0]!.name).toBe('row')
+    expect(typeof nvComp!.slots[0]!.content).toBe('function')
   })
 })
 

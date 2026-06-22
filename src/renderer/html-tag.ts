@@ -54,7 +54,9 @@ export interface SlotSentinel {
   readonly __nvProps?: readonly PropEntry[]
 }
 
-type SlotsOpts = { fallback?: TemplateIR } & { [propName: string]: ReactiveExpr | TemplateIR | undefined }
+type SlotsOpts = { fallback?: TemplateIR } & {
+  [propName: string]: ReactiveExpr | TemplateIR | undefined
+}
 
 /**
  * Create a slot outlet sentinel for the tagged-template side.
@@ -182,7 +184,8 @@ function buildHtmlHoleBinding(holeKind: HoleKind, pathIndex: number, origExpr: u
         pathIndex,
         name: origExpr.__nvSlotOutlet,
         ...(origExpr.__nvFallback !== undefined && { fallback: origExpr.__nvFallback }),
-        ...(origExpr.__nvProps !== undefined && origExpr.__nvProps.length > 0 && { props: origExpr.__nvProps }),
+        ...(origExpr.__nvProps !== undefined &&
+          origExpr.__nvProps.length > 0 && { props: origExpr.__nvProps }),
       }
       return b
     }
@@ -337,7 +340,7 @@ function walkNodeList(nodes: Node[], exprs: unknown[], root: Node, doc: Document
               const holeMatch = /^nv-(\d+)$/.exec(commentText)
               if (holeMatch !== null) {
                 // biome-ignore lint/style/noNonNullAssertion: regex match guarantees group
-                const holeIdx = parseInt(holeMatch[1]!, 10)
+                const holeIdx = Number.parseInt(holeMatch[1]!, 10)
                 const expr = exprs[holeIdx]
                 if (isSlotFillSentinel(expr)) {
                   slots.push({ name: expr.__nvSlotFill, content: expr.factory })
@@ -358,7 +361,7 @@ function walkNodeList(nodes: Node[], exprs: unknown[], root: Node, doc: Document
               const holeMatch = /^nv-(\d+)$/.exec(commentText)
               if (holeMatch !== null) {
                 // biome-ignore lint/style/noNonNullAssertion: regex match guarantees group
-                const holeIdx = parseInt(holeMatch[1]!, 10)
+                const holeIdx = Number.parseInt(holeMatch[1]!, 10)
                 if (consumedFillIndices.has(holeIdx)) continue
               }
             }
@@ -627,7 +630,11 @@ export function createHtmlTag(document: Document) {
   return function html(strings: TemplateStringsArray, ...exprs: unknown[]): TemplateIR {
     // Validate: all expressions must be functions (thunks) OR slot sentinels OR slot-fill sentinels.
     for (let i = 0; i < exprs.length; i++) {
-      if (typeof exprs[i] !== 'function' && !isSlotSentinel(exprs[i]) && !isSlotFillSentinel(exprs[i])) {
+      if (
+        typeof exprs[i] !== 'function' &&
+        !isSlotSentinel(exprs[i]) &&
+        !isSlotFillSentinel(exprs[i])
+      ) {
         throw new TypeError(
           `[nv/html] Expression at hole ${i} is not a function. Wrap reactive values in thunks: \${() => signal()} not \${signal()}. Received: ${typeof exprs[i]}`,
         )
