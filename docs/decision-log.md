@@ -49,7 +49,7 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.3.3**._
 - **Slot consumption — increment 1 LANDED (2026-06-22):** GATE-2 walk-collapse (retired
   `buildSlotSubIR`/`buildNvSlotSubIR`); component-as-slot-child (nested-component deferral
   closed); fallback (`SlotOutletBinding.fallback?`). Template-IR → v0.3.3. D-slot-1
-  retained. Increment 2 (scoped slots + D-slot-2) queued.
+  retained. Increment 2 (scoped slots + D-slot-1 retained, D-slot-2 re-phased to `each`) queued.
 - **Real-browser gate:** PASSED across Blink/Gecko/WebKit (36/36). Phase 0 closed.
 - **Perf-validation phase:** COMPLETE. All three tripwires resolved (createSignals
   cleared structural-accepted; FALSE-heavy characterized watch-item; cross-engine
@@ -95,11 +95,10 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.3.3**._
 
 ### Forward queue (named, not blocking)
 - **Slots — design APPROVED (2026-06-22), Path B phasing:** Increment 1 (LANDED 2026-06-22) =
-  GATE-2 walk-collapse (retire `buildSlotSubIR`/`buildNvSlotSubIR` → recursive
-  `processHtmlTemplate`) + component-as-slot-child + fallback (`SlotOutletBinding.fallback?`);
-  retains D-slot-1; Template-IR → v0.3.3. Increment 2 (queued) = scoped slots
-  (`SlotEntry.content` factory + `SlotOutletBinding.props` + `let={...}` authoring +
-  **D-slot-2** invocation-scoped ownership, retiring D-slot-1); Template-IR → v0.4.
+  GATE-2 walk-collapse + component-as-slot-child + fallback (`SlotOutletBinding.fallback?`);
+  Template-IR → v0.3.3. Increment 2 (queued) = scoped slots (`SlotEntry.content` factory +
+  `SlotOutletBinding.props` + `let={...}` authoring); **D-slot-1 retained**; Template-IR →
+  v0.4. **D-slot-2 re-phased** to land with `each` (2026-06-22 re-phasing entry).
 - `$style` scoping/injection (parsed, not emitted); `$style × slots` (parked behind
   `$style` scoping).
 - SyncBinding (throws at both back-ends today).
@@ -113,7 +112,7 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.3.3**._
   *portable/interoperable*, not strong-agnostic like the pure-logic packages).
 
 ### Superseded
-- _none yet._
+- **D-slot-2 in increment 2** — superseded 2026-06-22; flip re-phased to land with `each` (see log entry).
 
 ---
 
@@ -599,4 +598,62 @@ of the E-2b collapse.
 Cases deleted; `emitThunkSource` is now leaf-only (`LeafThunkSource` type parameter).
 
 **No contract change.** reactive-core v0.4.2, Template-IR v0.3.3 both unchanged. Increment 2
-(scoped slots + D-slot-2) queued.
+(scoped slots, D-slot-1 retained, D-slot-2 re-phased) queued.
+
+### 2026-06-22 — D-slot-2 ownership flip re-phased: lands with `each`, not increment 2 (supersedes phasing in *Scoped slots design APPROVED [2026-06-22]*)
+
+**Decision.** The D-slot-2 ownership flip (invocation-scoped, retiring D-slot-1) is moved
+OUT of increment 2 and re-phased to land **with the `each` iteration construct**, where its
+motivating leak scenario is real. Increment 2 now ships the scoped-slot **IR shape + authoring
+surface only**, retaining D-slot-1. This **supersedes the phasing** in *Scoped slots +
+fallback + component-as-slot-child: design APPROVED [2026-06-22]* (which placed D-slot-2 in
+increment 2); it does **not** reverse the GATE-1 *ruling* (invocation-scoped ownership is still
+the correct end state) — only **when** the flip lands.
+
+**Why (the unfalsifiable-gate problem).** D-slot-2's leak argument bites only when slot content
+is rendered inside a **per-invocation root distinct from the component root** — i.e. a
+`ListBinding` item / `each` row. In increment 2's actual scope (scoped slots on a plain
+component, no `each` yet), the component's own `createRoot` **is** the invocation; there is no
+second per-invocation root to dispose independently, and no sibling invocation to leave live.
+The design doc's §8 ownership obligation ("child disposes one invocation → that content's
+effects gone, siblings + parent signal live") therefore **cannot be written with teeth** in
+increment 2 — there are no sibling invocations. Flipping a logged §6 ownership rule in a session
+where no test can distinguish D-slot-1 from D-slot-2 by inspection violates the ironclad
+"every gate item must be failable on inspection" rule. We do not flip a §6 decision until the
+scenario that loads it exists.
+
+**What increment 2 ships instead (fully testable now).**
+- `SlotEntry.content` → factory `(slotProps) => TemplateIR` (hard-cut, no back-compat — nothing
+  released). Unscoped slots become `(_props) => ir`.
+- `SlotOutletBinding.props?: readonly PropEntry[]` — child-exposed accessor thunks at the outlet.
+- `let={ ... }` authoring (`.nv` destructure attribute on `<slot>` fill) + tagged-template
+  `slot('name', ({ ... }) => html\`...\`)` fill form.
+- `.nv` expose-object entries erase to accessor **thunks**, not value calls.
+- **Ownership: retains D-slot-1** (parent-lexical), unchanged. The factory shape and `props`
+  channel are owner-agnostic — they wire the same content; only the eventual owner of the
+  content's effects changes when D-slot-2 lands. Increment 2's factory shape is what D-slot-2
+  builds on; no double-refactor (the factory shape is not undone by the later ownership flip).
+- **Contract:** Template-IR **v0.3.3 → v0.4** (content-factory shape change + `props`).
+  reactive-core **v0.4.2 unchanged** (no §6 touch — D-slot-1 retained).
+
+**What lands with `each` (later, gated on row-churn reorder data per forward queue).**
+- D-slot-2 invocation-scoped ownership flip (retires D-slot-1), gated by a **real multi-row
+  differential**: an `each` list where disposing one row's invocation tears down that row's
+  slot-content effects while sibling rows + the parent signal stay live (real teeth, not a
+  hand-simulated per-invocation root). This is the §8 ownership obligation with the scenario
+  that makes it failable.
+- reactive-core stays v0.4.2 if the flip uses existing `getOwner`/`runWithOwner`/`createRoot`
+  (the `wireList` per-item-root pattern, verified against `wireList` before landing); escalate
+  if a §6 gap surfaces.
+
+**Net effect on the GATE-1 ruling.** Unchanged in substance — invocation-scoped ownership
+remains the decided end state. Only the landing is moved to where its gate has teeth. D-slot-1
+is retained one increment longer than the design doc anticipated.
+
+**Cites/supersedes.** Supersedes the increment-2 phasing in *Scoped slots + fallback +
+component-as-slot-child: design APPROVED [2026-06-22]*. Cites *Slot increment 1.5 LANDED
+[2026-06-22]* (the `computeBindingThunks` single thunk-builder is the clean emit seam the
+`props` channel attaches to). Increment-2 CC handoff: `cc-handoff-scoped-slots.md`.
+
+**Status.** Re-phasing DECIDED. Increment 2 (shape + authoring, D-slot-1 retained) commissioned.
+D-slot-2 flip queued behind `each`.
