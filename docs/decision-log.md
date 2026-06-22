@@ -82,7 +82,9 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4**._
 - Compile-time vs. runtime split beyond the read/write transform (scheduling,
   encapsulation) — narrowed, not closed.
 - Effect-flush timing primitive (microtask vs. custom scheduler).
-- Compile-time full encapsulation (DOM + style) — genuine research.
+- Compile-time DOM encapsulation — still open (Shadow-DOM opt-in path unspecced).
+  STYLE encapsulation RESOLVED 2026-06-22 (see Log) — Light-DOM scoping via hybrid
+  routing; not a contract concern.
 
 ### Genuine research / deferred-on-evidence
 - Beating the alien-signals-class baseline: nv wins/ties 5 of 7 cases; two wide-graph
@@ -91,6 +93,10 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4**._
   evidence only — noted, not approved).
 - **FALSE-heavy row-churn** watch-item (reopen on real-app evidence with a
   steady-state-update harness).
+- **Per-key class-toggle node-width** — object-form `class={{...}}` emits one effect per
+  key (fine-grained). For wide objects this trades N graph nodes against 1 looping effect.
+  Same `ReactiveNode`-width structural cost as the kind-split tripwire; per-key default
+  carries a compile-time width-threshold fallback, threshold gated on real-app evidence.
 
 ### Forward queue (named, not blocking)
 - **Slots — design APPROVED (2026-06-22), Path B phasing:** Increments 1 + 1.5 LANDED
@@ -99,8 +105,18 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4**._
   **retains D-slot-1**; Template-IR → v0.4. **D-slot-2 invocation-scoped ownership flip
   re-phased (2026-06-22) to land WITH `each`** — its leak gate requires real per-row
   invocations to be failable; flipping it earlier is an unfalsifiable §6 gate.
-- `$style` scoping/injection (parsed, not emitted); `$style × slots` (parked behind
-  `$style` scoping).
+- **`$style` scoping — design RESOLVED 2026-06-22, spec drafted (`spec-style-scoping-and-class-selection.md`),
+  NOT yet a CC handoff.** Hybrid per-entry routing (key→class-rewrite, selector→attribute-hash);
+  `factory` form → CSS-custom-property lowering (values reactive, factory NOT re-run);
+  injection = hoist-once-per-component-identity + dedup. Renderer/compiler-layer only —
+  NOT a reactive-core contract concern (Template-IR §scope already fences this).
+- **Class-selection (`class={...}`) — design RESOLVED 2026-06-22, same spec, own increment
+  (NOT a `$style` rider).** Three compile-time-routed forms: function/string/template →
+  one full-string AttrBinding; object/array literal → per-key `classList.toggle` effects;
+  `cx()` pure string helper. Per-key default for object form gated on `ReactiveNode`-width
+  evidence (ties to the kind-split watch-item).
+- `$style × slots` — STILL parked behind `$style` scoping *implementation* (design tractable
+  now that axis-a is chosen, but specced after `$style` lands).
 - SyncBinding (throws at both back-ends today).
 - LIS list move-minimization — CLOSED [2026-06-22], not commissioned (O(N) reconcile
   acceptable: N=1k sub-2ms, N=10k 17ms real-Chromium).
@@ -143,6 +159,8 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4**._
 ### Naming
 - `neutro/view` / `nv` working name; package under `@neutro` (view engine is
   *portable/interoperable*, not strong-agnostic like the pure-logic packages).
+- `cx` — pure class-string builder helper (provisional name, may be reconsidered).
+  Reads booleans, returns a string, subscribes to nothing. Not reactive itself.
 
 ### Superseded
 - **D-slot-2 in increment 2** — superseded 2026-06-22; flip re-phased to land with `each` (see log entry).
@@ -860,3 +878,105 @@ increment 3.** Logged explicitly rather than closing silently as full G3.
 **Verdict:** PASS. `each` authoring moves from "unblocked" to "LANDED, verified
 (tagged-template behavioral; `.nv` structural-only, behavioral deferred to inc 3)".
 Current State header edits applied.
+
+---
+
+### 2026-06-22 — `$style` scoping + class-selection: design RESOLVED (rulings 1–4 + class axis)
+
+**Event:** Architect-stream research open (`research-style-scoping.md`) resolved by
+owner rulings. Produces a drafted spec (`spec-style-scoping-and-class-selection.md`);
+NOT yet a CC handoff. Two independently-shippable designs settled: `$style` scoping,
+and class-selection (`class={...}`). Class-selection surfaced from the `$style` thread
+but is a SEPARATE axis and ships as its own increment.
+
+**Constraint 1 (frames everything):** Template-IR §scope already fences style scoping
+OUT of reactive-core-contract scope ("Shadow DOM / style scoping — out of contract
+scope; IR emits Light DOM by default; Shadow DOM is an opt-in wrapping the mount
+point"). Therefore NONE of the below touches the reactive-core contract or requires a
+contract bump. These are renderer/compiler-layer decisions. If a future candidate
+forces a contract change, that is the signal it is the wrong candidate.
+
+**RULING 1 — Scoping strategy: hybrid, routed PER-ENTRY at compile time.**
+Each `$style` entry is classified once at compile time and takes exactly one mechanism
+(no runtime branching):
+- **Key-form entry** (bare identifier referenced by the template, e.g. `{ card: {...} }`
+  with `class={style.card}`) → **class-rewrite**: `card` → `card_<hash>`, template
+  reference rewritten to match. (Reuses existing `simpleHash`.)
+- **Selector-form entry** (contains combinators / pseudo / `.`/`#`/element names, no
+  template handle, e.g. `'div > .foo:hover'`) → **attribute-hash**: stamp
+  `[data-nv-s-<hash>]` on the component's shape.html elements; rewrite selector to
+  `... [data-nv-s-<hash>]`.
+Owner directive: hybrid is acceptable *only if* implemented smartly — classification is
+static, single-pass, no unnecessary evaluation, no per-update branching.
+
+**RULING 2 — `$style` accepts BOTH key-form and CSS selectors.** DX + non-limitation.
+Parser already retains `source` verbatim (selectors) AND extracts `keys` (handles);
+the dual capture supports both forms. The hybrid (Ruling 1) is precisely what makes
+accepting both sound: each form routes to the mechanism it fits.
+
+**RULING 3 — `factory`-form value reactivity via CSS-CUSTOM-PROPERTY lowering, NOT
+factory re-runs.** Decomposed the conflated "styles should be reactive" into:
+  (a) reactive class/style *selection* (which rules apply) — ALREADY FREE today as an
+      AttrBinding on `class`/`style`; this is what classcat/cx/Solid-classList do.
+  (b) reactive rule *values* (declaration values change) — the genuinely new thing,
+      = the `factory` form.
+For (b): the compiler analyzes the factory at compile time to split static-vs-dynamic
+declarations. Static → emitted once, scoped, never re-evaluated. Dynamic → lowered to
+`prop: var(--nv-<key>)` in the static CSS + a reactive `style` custom-property binding
+(`el.style.setProperty('--nv-<key>', v)`) riding EXISTING Attr/Prop machinery. The
+factory is NOT re-run on signal change; at runtime only the changed custom property is
+written. Rationale (perf, the optimization axis owner named): factory-re-run + CSS
+re-injection is a document-level cascade recalc scaling with matched-element count —
+pathological for run-once-mounts-many. Custom-property write is a single setProperty,
+no re-parse, no cascade recalc beyond the heavily-optimized custom-property
+invalidation. Boundary: custom properties cover dynamic VALUES; dynamic rule-PRESENCE
+(a whole rule appearing/disappearing) or dynamic property NAMES stay in class-selection
+(toggle a class), NOT stylesheet mutation.
+
+**RULING 4 — injection/dedup: compiler-internal, judged on sound/correct/performant.**
+Owner indifferent to mechanism. Decision: static scoped CSS is hoisted once per
+component IDENTITY and deduped (run-once components mount many times → never re-inject
+per instance). Dynamic part is per-element custom properties (no stylesheet involvement).
+Mechanism (inline `<style>` hoist+dedup vs constructable/adopted stylesheets) deferred
+to spec/implementation; constructable stylesheets favored for cross-instance dedup but
+not locked.
+
+**CLASS-SELECTION (`class={...}`) — separate axis, own increment.** Compile-time
+routing on the expression SHAPE inside `class={...}` (all three stay `class={...}`,
+no new attribute):
+- **function call / string / template literal** (e.g. `class={cx(...)}`,
+  `class={\`a ${b}\`}`) → ONE full-string AttrBinding (reassigns whole attribute).
+- **object literal** (`class={{ active: isActive() }}`) → per-key `classList.toggle`
+  effects, ONE EFFECT PER KEY (strictly finer than Solid's single looping effect:
+  toggling `active` never reads `big`). No diffing (toggle is idempotent).
+- **array literal** (`class={['btn', { active: isActive() }]}`) → sugar over the two
+  above: bare strings static, object entries per-key toggle.
+- static classes stay in shape.html `class="..."` literal, untouched.
+nv-beats-Solid point: the compiler emits the right strategy PER SITE; Solid applies one
+runtime strategy uniformly. Per-key emission avoids Solid's documented `class`+`classList`
+full-reassign footgun BY CONSTRUCTION (toggle owns only its keys).
+
+**`cx` helper:** APPROVED. Pure, non-reactive string builder (reads booleans → returns
+string, subscribes to nothing). Lives INSIDE `class={...}`; the compiler sees a function
+call returning a string → one AttrBinding; `cx` carries zero machinery and never appears
+in IR/contract. Provisional name (owner may reconsider). Explicitly NOT magic/reactive —
+reactivity comes only from the enclosing thunk.
+
+**DX seam (document, not an impl problem):** do not MIX strategies on one element's
+`class` — `class={cx(...)}` is full-reassign; `class={{...}}` is per-key-toggle; pick one
+per element (same root cause as Solid's class+classList warning). Static literal classes
+coexist with either.
+
+**Open sub-points carried (not blocking):**
+- Per-key-effect default for object form carries a compile-time width-threshold fallback
+  to one-looping-effect; threshold gated on real-app `ReactiveNode`-width evidence (ties
+  to kind-split watch-item). Owner agreed conservative framing: lean per-key but do not
+  hardcode "always per-key" without row-width data.
+- Dynamic key name (`{ [className()]: true }`) breaks per-key-effect (key itself reactive)
+  → compiler detects non-static key → fallback to looping-classList or full reassign.
+- `factory` static-vs-dynamic split assumes signal reads are statically detectable in the
+  factory body (same erasure machinery as `$script`). Confirm during spec→build.
+
+**Status:** design RESOLVED. Spec drafted. Two increments queued, NOT commissioned:
+(I) `$style` scoping + injection; (II) class-selection + `cx`. `$style × slots` remains
+parked behind (I). No code landed. No contract/IR bump from the decision itself.
