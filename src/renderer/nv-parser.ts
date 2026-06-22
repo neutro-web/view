@@ -56,6 +56,7 @@ import type {
   ConditionalBinding,
   EventBinding,
   HandlerExpr,
+  ListBinding,
   NodePath,
   PropBinding,
   PropEntry,
@@ -365,11 +366,21 @@ interface NvWalkedComponent {
   slotLetNames: string[][]
 }
 
+interface NvWalkedEach {
+  anchorPath: NodePath
+  itemsHoleIdx: number
+  keyHoleIdx: number
+  letNames: string[]
+  bodyIR: TemplateIR
+  bodyHoleIndices: number[]
+}
+
 interface NvWalkResult {
   holeInfos: NvSlotHoleInfo[]
   holePaths: NodePath[]
   components: NvWalkedComponent[]
   consumed: Set<number>
+  lists: NvWalkedEach[]
 }
 
 /**
@@ -390,6 +401,7 @@ function walkNvNodeList(
   const holePaths: NodePath[] = []
   const components: NvWalkedComponent[] = []
   const consumed = new Set<number>()
+  const lists: NvWalkedEach[] = []
 
   function walk(node: Node): void {
     if (node.nodeType === 8) {
@@ -401,6 +413,57 @@ function walkNvNodeList(
       }
     } else if (node.nodeType === 1) {
       const el = node as Element
+
+      // <each> element detection — before component detection.
+      if (el.tagName.toLowerCase() === 'each') {
+        // Find .of and key hole indices from data sentinels
+        let itemsHoleIdx = -1
+        let keyHoleIdx = -1
+        for (let k = 0; k < holeExprs.length; k++) {
+          if (el.getAttribute(`data-nv-prop-${k}`) === 'of') {
+            itemsHoleIdx = k
+            el.removeAttribute(`data-nv-prop-${k}`)
+            consumed.add(k)
+          }
+          if (el.getAttribute(`data-nv-attr-${k}`) === 'key') {
+            keyHoleIdx = k
+            el.removeAttribute(`data-nv-attr-${k}`)
+            consumed.add(k)
+          }
+        }
+        if (itemsHoleIdx === -1 || keyHoleIdx === -1) {
+          throw new Error('[nv] <each> requires .of="${...}" and key="${...}" attributes')
+        }
+
+        // Extract let-bound names from let={item, index}
+        const letAttr = el.getAttribute('let') ?? ''
+        const letNames = letAttr
+          .replace(/[{}]/g, '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+
+        // Build body IR from child nodes via shared slot content builder
+        const bodyNodes = Array.from(el.childNodes)
+        const { ir: bodyIR, holeIndices: bodyHoleIndices } = buildNvSlotContentIR(
+          bodyNodes,
+          holeExprs,
+          doc,
+          `each:body:${lists.length}`,
+          signals,
+          letNames,
+        )
+        for (const idx of bodyHoleIndices) consumed.add(idx)
+
+        // Replace <each> element with anchor comment
+        const listIndex = lists.length
+        const anchor = doc.createComment(`nv-list-${listIndex}`)
+        el.parentNode?.replaceChild(anchor, el)
+        const anchorPath = computePath(anchor, root)
+
+        lists.push({ anchorPath, itemsHoleIdx, keyHoleIdx, letNames, bodyIR, bodyHoleIndices })
+        return // don't recurse into <each> children (body already processed)
+      }
 
       // Component element detection via data-nv-component sentinel.
       const compName = el.getAttribute('data-nv-component')
@@ -551,7 +614,7 @@ function walkNvNodeList(
   }
 
   for (const n of nodes) walk(n)
-  return { holeInfos, holePaths, components, consumed }
+  return { holeInfos, holePaths, components, consumed, lists }
 }
 
 // ── Slot content IR builder (collapse: uses walkNvNodeList) ────────────────────
@@ -597,7 +660,7 @@ function buildNvSlotContentIR(
     doc,
     fragWrapper,
     slotSignals,
-  )
+  ) // lists is intentionally ignored in slot content builder
 
   const rawHtml = fragWrapper.innerHTML.replace(
     /\s+data-nv-(?:attr|prop|event|component)-\d+="[^"]*"/g,
@@ -749,10 +812,18 @@ interface PendingNvComponentInfo {
   slotLetNames?: ReadonlyArray<ReadonlyArray<string>>
 }
 
+interface PendingNvEachInfo {
+  itemsHoleIdx: number
+  keyHoleIdx: number
+  letNames: string[]
+  bodyHoleIndices: number[]
+}
+
 interface ProcessResult {
   ir: TemplateIR
   verdicts: Array<'ACCEPT' | 'PLAIN'>
   pendingComponents: PendingNvComponentInfo[]
+  pendingEachItems: PendingNvEachInfo[]
   consumedByComponent: ReadonlySet<number>
   diagnostics: NvDiagnostic[]
 }
@@ -773,6 +844,7 @@ function processHtmlTemplate(
       },
       verdicts: [],
       pendingComponents: [],
+      pendingEachItems: [],
       consumedByComponent: new Set<number>(),
       diagnostics: [],
     }
@@ -807,6 +879,7 @@ function processHtmlTemplate(
     holePaths,
     components: pendingComponents,
     consumed: consumedByComponent,
+    lists: pendingLists,
   } = walkNvNodeList(Array.from(frag.childNodes), holeExprs, doc, frag, signals)
   // Map encounter-order hole paths back to GLOBAL hole indices (top-level convention).
   for (let h = 0; h < holeInfos.length; h++) {
@@ -854,6 +927,19 @@ function processHtmlTemplate(
       slots,
     }
     bindings.push(cb)
+  }
+
+  // Add list bindings from <each> elements (anchor paths appended after component paths)
+  for (const wl of pendingLists) {
+    const pathIndex = allPaths.length
+    allPaths.push(wl.anchorPath)
+    bindings.push({
+      kind: 'list',
+      pathIndex,
+      items: (() => []) as () => readonly unknown[],
+      key: ((_item: unknown, i: number) => i) as (item: unknown, i: number) => string | number,
+      itemTemplate: (_valueSig, _indexSig) => wl.bodyIR,
+    } satisfies ListBinding)
   }
 
   for (let i = 0; i < holeExprs.length; i++) {
@@ -905,6 +991,12 @@ function processHtmlTemplate(
         slotLetNames,
       }),
     ),
+    pendingEachItems: pendingLists.map((wl) => ({
+      itemsHoleIdx: wl.itemsHoleIdx,
+      keyHoleIdx: wl.keyHoleIdx,
+      letNames: wl.letNames,
+      bodyHoleIndices: wl.bodyHoleIndices,
+    })),
     consumedByComponent,
     diagnostics: processdiagnostics,
   }

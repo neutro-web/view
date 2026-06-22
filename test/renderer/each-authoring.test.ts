@@ -9,6 +9,7 @@ import { __test, flushSync, signal } from '../../src/core/core.js'
 import { createHtmlTag, each } from '../../src/renderer/html-tag.js'
 import { mount } from '../../src/renderer/interpreter.js'
 import type { TemplateIR } from '../../src/renderer/ir.js'
+import { parseNvFile } from '../../src/renderer/nv-parser.js'
 
 const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>')
 const document = dom.window.document
@@ -202,6 +203,23 @@ test('TC-EA-05  each(): reorder — index accessor updates without rebuild', () 
       rmParent(parent)
     }
   }
+})
+
+// TC-EA-10: .nv <each> produces IR with a ListBinding (parse path)
+test('TC-EA-10  .nv <each> produces IR with a ListBinding', () => {
+  const source =
+    'const List = $component(() => {\n' +
+    '  $script(() => {\n' +
+    '    const items = signal([])\n' +
+    '  })\n' +
+    '  $render(() => html`<ul><each .of="${items}" key="${(item) => item.id}" let={item}><li>${item}</li></each></ul>`)\n' +
+    '})\n'
+  const results = parseNvFile(source, 'list.nv', document)
+  expect(results.length).toBe(1)
+  const ir = results[0]!.ir
+  const listBinding = ir.bindings.find((b) => b.kind === 'list')
+  expect(listBinding).toBeDefined()
+  expect(listBinding!.kind).toBe('list')
 })
 
 // TC-EA-06: unmount no-leak
