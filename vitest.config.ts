@@ -7,7 +7,7 @@ export default defineConfig({
     // (or set environment here to 'jsdom' if most tests need DOM).
     environment: 'node',
     include: ['**/*.{test,_test}.ts'],
-    exclude: [...configDefaults.exclude, 'PK/**'],
+    exclude: [...configDefaults.exclude, 'PK/**', '.claude/**'],
     // The project convention: tests are deterministic; perf numbers are NOT
     // validated here (that's real-hardware / Claude Code work).
     globals: false,
