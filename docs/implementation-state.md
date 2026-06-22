@@ -113,7 +113,12 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
   `Name.mount = (parent, doc, props = {}, slots = {}) => mount(Name(props, slots), parent, doc)`
   root sugar. A parent emitting a `<Child/>` binding threads prop accessor thunks
   (`expr: () => (n())`) into the child factory; the parent root owns the child's effects by
-  construction. Slot **consumption** LANDED (increment 1, 2026-06-22): walk-collapse, component-as-slot-child, fallback (`SlotOutletBinding.fallback?`). Increment 2 (scoped slots) queued.
+  construction. Slot **consumption** LANDED (increment 1, 2026-06-22): walk-collapse, component-as-slot-child, fallback (`SlotOutletBinding.fallback?`). **Increment 1.5 LANDED (2026-06-22):**
+  `nv-parser.ts` emit path now has a single recursive thunk-builder (`computeBindingThunks`),
+  shared by the top-level path and conditional-branch path; component-in-conditional-branch
+  emit is fixed (was "ComponentBinding thunk kind mismatch"). `nv-emitter.ts` `emitThunkSource`
+  is now leaf-only (`LeafThunkSource`); structural kinds (`conditional`, `component`,
+  `slot-outlet`) handled directly by `emitBindingLiteral`. Increment 2 (scoped slots) queued.
 - **Equality hook inert; step 4 shelved** — neither specialization is wired to save work.
 - **SyncBinding** throws at both back-ends.
 - **Multi-root mount/dispose — FIXED (v0.2.1).** Both back-ends now snapshot all fragment

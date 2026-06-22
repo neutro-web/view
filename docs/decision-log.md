@@ -577,3 +577,26 @@ the four placed seam files, per "verify by reading placed files, never green cou
    untested. Increment 2 gate must include explicit e2e items.
 
 **Status.** Increment 1 formally closed. Increment 2 (scoped slots + D-slot-2) open.
+
+### 2026-06-22 — Slot increment 1.5 LANDED: emit-path collapse + conditional-branch component fix
+
+**E-2b collapse landed.** `computeBindingThunks` extracted as a single recursive thunk-builder
+shared by both the top-level emit path (`parseNvFileForEmit`) and the conditional-branch path
+(`computeThunkSource`). The inline assembly block in `parseNvFileForEmit` is replaced by a
+single call; the conditional case in `computeThunkSource` now threads the branch `ProcessResult`
+(including `pendingComponents`) through `computeBindingThunks` instead of the hole-only
+`computeThunksForTemplate`. Structural precedent: GATE-2 collapse (Slot increment 1, 2026-06-22)
+— same pattern, walk seam unified; here the thunk-builder seam is unified.
+
+**Component-in-conditional-branch fixed.** A component inside a conditional branch
+(`${show ? html\`<Card .label="${show}"/>\` : html\`<p>no</p>\`}`) previously produced flat `prop`
+ThunkSources (hole-only path) instead of a wrapped `component` ThunkSource, causing
+`emitModule` to throw "ComponentBinding thunk kind mismatch". Fixed as a direct consequence
+of the E-2b collapse.
+
+**Dead code deleted.** `emitThunkSource` in `nv-emitter.ts` had unreachable `conditional`,
+`component`, and `slot-outlet` cases. Probes (REACHED-*) confirmed zero fires across 496 tests.
+Cases deleted; `emitThunkSource` is now leaf-only (`LeafThunkSource` type parameter).
+
+**No contract change.** reactive-core v0.4.2, Template-IR v0.3.3 both unchanged. Increment 2
+(scoped slots + D-slot-2) queued.
