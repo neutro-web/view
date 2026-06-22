@@ -6,7 +6,7 @@
 import { JSDOM } from 'jsdom'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { emitMount } from '../../src/compiler/emitted-mount.js'
-import { createRoot, flushSync, signal } from '../../src/core/core.js'
+import { createRoot, flushSync, onCleanup as onCleanupImport, signal } from '../../src/core/core.js'
 import { createHtmlTag, slots } from '../../src/renderer/html-tag.js'
 import { mount } from '../../src/renderer/interpreter.js'
 import type {
@@ -988,5 +988,269 @@ describe('§8.2-B3 — conditional-inside-slot-content: nv-parser slot sub-build
     const body = comp!.slots.find((s) => s.name === 'body')
     expect(body).toBeDefined()
     expect(body!.content.bindings[0]?.kind).toBe('text')
+  })
+})
+
+// ── Step B — component-as-slot-child (falls out of the GATE-2 collapse) ────────
+
+describe('component-as-slot-child — <Card/> in a named slot produces ComponentBinding', () => {
+  it('FE: html-tag named-slot sub-IR contains a ComponentBinding for nested <Card/>', () => {
+    const html = createHtmlTag(doc)
+    const sig = signal('x')
+    const ir = html`<Outer><slot name="body"><Card .label="${() => sig()}"><p>inner</p></Card></slot></Outer>`
+    const outer = ir.bindings.find((b) => b.kind === 'component') as ComponentBinding | undefined
+    expect(outer).toBeDefined()
+    const body = outer!.slots.find((s) => s.name === 'body')
+    expect(body).toBeDefined()
+    const nested = body!.content.bindings.find((b) => b.kind === 'component') as
+      | ComponentBinding
+      | undefined
+    expect(nested).toBeDefined()
+    expect(nested!.propNames).toEqual(['label'])
+    // The nested component's own default slot captured its <p>inner</p> content.
+    const nestedDefault = nested!.slots.find((s) => s.name === 'default')
+    expect(nestedDefault).toBeDefined()
+    expect(nestedDefault!.content.shape.html).toBe('<p>inner</p>')
+  })
+
+  it('FE: nv-parser named-slot sub-IR contains a ComponentBinding for nested <Card/>', () => {
+    const nvSrc = [
+      'export const P = $component(() => {',
+      '  $script(() => { const sig = signal("x") })',
+      '  $render(() => html`<Outer><slot name="body"><Card .label="${sig}"><p>inner</p></Card></slot></Outer>`)',
+      '})',
+    ].join('\n')
+    const nvIR = parseNvFile(nvSrc, 'test.nv', doc)[0]?.ir
+    expect(nvIR).toBeDefined()
+    const outer = nvIR!.bindings.find((b) => b.kind === 'component') as ComponentBinding | undefined
+    expect(outer).toBeDefined()
+    const body = outer!.slots.find((s) => s.name === 'body')
+    expect(body).toBeDefined()
+    const nested = body!.content.bindings.find((b) => b.kind === 'component') as
+      | ComponentBinding
+      | undefined
+    expect(nested).toBeDefined()
+    expect(nested!.propNames).toEqual(['label'])
+  })
+
+  it('FE-equivalence: both front-ends produce identical component-in-slot sub-IRs', () => {
+    const html = createHtmlTag(doc)
+    const sig = signal('x')
+    const htmlIR = html`<Outer><slot name="body"><Card .label="${() => sig()}"><p>inner</p></Card></slot></Outer>`
+    const htmlOuter = htmlIR.bindings.find((b) => b.kind === 'component') as
+      | ComponentBinding
+      | undefined
+    const htmlBody = htmlOuter!.slots.find((s) => s.name === 'body')!
+
+    const nvSrc = [
+      'export const P = $component(() => {',
+      '  $script(() => { const sig = signal("x") })',
+      '  $render(() => html`<Outer><slot name="body"><Card .label="${sig}"><p>inner</p></Card></slot></Outer>`)',
+      '})',
+    ].join('\n')
+    const nvIR = parseNvFile(nvSrc, 'test.nv', doc)[0]?.ir!
+    const nvOuter = nvIR.bindings.find((b) => b.kind === 'component') as
+      | ComponentBinding
+      | undefined
+    const nvBody = nvOuter!.slots.find((s) => s.name === 'body')!
+
+    const r = irStructurallyEqual(doc, htmlBody.content, nvBody.content)
+    expect(r.equal, `component-in-slot sub-IR divergence: ${r.reason}`).toBe(true)
+  })
+
+  it('both back-ends: nested component in named slot mounts and disposes', () => {
+    // Build a manual IR with a RESOLVED nested-component factory in the slot content,
+    // mounted via a named slot of an outer component. Verifies wireComponent (interpreter)
+    // and the emitted-mount component case mount + dispose the nested component.
+    function buildIR(): TemplateIR {
+      const nestedChildIR: TemplateIR = {
+        id: 'nested:card',
+        shape: { html: '<span class="card">card-body</span>', bindingPaths: [] },
+        bindings: [],
+      }
+      const slotContentIR: TemplateIR = {
+        id: 'slot:cas:body',
+        shape: { html: '<!--nv-comp-0-->', bindingPaths: [[0]] },
+        bindings: [
+          {
+            kind: 'component',
+            pathIndex: 0,
+            component: () => nestedChildIR,
+            props: [],
+            propNames: [],
+            slots: [],
+          },
+        ],
+      }
+      const outerChildIR: TemplateIR = {
+        id: 'outer:cas',
+        shape: { html: '<div class="outer"><!--nv-0--></div>', bindingPaths: [[0, 0]] },
+        bindings: [{ kind: 'slot-outlet', pathIndex: 0, name: 'body' }],
+      }
+      return {
+        id: 'parent:cas',
+        shape: { html: '<!--nv-comp-0-->', bindingPaths: [[0]] },
+        bindings: [
+          {
+            kind: 'component',
+            pathIndex: 0,
+            component: () => outerChildIR,
+            props: [],
+            propNames: [],
+            slots: [{ name: 'body', content: slotContentIR }],
+          },
+        ],
+      }
+    }
+
+    // Interpreter: mount, assert nested DOM present, dispose, assert gone.
+    const disposeI = mountI(buildIR())
+    expect(container.querySelector('.outer .card')?.textContent).toBe('card-body')
+    disposeI()
+    flushSync()
+    expect(container.querySelector('.card')).toBeNull()
+
+    // Compiler: same.
+    const disposeC = mountC(buildIR())
+    expect(container.querySelector('.outer .card')?.textContent).toBe('card-body')
+    disposeC()
+    flushSync()
+    expect(container.querySelector('.card')).toBeNull()
+  })
+})
+
+describe('component-in-default-slot — <Card/> in the default slot produces ComponentBinding', () => {
+  it('FE: html-tag default-slot sub-IR contains a ComponentBinding for nested <Card/>', () => {
+    const html = createHtmlTag(doc)
+    const sig = signal('x')
+    const ir = html`<Outer><Card .label="${() => sig()}"><p>inner</p></Card></Outer>`
+    const outer = ir.bindings.find((b) => b.kind === 'component') as ComponentBinding | undefined
+    expect(outer).toBeDefined()
+    const def = outer!.slots.find((s) => s.name === 'default')
+    expect(def).toBeDefined()
+    const nested = def!.content.bindings.find((b) => b.kind === 'component') as
+      | ComponentBinding
+      | undefined
+    expect(nested).toBeDefined()
+  })
+
+  it('FE: nv-parser default-slot sub-IR contains a ComponentBinding for nested <Card/>', () => {
+    const nvSrc = [
+      'export const P = $component(() => {',
+      '  $script(() => { const sig = signal("x") })',
+      '  $render(() => html`<Outer><Card .label="${sig}"><p>inner</p></Card></Outer>`)',
+      '})',
+    ].join('\n')
+    const nvIR = parseNvFile(nvSrc, 'test.nv', doc)[0]?.ir
+    expect(nvIR).toBeDefined()
+    const outer = nvIR!.bindings.find((b) => b.kind === 'component') as ComponentBinding | undefined
+    expect(outer).toBeDefined()
+    const def = outer!.slots.find((s) => s.name === 'default')
+    expect(def).toBeDefined()
+    const nested = def!.content.bindings.find((b) => b.kind === 'component') as
+      | ComponentBinding
+      | undefined
+    expect(nested).toBeDefined()
+  })
+
+  it('FE-equivalence: both front-ends produce identical component-in-default-slot sub-IRs', () => {
+    const html = createHtmlTag(doc)
+    const sig = signal('x')
+    const htmlIR = html`<Outer><Card .label="${() => sig()}"><p>inner</p></Card></Outer>`
+    const htmlOuter = htmlIR.bindings.find((b) => b.kind === 'component') as
+      | ComponentBinding
+      | undefined
+    const htmlDef = htmlOuter!.slots.find((s) => s.name === 'default')!
+
+    const nvSrc = [
+      'export const P = $component(() => {',
+      '  $script(() => { const sig = signal("x") })',
+      '  $render(() => html`<Outer><Card .label="${sig}"><p>inner</p></Card></Outer>`)',
+      '})',
+    ].join('\n')
+    const nvIR = parseNvFile(nvSrc, 'test.nv', doc)[0]?.ir!
+    const nvOuter = nvIR.bindings.find((b) => b.kind === 'component') as
+      | ComponentBinding
+      | undefined
+    const nvDef = nvOuter!.slots.find((s) => s.name === 'default')!
+
+    const r = irStructurallyEqual(doc, htmlDef.content, nvDef.content)
+    expect(r.equal, `component-in-default-slot sub-IR divergence: ${r.reason}`).toBe(true)
+  })
+})
+
+describe('nested-component-in-slot-disposes — parent dispose tears down the nested component', () => {
+  function buildIR(cleanups: { nested: number }): TemplateIR {
+    // Nested component whose factory registers a cleanup we can observe.
+    const nestedChildIR: TemplateIR = {
+      id: 'nested:dispose',
+      shape: { html: '<span class="nested">x</span>', bindingPaths: [] },
+      bindings: [],
+    }
+    const slotContentIR: TemplateIR = {
+      id: 'slot:dispose:body',
+      shape: { html: '<!--nv-comp-0-->', bindingPaths: [[0]] },
+      bindings: [
+        {
+          kind: 'component',
+          pathIndex: 0,
+          component: () => {
+            // Register a cleanup inside the nested component's own root.
+            onCleanupImport(() => {
+              cleanups.nested++
+            })
+            return nestedChildIR
+          },
+          props: [],
+          propNames: [],
+          slots: [],
+        },
+      ],
+    }
+    const outerChildIR: TemplateIR = {
+      id: 'outer:dispose',
+      shape: { html: '<div class="host"><!--nv-0--></div>', bindingPaths: [[0, 0]] },
+      bindings: [{ kind: 'slot-outlet', pathIndex: 0, name: 'body' }],
+    }
+    return {
+      id: 'parent:dispose',
+      shape: { html: '<!--nv-comp-0-->', bindingPaths: [[0]] },
+      bindings: [
+        {
+          kind: 'component',
+          pathIndex: 0,
+          component: () => outerChildIR,
+          props: [],
+          propNames: [],
+          slots: [{ name: 'body', content: slotContentIR }],
+        },
+      ],
+    }
+  }
+
+  it('interpreter: parent dispose removes nested DOM and runs nested cleanup exactly once', () => {
+    const cleanups = { nested: 0 }
+    const dispose = mountI(buildIR(cleanups))
+    expect(container.querySelector('.host .nested')).not.toBeNull()
+    expect(cleanups.nested).toBe(0)
+
+    dispose()
+    flushSync()
+
+    expect(container.querySelector('.nested')).toBeNull()
+    expect(cleanups.nested).toBe(1)
+  })
+
+  it('compiler: parent dispose removes nested DOM and runs nested cleanup exactly once', () => {
+    const cleanups = { nested: 0 }
+    const dispose = mountC(buildIR(cleanups))
+    expect(container.querySelector('.host .nested')).not.toBeNull()
+    expect(cleanups.nested).toBe(0)
+
+    dispose()
+    flushSync()
+
+    expect(container.querySelector('.nested')).toBeNull()
+    expect(cleanups.nested).toBe(1)
   })
 })
