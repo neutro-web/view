@@ -8,7 +8,7 @@ import { emitMount } from '../../src/compiler/emitted-mount.js'
 import { __test, flushSync, signal } from '../../src/core/core.js'
 import { createHtmlTag, each } from '../../src/renderer/html-tag.js'
 import { mount } from '../../src/renderer/interpreter.js'
-import type { TemplateIR } from '../../src/renderer/ir.js'
+import type { ListBinding, TemplateIR, WritableSignal } from '../../src/renderer/ir.js'
 import { parseNvFile } from '../../src/renderer/nv-parser.js'
 import { irStructurallyEqual } from './ir-equivalence.js'
 
@@ -198,7 +198,10 @@ test('TC-EA-05  each(): reorder — index accessor updates without rebuild', () 
       expect(lisAfter[1]!.textContent).toBe('A#1')
       expect(lisAfter[2]!.textContent).toBe('B#2')
       // Node identity: same elements reused
-      expect(lisAfter.every((li) => lisBefore.some((lb) => lb === li))).toBe(true)
+      expect(
+        lisAfter.every((li) => lisBefore.some((lb) => lb === li)),
+        'DOM nodes should be reused (identity preserved) after reorder',
+      ).toBe(true)
     } finally {
       dispose()
       rmParent(parent)
@@ -269,5 +272,43 @@ test('TC-EA-06  each(): unmount — no reactive leaks', () => {
   dispose()
   expect(__test.observerCount(items)).toBe(0)
   expect(parent.querySelectorAll('li').length).toBe(0)
+  rmParent(parent)
+})
+
+// TC-EA-G4: fail-shows-teeth — snapshot adapter (direct value, not thunk) freezes DOM
+// This test verifies the gate has teeth: if item() is called at construction time
+// instead of wrapped in a thunk, value changes do NOT update the DOM.
+// Contrast with TC-EA-04 which proves the correct each() adapter DOES update the DOM.
+test('TC-EA-G4  fail-shows-teeth: snapshot adapter freezes DOM on value change', () => {
+  const items = signal<Item[]>([{ id: 1, label: 'Initial' }])
+  // Deliberately WRONG item template: snapshots value at row-creation time instead of reading signal reactively
+  const brokenItemTemplate = (vs: WritableSignal<unknown>, _is: WritableSignal<number>) => {
+    const snapshottedItem = vs() as Item // snapshot at row-creation time — NOT reactive
+    return html`<li>${() => snapshottedItem?.label ?? '?'}</li>`
+  }
+  // Hand-authored IR using the broken template to test that the gate has teeth
+  const ir: TemplateIR = {
+    id: 'broken-adapter-test',
+    shape: { html: '<ul><!--nv-0--></ul>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'list',
+        pathIndex: 0,
+        items: () => items() as readonly unknown[],
+        key: (item) => (item as Item).id,
+        itemTemplate: brokenItemTemplate,
+      } satisfies ListBinding,
+    ],
+  }
+  const parent = mkParent()
+  const dispose = mount(ir, parent, document)
+  flushSync()
+  expect(parent.querySelector('li')!.textContent).toBe('Initial')
+  // Update the signal — broken adapter won't re-read the value
+  items.set([{ id: 1, label: 'Updated' }])
+  flushSync()
+  // With broken (snapshot) adapter: DOM stays 'Initial', confirming TC-EA-04 is non-trivial
+  expect(parent.querySelector('li')!.textContent).toBe('Initial')
+  dispose()
   rmParent(parent)
 })
