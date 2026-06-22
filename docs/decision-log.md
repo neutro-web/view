@@ -113,13 +113,9 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4**._
   row); do not fork a parallel construct. Gated on row-churn reorder data.
 
 ### Named near-term debt
-- **`irStructurallyEqual` comparator gap — `SlotOutletBinding.props` / `fallback` not compared:**
-  The structural comparator in `test/renderer/ir-equivalence.ts` does not descend into
-  `SlotOutletBinding.props` or `SlotOutletBinding.fallback` when checking FE-equivalence.
-  This predates scoped slots (`fallback` had the same gap since increment 1); increment 2 did
-  not regress it, but the gap is now more load-bearing. The `each` construct will need
-  comparator coverage for per-row slot props anyway — **extend the comparator there** rather
-  than in a standalone patch. Tracked here so the `each` plan gate includes it.
+- **Comparator `props`/`fallback` blindness (named debt):** `ir-equivalence.ts`
+  `slot-outlet` comparison covers `.name` only, not `props[]`/`fallback`. Resolve with
+  the comparator extension `each` needs.
 
 ### Naming
 - `neutro/view` / `nv` working name; package under `@neutro` (view engine is
@@ -698,3 +694,43 @@ No `src/core/` edits.
 
 **Cites.** *Scoped slots design APPROVED [2026-06-22]*; *D-slot-2 ownership flip re-phased to `each`
 [2026-06-22]* (D-slot-2 is NOT in this increment — phasing decision is the reason D-slot-1 is retained here).
+
+### Scoped slots — increment 2 ARCHITECT-VERIFIED [2026-06-22]
+
+Verified the inc-2 LANDED entry [2026-06-22] against placed files (read, not CC
+summary; green counts not trusted). All eight gate checks pass on inspection:
+
+1. **Factory hard-cut total.** `SlotEntry.content: SlotContent` everywhere; no
+   `TemplateIR | SlotContent` union in `ir.ts`; no bare-IR `content:` literal in
+   either FE capture site or any corpus literal (grepped).
+2. **D-slot-1 byte-identical.** `runWithOwner(capturedParentOwner, …)` unchanged in
+   `interpreter.ts` `wireSlotOutlet` (content + fallback arms) and `emitted-mount.ts`
+   slot-outlet case. No `src/core/` change. D-slot-2 did not sneak in.
+3. **`props` rides the single thunk path.** `.nv` outlet exposure erases to a thunk
+   (`item()` → emitter wraps `() => (item())`); `let={…}` reads map to `slotProps.x()`
+   accessors. No second thunk-assembly path; degraded-copy class did not recur. Emit-time
+   `s.content({})` materializes IR *structure* only — thunk sources come from
+   `computeBindingThunks` over `holeIndices`, not from re-running the factory.
+4. **FE-equivalence real** (both outlet-props and `slot()`/`let={…}` fill produce matching
+   `SlotOutletBinding.props` / `SlotEntry`). Comparator used without exception. **Debt:** see D2.
+5. **Behavior-neutrality.** All pre-existing slot corpus green with `content: () => ir`
+   wrapping only, zero assertion changes. `§scoped-G4.6` pins D-slot-1 under scoped content.
+6. **Fail-shows-teeth.** `§exposed-value-reactivity` fails if expose snapshots (value-call
+   instead of thunk) — assertion reads post-write DOM, not "effect ran."
+7. **Anti-vacuous + scope.** New tests assert real DOM/string values. Changeset confined to
+   `src/renderer/*`, `src/compiler/emitted-mount.ts`, tests, docs. (`git show --stat` confirmed
+   `src/core/` = 0 lines per LANDED entry; not independently re-run at verification.)
+8. **Contract consistency.** `template-ir.md` title + Status + changelog + type-reference
+   appendix all v0.4; reactive-core v0.4.2. A-0 ordering per LANDED entry.
+
+**Defect found (does not block closure):**
+- **D2 (logged debt):** `ir-equivalence.ts` `bindingEqual` `slot-outlet` case compares only
+  `.name`; it does not descend into `props[]` or `fallback`. Scoped-slot FE-equivalence is
+  pinned by explicit per-field asserts in the two `§scoped-slot-FE-equivalence` tests, not by
+  the structural oracle. Pre-dates inc 2 (fallback has the same gap). Fold into the comparator
+  extension `each` will require; do not extend speculatively now.
+
+**Increment 2 formally CLOSED.**
+
+**Cites.** *Scoped slots — increment 2 LANDED [2026-06-22]* (this entry verifies it);
+*D-slot-2 ownership flip re-phased to `each` [2026-06-22]* (basis for D-slot-1 retention).
