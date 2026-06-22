@@ -909,4 +909,47 @@ const App = $component(() => {
   expect(propSrc).toBe('n()') // not 'n'
 })
 
+// ── §inc1.5 — component-in-conditional-branch ─────────────────────────────────
+
+describe('§inc1.5 — component-in-conditional-branch', () => {
+  test('EM-INC15-1: component in conditional branch produces component ThunkSource (not prop)', () => {
+    const doc = new JSDOM('').window.document as unknown as Document
+    const src = `
+      import { Card } from './card.nv'
+      const Toggle = $component(() => {
+        $script(() => { const show = signal(true) })
+        $render(() => html\`<div>\${show ? html\`<Card .label="\${show}"/>\` : html\`<p>no</p>\`}</div>\`)
+      })
+    `
+    const results = parseNvFileForEmit(src, 'toggle.nv', doc)
+    const toggle = results.find((r) => r.name === 'Toggle')
+    expect(toggle).toBeDefined()
+    const emit = toggle!.emit!
+
+    // bindingThunks[0] is the conditional (show ? html`<Card/>` : html`<p>no</p>`)
+    expect(emit.bindingThunks[0]?.kind).toBe('conditional')
+    const condThunk = emit.bindingThunks[0] as Extract<
+      ThunkSource,
+      { kind: 'conditional' }
+    >
+
+    // consequent[0] must be 'component', NOT 'prop' or 'text'
+    expect(condThunk.consequent[0]?.kind).toBe('component')
+    const compThunk = condThunk.consequent[0] as Extract<ThunkSource, { kind: 'component' }>
+    expect(compThunk.componentSrc).toBe('Card')
+
+    // IR must also have component at consequent.bindings[0]
+    const irConditional = toggle!.ir.bindings[0] as ConditionalBinding
+    expect(irConditional.kind).toBe('conditional')
+    expect(irConditional.consequent.bindings[0]?.kind).toBe('component')
+
+    // emitModule must not throw
+    expect(() => emitModule(results)).not.toThrow()
+
+    // Emitted JS contains 'component' kind in the conditional consequent
+    const emitted = emitModule(results)
+    expect(emitted).toContain("kind: 'component'")
+  })
+})
+
 // TC-C16 moved to nv-emitter-exec.test.ts (uses esbuild bundling; new Function cannot eval ESM imports)
