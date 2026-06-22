@@ -1254,3 +1254,92 @@ describe('nested-component-in-slot-disposes — parent dispose tears down the ne
     expect(cleanups.nested).toBe(1)
   })
 })
+
+// ── §8.3 corpus extension — slot-outlet fallback ──────────────────────────────
+
+describe('§8.3 — fallback: child-authored default when slot is absent', () => {
+  // FE-equivalence: html-tag slots('x', { fallback }) and nv-parser slots.x ?? html``
+  // produce identical SlotOutletBindings with fallback set.
+  it('FE-equivalence: html-tag fallback opt and nv-parser ?? produce identical outlet IRs', () => {
+    const html = createHtmlTag(doc)
+    const htmlChildIR = html`<div>${slots('header', { fallback: html`<h1>Untitled</h1>` })}</div>`
+
+    const nvSrc = [
+      'export const Child = $component(() => {',
+      '  $render(() => html`<div>${slots.header ?? html`<h1>Untitled</h1>`}</div>`)',
+      '})',
+    ].join('\n')
+    const nvChildIR = parseNvFile(nvSrc, 'test.nv', doc)[0]?.ir!
+
+    const htmlOutlet = htmlChildIR.bindings[0] as SlotOutletBinding
+    const nvOutlet = nvChildIR.bindings[0] as SlotOutletBinding
+    expect(htmlOutlet.kind).toBe('slot-outlet')
+    expect(htmlOutlet.fallback).toBeDefined()
+    expect(nvOutlet.fallback).toBeDefined()
+
+    const r = irStructurallyEqual(doc, htmlChildIR, nvChildIR)
+    expect(r.equal, `outlet-fallback IR divergence: ${r.reason}`).toBe(true)
+  })
+
+  // Build a child IR with a fallback-bearing slot outlet, plus a parent that either
+  // fills the slot or not. Shared so both back-ends and both cases use one shape.
+  function buildFallbackChildIR(): TemplateIR {
+    const fallbackIR: TemplateIR = {
+      id: 'slot:fb:fallback',
+      shape: { html: '<h1>Untitled</h1>', bindingPaths: [] },
+      bindings: [],
+    }
+    return {
+      id: 'child:fb',
+      shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0, 0]] },
+      bindings: [{ kind: 'slot-outlet', pathIndex: 0, name: 'header', fallback: fallbackIR }],
+    }
+  }
+
+  function buildParentIR(id: string, fillSlot: boolean): TemplateIR {
+    const childIR = buildFallbackChildIR()
+    const filledIR: TemplateIR = {
+      id: 'slot:fb:filled',
+      shape: { html: '<strong>Filled</strong>', bindingPaths: [] },
+      bindings: [],
+    }
+    return {
+      id,
+      shape: { html: '<!--nv-comp-0-->', bindingPaths: [[0]] },
+      bindings: [
+        {
+          kind: 'component',
+          pathIndex: 0,
+          component: () => childIR,
+          props: [],
+          propNames: [],
+          slots: fillSlot ? [{ name: 'header', content: filledIR }] : [],
+        },
+      ],
+    }
+  }
+
+  it('fallback-renders-when-unfilled (interpreter)', () => {
+    mountI(buildParentIR('parent:fb:unfilled:i', false))
+    expect(container.querySelector('h1')?.textContent).toBe('Untitled')
+    expect(container.querySelector('strong')).toBeNull()
+  })
+
+  it('fallback-renders-when-unfilled (compiler)', () => {
+    mountC(buildParentIR('parent:fb:unfilled:c', false))
+    expect(container.querySelector('h1')?.textContent).toBe('Untitled')
+    expect(container.querySelector('strong')).toBeNull()
+  })
+
+  it('fallback-suppressed-when-filled (interpreter)', () => {
+    mountI(buildParentIR('parent:fb:filled:i', true))
+    expect(container.querySelector('strong')?.textContent).toBe('Filled')
+    expect(container.querySelector('h1')).toBeNull()
+  })
+
+  it('fallback-suppressed-when-filled (compiler)', () => {
+    mountC(buildParentIR('parent:fb:filled:c', true))
+    expect(container.querySelector('strong')?.textContent).toBe('Filled')
+    expect(container.querySelector('h1')).toBeNull()
+  })
+})
