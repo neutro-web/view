@@ -223,6 +223,8 @@ export type ComponentBinding = BaseBinding & {
 export type SlotOutletBinding = BaseBinding & {
   kind: 'slot-outlet'
   name: string
+  /** Child-authored default content, rendered when the slot is absent (increment 1). */
+  fallback?: TemplateIR
 }
 
 export type Binding =

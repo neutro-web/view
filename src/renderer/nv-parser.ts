@@ -86,7 +86,7 @@ export interface NvDiagnostic {
 export type ThunkSource =
   | { kind: 'text' | 'attr' | 'prop'; exprSrc: string }
   | { kind: 'event'; handlerSrc: string }
-  | { kind: 'slot-outlet'; name: string }
+  | { kind: 'slot-outlet'; name: string; fallbackThunks?: ThunkSource[] }
   | {
       kind: 'conditional'
       conditionSrc: string
@@ -241,6 +241,31 @@ function buildNvHoleBinding(
       const slotName = (holeExpr.name as ts.Identifier).text
       const b: SlotOutletBinding = { kind: 'slot-outlet', pathIndex, name: slotName }
       return b
+    }
+    // Check slot outlet with fallback: `slots.name ?? html\`...\``.
+    if (
+      ts.isBinaryExpression(holeExpr) &&
+      holeExpr.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+    ) {
+      const left = holeExpr.left
+      const right = holeExpr.right
+      const isHtmlTTE = (e: ts.Expression): e is ts.TaggedTemplateExpression =>
+        ts.isTaggedTemplateExpression(e) && ts.isIdentifier(e.tag) && e.tag.text === 'html'
+      if (
+        ts.isPropertyAccessExpression(left) &&
+        ts.isIdentifier(left.expression) &&
+        left.expression.text === 'slots' &&
+        ts.isIdentifier(left.name) &&
+        isHtmlTTE(right)
+      ) {
+        const b: SlotOutletBinding = {
+          kind: 'slot-outlet',
+          pathIndex,
+          name: (left.name as ts.Identifier).text,
+          fallback: processHtmlTemplate(right, doc, signals).ir,
+        }
+        return b
+      }
     }
     // Check conditional: ternary with html`` branches.
     if (ts.isConditionalExpression(holeExpr)) {
@@ -1759,6 +1784,38 @@ function computeThunkSource(
       ts.isIdentifier(holeExpr.name)
     ) {
       return { kind: 'slot-outlet' as const, name: (holeExpr.name as ts.Identifier).text }
+    }
+    // Slot outlet with fallback: `slots.name ?? html\`...\``.
+    if (
+      ts.isBinaryExpression(holeExpr) &&
+      holeExpr.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+    ) {
+      const left = holeExpr.left
+      const right = holeExpr.right
+      const isHtmlTTE = (e: ts.Expression): e is ts.TaggedTemplateExpression =>
+        ts.isTaggedTemplateExpression(e) && ts.isIdentifier(e.tag) && e.tag.text === 'html'
+      if (
+        ts.isPropertyAccessExpression(left) &&
+        ts.isIdentifier(left.expression) &&
+        left.expression.text === 'slots' &&
+        ts.isIdentifier(left.name) &&
+        isHtmlTTE(right)
+      ) {
+        const fallbackThunks = computeThunksForTemplate(
+          right,
+          doc,
+          symbols,
+          diagnostics,
+          new Set(),
+          propsParamName,
+          propsAccessors,
+        )
+        return {
+          kind: 'slot-outlet' as const,
+          name: (left.name as ts.Identifier).text,
+          fallbackThunks,
+        }
+      }
     }
     // May be a ConditionalBinding (ternary with html`` branches)
     if (ts.isConditionalExpression(holeExpr)) {

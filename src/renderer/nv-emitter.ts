@@ -144,8 +144,17 @@ function emitBindingLiteral(
         `${i2}slots: [${slotLiterals}] }`,
       ].join('\n')
     }
-    case 'slot-outlet':
-      return `{ kind: 'slot-outlet', ${pathEntry}, name: ${JSON.stringify((binding as SlotOutletBinding).name)} }`
+    case 'slot-outlet': {
+      const sob = binding as SlotOutletBinding
+      const parts = [`kind: 'slot-outlet'`, pathEntry, `name: ${JSON.stringify(sob.name)}`]
+      if (sob.fallback !== undefined) {
+        if (thunk.kind !== 'slot-outlet')
+          throw new Error('[nv/emitter] SlotOutletBinding thunk kind mismatch')
+        const fallbackThunks = thunk.fallbackThunks ?? []
+        parts.push(`fallback: ${emitIrLiteral(sob.fallback, fallbackThunks, indent)}`)
+      }
+      return `{ ${parts.join(', ')} }`
+    }
     default:
       throw new Error(
         `[nv/emitter] Unsupported binding kind for emit: ${(binding as Binding).kind}`,

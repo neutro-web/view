@@ -448,11 +448,32 @@ function wireSlotOutlet(
   capturedParentOwner: ReturnType<typeof getOwner>,
 ): void {
   const slotIR = slotsObj[binding.name]
-  if (slotIR === undefined) return // unfilled slot: render nothing (v1; fallback deferred)
 
   const parent = anchorNode.parentNode
   if (parent === null) {
     throw new Error('[nv/interpreter] SlotOutletBinding: anchor has no parent')
+  }
+
+  if (slotIR === undefined) {
+    // Unfilled slot: render fallback if authored, else nothing.
+    // D-slot-1 retained for increment 1: fallback is child-authored, rendered at
+    // outlet scope under the same captured parent owner as the filled case.
+    const fallbackIR = binding.fallback
+    if (fallbackIR !== undefined) {
+      runWithOwner(capturedParentOwner, () => {
+        const fallbackDisposer = createRoot((dispose) => {
+          const { roots } = mountFragment(fallbackIR, parent, doc, anchorNode)
+          onCleanup(() => {
+            for (const n of roots) {
+              if (n.parentNode !== null) n.parentNode.removeChild(n)
+            }
+          })
+          return dispose
+        })
+        onCleanup(() => fallbackDisposer())
+      })
+    }
+    return
   }
 
   // Render slot content under the parent's owner so reactive reads are owned by the parent,

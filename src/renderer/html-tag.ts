@@ -49,15 +49,17 @@ import type {
 /** Opaque sentinel returned by `slots(name)` — the tagged-template outlet form. */
 export interface SlotSentinel {
   readonly __nvSlotOutlet: string
+  readonly __nvFallback?: TemplateIR
 }
 
 /**
  * Create a slot outlet sentinel for the tagged-template side.
  * Write `${slots('header')}` where the child component renders the named slot.
  * Mirrors `.nv`'s `{slots.header}` bare-read; both produce `SlotOutletBinding`.
+ * An optional `fallback` TemplateIR renders when the slot is absent (increment 1).
  */
-export function slots(name: string): SlotSentinel {
-  return { __nvSlotOutlet: name }
+export function slots(name: string, opts?: { fallback?: TemplateIR }): SlotSentinel {
+  return { __nvSlotOutlet: name, __nvFallback: opts?.fallback }
 }
 
 function isSlotSentinel(v: unknown): v is SlotSentinel {
@@ -134,6 +136,7 @@ function buildHtmlHoleBinding(holeKind: HoleKind, pathIndex: number, origExpr: u
         kind: 'slot-outlet',
         pathIndex,
         name: origExpr.__nvSlotOutlet,
+        ...(origExpr.__nvFallback !== undefined && { fallback: origExpr.__nvFallback }),
       }
       return b
     }

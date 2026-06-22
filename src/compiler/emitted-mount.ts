@@ -508,15 +508,39 @@ function emitSetup(
         wireSpecs.push({
           accessor,
           wire(anchorNode, doc) {
-            if (!slotContext) return // no slot context = unfilled
-            const slotIR = slotContext.slotsObj[slotName]
-            if (slotIR === undefined) return // unfilled slot: render nothing
+            const slotIR = slotContext?.slotsObj[slotName]
 
             const parent = anchorNode.parentNode
             if (parent === null)
               throw new Error('[nv/emit] SlotOutletBinding: anchor has no parent')
 
-            runWithOwner(slotContext.capturedParentOwner, () => {
+            if (slotIR === undefined) {
+              // Unfilled slot: render fallback if authored, else nothing.
+              // D-slot-1 retained: fallback rendered at outlet scope under the
+              // captured parent owner (same ownership pattern as the filled case).
+              const fallbackIR = (binding as SlotOutletBinding).fallback
+              if (fallbackIR === undefined) return
+              const fallbackOwner = slotContext?.capturedParentOwner ?? getOwner()
+              runWithOwner(fallbackOwner, () => {
+                const fallbackDisposer = createRoot((dispose) => {
+                  const emptyVerdicts = new Map<number, BindingErasureVerdict>()
+                  const { setup: fbSetup } = emitSetup(fallbackIR, emptyVerdicts)
+                  const { roots } = fbSetup(parent, doc, anchorNode)
+                  onCleanup(() => {
+                    for (const n of roots) {
+                      if (n.parentNode !== null) n.parentNode.removeChild(n)
+                    }
+                  })
+                  return dispose
+                })
+                onCleanup(() => fallbackDisposer())
+              })
+              return
+            }
+
+            // slotIR !== undefined implies slotContext is defined.
+            const filledOwner = slotContext?.capturedParentOwner ?? null
+            runWithOwner(filledOwner, () => {
               const slotDisposer = createRoot((dispose) => {
                 const emptyVerdicts = new Map<number, BindingErasureVerdict>()
                 const { setup: slotSetup } = emitSetup(slotIR, emptyVerdicts)
