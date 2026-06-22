@@ -10,6 +10,7 @@ import { createHtmlTag, each } from '../../src/renderer/html-tag.js'
 import { mount } from '../../src/renderer/interpreter.js'
 import type { TemplateIR } from '../../src/renderer/ir.js'
 import { parseNvFile } from '../../src/renderer/nv-parser.js'
+import { irStructurallyEqual } from './ir-equivalence.js'
 
 const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>')
 const document = dom.window.document
@@ -220,6 +221,31 @@ test('TC-EA-10  .nv <each> produces IR with a ListBinding', () => {
   const listBinding = ir.bindings.find((b) => b.kind === 'list')
   expect(listBinding).toBeDefined()
   expect(listBinding!.kind).toBe('list')
+})
+
+// TC-EA-G2: FE-equivalence — .nv <each> and tagged-template each() produce irStructurallyEqual IR
+test('TC-EA-G2  FE-equivalence: .nv <each> and each() produce irStructurallyEqual ListBinding', () => {
+  // Tagged-template version
+  const items = signal<Item[]>([])
+  const ttIr = html`<ul>${each(
+    () => items() as readonly unknown[],
+    (item) => (item as Item).id,
+    ({ item }) => html`<li>${() => (item() as Item).label}</li>`,
+  )}</ul>`
+
+  // .nv version (parse path)
+  const source =
+    'const List = $component(() => {\n' +
+    '  $script(() => {\n' +
+    '    const items = signal([])\n' +
+    '  })\n' +
+    '  $render(() => html`<ul><each .of="${items}" key="${(item) => item.id}" let={item}><li>${item}</li></each></ul>`)\n' +
+    '})\n'
+  const results = parseNvFile(source, 'list.nv', document)
+  const nvIr = results[0]!.ir
+
+  const result = irStructurallyEqual(document, ttIr, nvIr)
+  expect(result.equal, result.reason).toBe(true)
 })
 
 // TC-EA-06: unmount no-leak
