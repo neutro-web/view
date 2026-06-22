@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-21. Contract **v0.4.2** · Template-IR **v0.3.1**._
+_Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.3.2**._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
 > `nv-decision-log-archive.md` (moved 2026-06-21). This snapshot is the resolved
@@ -48,14 +48,11 @@ _Last updated: 2026-06-21. Contract **v0.4.2** · Template-IR **v0.3.1**._
   path (A2 factory-shape convergence).
 - **Slot consumption:** LANDED (named + reactive, both FEs + emit + both back-ends,
   parent-lexical ownership). FE-equivalence enforced via the structural comparator
-  (G3.1 read-back addendum). **Three slot-content defects DESIGNED, CC fix commissioned
-  (2026-06-21):** B1 — both slot sub-builders (`buildSlotSubIR`/`buildNvSlotSubIR`)
-  hard-code every slot hole to `TextBinding` (violates §3; `.nv` IR-vs-emit kind
-  divergence). B3 — sub-builders blind to outlets/conditionals inside slot content.
-  Both fixed via the shared per-hole binding constructor (Option A), killing the
-  degraded-copy class. B2 — html-tag `.toString()` outlet detection replaced by a
-  structural `slots('name')` sentinel marker (`.nv` keeps `slots.name` AST detection).
-  §8.2 corpus gap (zero slot/component cases) closed in the same change. Pending CC land.
+  (G3.1 read-back addendum). **Three slot-content defects B1/B2/B3 LANDED (2026-06-21):**
+  B1+B3 — shared per-hole binding constructor kills degraded-copy class; sub-builders now
+  emit correct binding kinds inside slot content. B2 — `slots('name')` sentinel replaces
+  `.toString()` outlet detection (minification-safe; `.nv` keeps `slots.name` AST).
+  §8.2 corpus extended (+5 differential cases). Template-IR v0.3.2 (doc-only).
 - **Real-browser gate:** PASSED across Blink/Gecko/WebKit (36/36). Phase 0 closed.
 - **Perf-validation phase:** COMPLETE. All three tripwires resolved (createSignals
   cleared structural-accepted; FALSE-heavy characterized watch-item; cross-engine
@@ -99,9 +96,14 @@ _Last updated: 2026-06-21. Contract **v0.4.2** · Template-IR **v0.3.1**._
   steady-state-update harness).
 
 ### Forward queue (named, not blocking)
-- Slot fallback/default content; scoped slots (child→parent slot props);
-  component-as-slot-child (nested component inside a slot).
-- `$style` scoping/injection (parsed, not emitted).
+- **Slots — design APPROVED (2026-06-22), Path B phasing:** Increment 1 (commissioned) =
+  GATE-2 walk-collapse (retire `buildSlotSubIR`/`buildNvSlotSubIR` → recursive
+  `processHtmlTemplate`) + component-as-slot-child + fallback (`SlotOutletBinding.fallback?`);
+  retains D-slot-1; Template-IR → v0.3.3. Increment 2 (queued) = scoped slots
+  (`SlotEntry.content` factory + `SlotOutletBinding.props` + `let={...}` authoring +
+  **D-slot-2** invocation-scoped ownership, retiring D-slot-1); Template-IR → v0.4.
+- `$style` scoping/injection (parsed, not emitted); `$style × slots` (parked behind
+  `$style` scoping).
 - SyncBinding (throws at both back-ends today).
 - LIS list move-minimization (parked, gated on row-churn reorder cost).
 - Multi-root list items (single-root guard today; close before promoting multi-root).
@@ -460,3 +462,70 @@ Anti-vacuous sweeps: 0 `expect(true/false).toBe`, 0 `expect(!...` patterns.
 - `.nv` front-end unchanged — `slots.name` PropertyAccessExpression path untouched
 
 **References.** Prior entry `2026-06-21 — Slot-builder defects B1/B2/B3 — resolution DESIGNED; unified CC fix commissioned`.
+
+### 2026-06-22 — Scoped slots + fallback + component-as-slot-child: design APPROVED; gates ruled; Path B phasing
+
+**Decision.** The unified slot-content design (`scoped-slots-design.md`) is APPROVED. The
+three remaining slot features are one mechanism — *the child invokes the slot content as a
+richer thing*: scoped slots = invoke with exposed values; fallback = render an authored
+default when absent; component-as-slot-child = the content's binding set may include
+`ComponentBinding`. Four gates ruled:
+
+- **GATE-1 (§6 ownership) → D-slot-2: invocation-scoped ownership for all slot content,
+  retiring D-slot-1.** Scoped content reads child-exposed values that live as long as the
+  *invocation* (e.g. a list row), not the parent; strict parent-lexical (D-slot-1) would
+  strand a dangling observer when an invocation disposes. Invocation-scoped content is owned
+  by a `createRoot` at the outlet/invocation site, disposed when that invocation ends.
+  Parent-signal reads stay correct cross-scope (observation ≠ ownership, §6 / §12.24b). G4.6
+  still holds — the parent signal is untouched; only the content's *effect owner* moves.
+  **D-slot-1 is retired when scoped slots land (increment 2);** increment 1 (unscoped content
+  only) retains D-slot-1 because it has no per-invocation dependency. reactive-core stays
+  **v0.4.2** if implemented via existing `getOwner`/`runWithOwner`/`createRoot` (the
+  `wireList` pattern); verify against `wireList` and surface any §6 gap before landing
+  increment 2 (escalation rule).
+- **GATE-2 (surface area) → collapse (Option 2b).** Retire `buildSlotSubIR`/`buildNvSlotSubIR`;
+  slot content goes through the same recursive `processHtmlTemplate`. Permanently removes the
+  degraded-copy class that produced B1/B3, rather than re-arming it (component-as-slot-child
+  would otherwise force the sub-walk to re-grow component detection). Accepted cost: a real
+  refactor of the slot-capture path (hand the recursive call the slot subtree's hole
+  exprs + positions).
+- **GATE-3 (authoring) → `let={ ... }`.** Single destructure attribute on the `<slot>` fill
+  (not repeated `let:a let:b`; keeps the `let` token). Mirrors the tagged-template fill
+  `slot('row', ({ item, index }) => …)`, so both front-ends align. Child exposes at the
+  outlet via `slots.row({ item: item, index: index })` (.nv) / `slots('row', { item: () =>
+  …, index: () => … })` (tagged); **`.nv` expose-object entries erase to accessor THUNKS,
+  not value calls** (a value call would snapshot at expose time → dead). Object shorthand in
+  the expose object is NOT erased (existing parser gap) — long form until shorthand erasure
+  lands. Fallback: `{slots.x ?? html\`…\`}` (.nv) / `slots('x', { fallback: html\`…\` })`
+  (tagged). **`let` is contextually reserved on `<slot>` only** (ordinary JS elsewhere; the
+  `<slot>` element is consumed at parse time, never emitted). Zero runtime cost vs `let:`.
+  **Tag-level `let` deferred** (ambiguous with >1 scoped slot; Svelte v5 moved away from it).
+  Future ergonomic (not v1): validate `let={...}` names against the child's statically-known
+  exposed key set → diagnose typos instead of silently binding `undefined`.
+- **GATE-4 (phasing) → Path B (small wins first).** Two increments.
+
+**Increment 1 (commissioned now — `cc-handoff-slot-collapse-fallback.md`):** GATE-2 collapse
+(behavior-neutral; existing slot corpus stays green on the refactor alone) + component-as-
+slot-child (falls out of the collapse; no IR shape change) + fallback (additive
+`SlotOutletBinding.fallback?: TemplateIR`). Ownership retains D-slot-1. **Template-IR v0.3.2
+→ v0.3.3** (additive optional `fallback`). reactive-core **v0.4.2 unchanged**, no §6 change.
+
+**Increment 2 (later, separate gated session):** `SlotEntry.content` → factory
+`(slotProps) => TemplateIR`; `SlotOutletBinding.props?` (exposed accessor thunks);
+`let={...}` authoring; **D-slot-2** invocation-scoped ownership (retires D-slot-1). **Template-IR
+v0.3.3 → v0.4** (content-factory shape + `props`). Increment-1 work is not undone — `fallback`
+stays; the collapsed walk is what the factory shape builds on (no double-refactor).
+
+**Forward-looking (recorded so it does not collide):** the future `each` iteration construct
+(forward queue, gated on row-churn reorder data) is the only loop nv will have — run-once
+forbids `while`/imperative loops; control families are exactly `ConditionalBinding`,
+`ListBinding` (keyed each), `SyncBinding` (deferred). nv keys the *list*, not the element
+(no React `key` prop; key is a function on the construct, already `ListBinding.key`). A
+candidate `<each .of=… key=… let={ item, index }>` makes a list item a scoped slot the `each`
+fills per row — so increment 2's `SlotEntry.content` factory + `let={...}` should be designed
+so `each` reuses them rather than forking a parallel construct.
+
+**Status.** Design APPROVED; increment 1 commissioned; increment 2 queued. No code/IR change
+until CC lands increment 1. Cites *Slot-builder defects B1/B2/B3 LANDED [2026-06-21]*
+(removed the degraded-copy class at the per-hole constructor level; this collapse removes it
+at the walk level).
