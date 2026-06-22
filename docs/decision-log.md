@@ -46,16 +46,19 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.3.3**._
 - **Build pipeline `.nv → .js`:** Mode A, landed. Executable-module gate closed.
 - **Component API v1:** LANDED. Composition works end-to-end through the compiled
   path (A2 factory-shape convergence).
-- **Slot consumption — increment 1 LANDED (2026-06-22):** GATE-2 walk-collapse (retired
-  `buildSlotSubIR`/`buildNvSlotSubIR`); component-as-slot-child (nested-component deferral
-  closed); fallback (`SlotOutletBinding.fallback?`). Template-IR → v0.3.3. D-slot-1
-  retained. Increment 2 (scoped slots + D-slot-1 retained, D-slot-2 re-phased to `each`) queued.
+- **Slot consumption — increments 1 + 1.5 LANDED (2026-06-22):** inc 1 = GATE-2 walk-collapse,
+  component-as-slot-child, fallback (`SlotOutletBinding.fallback?`); inc 1.5 = emit-path
+  thunk-builder collapse (`computeBindingThunks`) + component-in-conditional-branch fix +
+  dead-code deletion. Template-IR v0.3.3. D-slot-1 retained. Increment 2 (scoped-slot IR shape
+  + `let={...}` authoring, D-slot-1 retained) queued; **D-slot-2 ownership flip re-phased to
+  land with `each`** (its leak gate needs real multi-row invocations — see 2026-06-22 re-phase).
 - **Real-browser gate:** PASSED across Blink/Gecko/WebKit (36/36). Phase 0 closed.
 - **Perf-validation phase:** COMPLETE. All three tripwires resolved (createSignals
   cleared structural-accepted; FALSE-heavy characterized watch-item; cross-engine
   closed). No redesign triggered.
-- **Tests:** 3237 green at last report (slot increment 1, 2026-06-22). `tsc --strict`
-  + DOM lib, biome, build all clean.
+- **Tests:** 496 green across all files (post-inc-1.5, 2026-06-22). `tsc --strict`
+  + DOM lib, biome, build all clean. (Prior "3237" figure was inflated by vitest collecting
+  `.claude/worktrees/**`; `.claude/**` excluded so the count-delta gate reads the honest baseline.)
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state graph-coloring, push-down
@@ -94,11 +97,12 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.3.3**._
   steady-state-update harness).
 
 ### Forward queue (named, not blocking)
-- **Slots — design APPROVED (2026-06-22), Path B phasing:** Increment 1 (LANDED 2026-06-22) =
-  GATE-2 walk-collapse + component-as-slot-child + fallback (`SlotOutletBinding.fallback?`);
-  Template-IR → v0.3.3. Increment 2 (queued) = scoped slots (`SlotEntry.content` factory +
-  `SlotOutletBinding.props` + `let={...}` authoring); **D-slot-1 retained**; Template-IR →
-  v0.4. **D-slot-2 re-phased** to land with `each` (2026-06-22 re-phasing entry).
+- **Slots — design APPROVED (2026-06-22), Path B phasing:** Increments 1 + 1.5 LANDED
+  (2026-06-22). Increment 2 (queued, `cc-handoff-scoped-slots.md`) = scoped-slot IR shape
+  (`SlotEntry.content` → factory + `SlotOutletBinding.props?`) + `let={...}` authoring;
+  **retains D-slot-1**; Template-IR → v0.4. **D-slot-2 invocation-scoped ownership flip
+  re-phased (2026-06-22) to land WITH `each`** — its leak gate requires real per-row
+  invocations to be failable; flipping it earlier is an unfalsifiable §6 gate.
 - `$style` scoping/injection (parsed, not emitted); `$style × slots` (parked behind
   `$style` scoping).
 - SyncBinding (throws at both back-ends today).
@@ -106,6 +110,11 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.3.3**._
 - Multi-root list items (single-root guard today; close before promoting multi-root).
 - `roots[0] as Node` biome-laundering cleanup (cosmetic).
 - kind-split (parked behind real-app wide-graph evidence).
+- **`each` iteration construct (+ D-slot-2):** keyed-each, the only loop nv will have. Lands the
+  **D-slot-2 ownership flip** alongside it (per 2026-06-22 re-phase) — `each` rows are the real
+  per-invocation roots that make the D-slot-2 leak gate failable. Reuses increment 2's
+  `SlotEntry.content` factory + `let={...}` (a list item is a scoped slot the `each` fills per
+  row); do not fork a parallel construct. Gated on row-churn reorder data.
 
 ### Naming
 - `neutro/view` / `nv` working name; package under `@neutro` (view engine is
