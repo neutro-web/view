@@ -928,10 +928,7 @@ describe('§inc1.5 — component-in-conditional-branch', () => {
 
     // bindingThunks[0] is the conditional (show ? html`<Card/>` : html`<p>no</p>`)
     expect(emit.bindingThunks[0]?.kind).toBe('conditional')
-    const condThunk = emit.bindingThunks[0] as Extract<
-      ThunkSource,
-      { kind: 'conditional' }
-    >
+    const condThunk = emit.bindingThunks[0] as Extract<ThunkSource, { kind: 'conditional' }>
 
     // consequent[0] must be 'component', NOT 'prop' or 'text'
     expect(condThunk.consequent[0]?.kind).toBe('component')

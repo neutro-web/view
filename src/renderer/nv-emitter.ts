@@ -45,7 +45,11 @@ const CORE_PRIMITIVES = new Set([
 
 // ── Thunk source emission ─────────────────────────────────────────────────────
 
-function emitThunkSource(thunk: ThunkSource, indent: string): string {
+type LeafThunkSource = Extract<ThunkSource, { kind: 'text' | 'attr' | 'prop' | 'event' }>
+
+/** Emit a leaf thunk source (text/attr/prop/event). Structural kinds are handled by emitBindingLiteral directly. */
+function emitThunkSource(thunk: LeafThunkSource, indent: string): string {
+  void indent
   switch (thunk.kind) {
     case 'text':
     case 'attr':
@@ -53,30 +57,6 @@ function emitThunkSource(thunk: ThunkSource, indent: string): string {
       return `() => (${thunk.exprSrc})`
     case 'event':
       return `() => (${thunk.handlerSrc})`
-    case 'conditional': {
-      const i4 = `${indent}    `
-      const consequentLines = thunk.consequent
-        .map((t) => `${i4}${emitThunkSource(t, i4)}`)
-        .join(',\n')
-      const alternatePart =
-        thunk.alternate === null
-          ? 'null'
-          : `[\n${thunk.alternate.map((t) => `${i4}${emitThunkSource(t, i4)}`).join(',\n')}\n${indent}  ]`
-      const consequentPart =
-        thunk.consequent.length > 0
-          ? `,\n${indent}  /* consequent thunks */ [\n${consequentLines}\n${indent}  ]`
-          : `,\n${indent}  []`
-      return `/* conditional */\n${indent}  (() => (${thunk.conditionSrc}))${consequentPart},\n${indent}  ${alternatePart}`
-    }
-    case 'component': {
-      const propParts = thunk.propSrcs
-        .map((p) => `{ name: ${JSON.stringify(p.name)}, expr: () => (${p.exprSrc}) }`)
-        .join(', ')
-      return `/* component:${thunk.componentSrc} */\n${indent}  ${thunk.componentSrc}, [${propParts}]`
-    }
-    case 'slot-outlet':
-      // Slot outlet has no expression — handled structurally in emitBindingLiteral.
-      return `/* slot-outlet:${thunk.name} */`
   }
 }
 
@@ -96,13 +76,13 @@ function emitBindingLiteral(
   const pathEntry = `pathIndex: ${binding.pathIndex}`
   switch (binding.kind) {
     case 'text':
-      return `{ kind: 'text', ${pathEntry}, expr: ${emitThunkSource(thunk, indent)} }`
+      return `{ kind: 'text', ${pathEntry}, expr: ${emitThunkSource(thunk as LeafThunkSource, indent)} }`
     case 'attr':
-      return `{ kind: 'attr', ${pathEntry}, name: ${JSON.stringify((binding as AttrBinding).name)}, expr: ${emitThunkSource(thunk, indent)} }`
+      return `{ kind: 'attr', ${pathEntry}, name: ${JSON.stringify((binding as AttrBinding).name)}, expr: ${emitThunkSource(thunk as LeafThunkSource, indent)} }`
     case 'prop':
-      return `{ kind: 'prop', ${pathEntry}, name: ${JSON.stringify((binding as PropBinding).name)}, expr: ${emitThunkSource(thunk, indent)} }`
+      return `{ kind: 'prop', ${pathEntry}, name: ${JSON.stringify((binding as PropBinding).name)}, expr: ${emitThunkSource(thunk as LeafThunkSource, indent)} }`
     case 'event':
-      return `{ kind: 'event', ${pathEntry}, eventName: ${JSON.stringify((binding as EventBinding).eventName)}, handlerKind: 'reactive', handler: ${emitThunkSource(thunk, indent)} }`
+      return `{ kind: 'event', ${pathEntry}, eventName: ${JSON.stringify((binding as EventBinding).eventName)}, handlerKind: 'reactive', handler: ${emitThunkSource(thunk as LeafThunkSource, indent)} }`
     case 'conditional': {
       const cb = binding as ConditionalBinding
       if (thunk.kind !== 'conditional')
