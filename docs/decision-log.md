@@ -102,15 +102,18 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4**._
 - `$style` scoping/injection (parsed, not emitted); `$style × slots` (parked behind
   `$style` scoping).
 - SyncBinding (throws at both back-ends today).
-- LIS list move-minimization (parked, gated on row-churn reorder cost).
+- LIS list move-minimization — CLOSED [2026-06-22], not commissioned (O(N) reconcile
+  acceptable: N=1k sub-2ms, N=10k 17ms real-Chromium).
 - Multi-root list items (single-root guard today; close before promoting multi-root).
 - `roots[0] as Node` biome-laundering cleanup (cosmetic).
 - kind-split (parked behind real-app wide-graph evidence).
-- **`each` iteration construct (+ D-slot-2):** keyed-each, the only loop nv will have. Lands the
-  **D-slot-2 ownership flip** alongside it (per 2026-06-22 re-phase) — `each` rows are the real
-  per-invocation roots that make the D-slot-2 leak gate failable. Reuses increment 2's
-  `SlotEntry.content` factory + `let={...}` (a list item is a scoped slot the `each` fills per
-  row); do not fork a parallel construct. Gated on row-churn reorder data.
+- **`each` iteration construct — UNBLOCKED, authoring not yet commissioned:** keyed-each,
+  the only loop nv will have. Spike resolved [2026-06-22]: per-row body reuses inc-2
+  `SlotEntry.content` via a `valueSig`/`indexSig`→thunk adapter (Variant A, TC-10f node
+  identity preserved); D-slot-2 invocation-scoped **confirmed already true for item bodies**
+  (D-slot-1 retained for component slots); move-min NOT commissioned (O(N) reconcile
+  acceptable). Surfaces: `.nv` `<each .of= key= let={item,index}>`, tagged-template
+  `each(items, key, ({item,index}) => html\`...\`)` → identical `ListBinding` IR.
 
 ### Named near-term debt
 - **Comparator `props`/`fallback` blindness (named debt):** `ir-equivalence.ts`
@@ -734,3 +737,41 @@ summary; green counts not trusted). All eight gate checks pass on inspection:
 
 **Cites.** *Scoped slots — increment 2 LANDED [2026-06-22]* (this entry verifies it);
 *D-slot-2 ownership flip re-phased to `each` [2026-06-22]* (basis for D-slot-1 retention).
+
+### 2026-06-22 — `each` spike resolved: item-body shape, D-slot-2, move-min
+
+Spike (CC, scratch-only, not committed) resolved the three gates that blocked the `each`
+authoring commission. Evidence read, not trusted from summary.
+
+**Item-body factory shape — DECIDED: SlotEntry reuse (Variant A).**
+Per-row body reuses `SlotEntry.content = (props: SlotProps) => TemplateIR`. A thin adapter
+exposes the reconcile loop's privately-held `valueSig`/`indexSig` as read-only thunks
+`{ item: () => valueSig(), index: () => indexSig() }`. Evidence: TC-10a–j pass under
+Variant A on both back-ends; **TC-10f node identity holds** (`lisAfter[0] === lisBefore[0]`)
+— the thunk indirection reads through the same signal objects, so the reactive graph is
+identical to the writable-signal path. No rebuild, no `itemTemplate` shape change to the
+reconcile loop, no core change. `ListBinding.itemTemplate` is bridged to `SlotContent`.
+
+**D-slot-2 ownership — DECIDED: invocation-scoped, already holds for list items.**
+Scope note: this confirms D-slot-2 **for `each` item bodies only**. D-slot-1 is **retained
+for component slots** (inc 2). This is not a general retirement of D-slot-1.
+Evidence: middle-row removal (3 rows → remove row 2) drops parent-signal `observerCount` by
+exactly 1 on both back-ends; siblings stay reactive. The per-row `createRoot` already owns
+row content (incl. parent-authored `let={}` content); `rec.dispose()` severs it. Under
+D-slot-1 the delta would have been 0 (leak) — the gate was failable and passed.
+**No `src/core/` change** (current reconcile design was already invocation-scoped). The
+inc-2 re-phase's "D-slot-2 flip lands with `each`" resolves to "already true; confirmed, not
+flipped."
+
+**Move-minimization (LIS/Ivi) — DECIDED: do NOT commission; question closed.**
+Real-Chromium reorder cost: N=1k worst-case sub-2 ms; N=10k shuffle 17 ms; single-move
+already O(1) DOM mutations. O(N) `insertBefore` reconcile is acceptable at target N.
+Negative result is a complete outcome — closes the parked move-min question rather than
+re-parking it.
+
+**Status.** All three gates resolved. `each` authoring increment unblocked: `.nv` `<each>`
+element form + tagged-template `each(...)` call form → identical `ListBinding` IR; per-row
+body is a `SlotEntry` via the thunk adapter. D2 comparator debt rides this increment.
+
+**Cites.** *Slot increment 2 LANDED [2026-06-22]* (re-phase basis); *D-slot-2 in increment 2
+— superseded [2026-06-22]* (the re-phase this spike discharges).
