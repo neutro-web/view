@@ -975,7 +975,11 @@ coexist with either.
 - Dynamic key name (`{ [className()]: true }`) breaks per-key-effect (key itself reactive)
   → compiler detects non-static key → fallback to looping-classList or full reassign.
 - `factory` static-vs-dynamic split assumes signal reads are statically detectable in the
-  factory body (same erasure machinery as `$script`). Confirm during spec→build.
+  factory body (same erasure machinery as `$script`). **Caveat found in review:**
+  `extractStyleInfo` currently captures `$style` as `source: string` + `keys`, NOT the
+  `ts.Expression`, and `$style` source is not bare-read-erased. Increment S must first
+  extend `extractStyleInfo` to retain the factory node (preferred) or re-parse `source`,
+  before the split/erasure can run on real nodes. Parse-layer extension, not contract/IR.
 
 **Status:** design RESOLVED. Spec drafted. Two increments queued, NOT commissioned:
 (I) `$style` scoping + injection; (II) class-selection + `cx`. `$style × slots` remains
