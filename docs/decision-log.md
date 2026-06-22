@@ -54,7 +54,7 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4**._
 - **Perf-validation phase:** COMPLETE. All three tripwires resolved (createSignals
   cleared structural-accepted; FALSE-heavy characterized watch-item; cross-engine
   closed). No redesign triggered.
-- **Tests:** 559 green (`each` authoring increment, 2026-06-22). `tsc --strict` + DOM lib, biome, build all clean.
+- **Tests:** 564 green (`each` inc-3 behavioral e2e, 2026-06-22). `tsc --strict` + DOM lib, biome, build all clean.
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state graph-coloring, push-down
@@ -116,8 +116,12 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4**._
   EachSentinel holes; FE `bindingPaths.length` differs for `each`; safe under
   pathIndex-keyed access, breaks on positional scans).
 
-- **Increment 3 (queued, not commissioned):** `.nv <each>` behavioral e2e —
-  bundle→eval→mount→assert, closing the G3 reduction above.
+- **Increment 3: LANDED** (branch feat/each-nv-behavioral). `.nv <each>` behavioral
+  e2e: EX-EACH-01..05 pass. G3-reduction debt retired — `each` is now behaviorally
+  proven on both FEs. Two emitter/parser bugs fixed in this increment: (1) nv-emitter
+  arrow-body object literal missing parens (esbuild parsed as block); (2) JSDOM
+  `let={item, index}` comma-split reassembly + `eraseSignalReadsInNode` PropertyAccess
+  guard split for slotProps accessors (`item.label → slotProps.item().label`).
 
 ### Named near-term debt
 - **Comparator `slot-outlet` `props` blindness — CLOSED [2026-06-22]:** `bindingEqual`
