@@ -112,6 +112,15 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4**._
   `SlotEntry.content` factory + `let={...}` (a list item is a scoped slot the `each` fills per
   row); do not fork a parallel construct. Gated on row-churn reorder data.
 
+### Named near-term debt
+- **`irStructurallyEqual` comparator gap — `SlotOutletBinding.props` / `fallback` not compared:**
+  The structural comparator in `test/renderer/ir-equivalence.ts` does not descend into
+  `SlotOutletBinding.props` or `SlotOutletBinding.fallback` when checking FE-equivalence.
+  This predates scoped slots (`fallback` had the same gap since increment 1); increment 2 did
+  not regress it, but the gap is now more load-bearing. The `each` construct will need
+  comparator coverage for per-row slot props anyway — **extend the comparator there** rather
+  than in a standalone patch. Tracked here so the `each` plan gate includes it.
+
 ### Naming
 - `neutro/view` / `nv` working name; package under `@neutro` (view engine is
   *portable/interoperable*, not strong-agnostic like the pure-logic packages).

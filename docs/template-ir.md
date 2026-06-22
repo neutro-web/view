@@ -1,4 +1,4 @@
-# nv Template IR — Design v0.3.3
+# nv Template IR — Design v0.4
  
 **Stream:** (3) Renderer/templating  
 **Contract reference:** nv Reactive Core Runtime Contract v0.4.2  
