@@ -48,14 +48,14 @@ _Last updated: 2026-06-21. Contract **v0.4.2** · Template-IR **v0.3.1**._
   path (A2 factory-shape convergence).
 - **Slot consumption:** LANDED (named + reactive, both FEs + emit + both back-ends,
   parent-lexical ownership). FE-equivalence enforced via the structural comparator
-  (G3.1 read-back addendum). **Two follow-ups OPEN (2026-06-21):** B1 — slot sub-IR
-  builders (`buildSlotSubIR`/`buildNvSlotSubIR`) hard-code every slot hole to
-  `TextBinding`, violating §3 (slot content is a full `TemplateIR`) and §6.1 for
-  attr/prop/event holes; unreachable by current corpus. B2 — tagged-template outlet
-  detection via `Function.prototype.toString()` matching is build-target/minifier
-  fragile and is a front-end-convergence design question (sanction source-string
-  detection vs. structural marker). Both gated on the §8.2 corpus having no
-  slot/component cases — corpus gap is the shared root cause.
+  (G3.1 read-back addendum). **Three slot-content defects DESIGNED, CC fix commissioned
+  (2026-06-21):** B1 — both slot sub-builders (`buildSlotSubIR`/`buildNvSlotSubIR`)
+  hard-code every slot hole to `TextBinding` (violates §3; `.nv` IR-vs-emit kind
+  divergence). B3 — sub-builders blind to outlets/conditionals inside slot content.
+  Both fixed via the shared per-hole binding constructor (Option A), killing the
+  degraded-copy class. B2 — html-tag `.toString()` outlet detection replaced by a
+  structural `slots('name')` sentinel marker (`.nv` keeps `slots.name` AST detection).
+  §8.2 corpus gap (zero slot/component cases) closed in the same change. Pending CC land.
 - **Real-browser gate:** PASSED across Blink/Gecko/WebKit (36/36). Phase 0 closed.
 - **Perf-validation phase:** COMPLETE. All three tripwires resolved (createSignals
   cleared structural-accepted; FALSE-heavy characterized watch-item; cross-engine
@@ -339,3 +339,107 @@ do not yet consume them) — forward queue.
 
 **Forward queue (confirmed deferred):** slot fallback/default content, scoped slots (slot props child→parent), component-as-slot-child (nested component inside a slot), `$style`×slots interaction.
 **Read-back addendum (2026-06-21):** G3.1 tightened post-landing — original assertion checked only slot name/length/kind; replaced with the shared structural comparator (`test/renderer/ir-equivalence.ts`, wrapping `comparator.ts`) so a `bindingPaths`/`shape.html` divergence between front-ends now fails. No production code changed; FE-equivalence property now actually enforced. Tests remain 3203.
+
+### 2026-06-21 — Slot-builder defects B1/B2/B3 — resolution DESIGNED; unified CC fix commissioned
+
+**Context.** A code read-back of the two slot sub-IR builders (after *Slot consumption
+LANDED [2026-06-21]*) surfaced three defects in how slot **content** is built. All three
+confirmed against real source (`src/renderer/html-tag.ts`, `src/renderer/nv-parser.ts`).
+Designed here; CC executes (handoff `cc-handoff-slot-defects.md`). **Not yet landed.**
+
+**The three defects.**
+- **B1 — both slot sub-builders hard-code every slot hole to `TextBinding`.**
+  `buildSlotSubIR` (html-tag) and `buildNvSlotSubIR` (.nv) detect attr/prop/event holes
+  inside slot content but discard the kind and emit `TextBinding` for all of them.
+  Violates Template-IR §3 (`SlotEntry.content` is a full `TemplateIR` whose bindings may
+  be any kind) and the locked invariant *misclassification costs perf, never correctness*:
+  a prop/event hole inside slot content wires a text update onto an element node → silently
+  wrong DOM, no parse-time error. Unreachable by the current corpus.
+  - **`.nv` subtlety (decisive for the gate):** two kind producers for the same slot hole
+    DISAGREE. IR-time `buildNvSlotSubIR` → `kind:'text'` (WRONG); emit-time
+    `computeThunkSource` switches on `pos.kind` → CORRECT (`prop`/`event`/`attr`). The
+    interpreter dispatches on IR kind (wrong), the compiler on emit ThunkSource (right) →
+    the two back-ends DIVERGE on the same `.nv` slot. The fix makes the IR builder AGREE
+    with the already-correct `computeThunkSource`.
+- **B2 — html-tag detects outlets via `Function.prototype.toString()`** (regex-matching
+  `() => slots.name`). Build-fragile: esbuild/tsc target lowering or minifier param
+  mangling silently breaks the match → the outlet falls through to a `TextBinding` whose
+  expr returns a `TemplateIR` → the back-end stringifies an object. The `.nv → .js` Mode A
+  pipeline puts esbuild in the toolchain, so the trigger is one build-flag away, undetected.
+  `.toString()` is **unfixable**: html-tag cannot evaluate the outlet thunk — `() =>
+  slots.body` closes over a `slots` object that exists only at component-CALL time, not at
+  html-PARSE time. There is no robust-`.toString()` path. **B2 is html-tag-only** — `.nv`
+  already detects outlets structurally via AST (`slots.name` PropertyAccessExpression).
+- **B3 — both slot sub-builders are blind to outlets and conditionals INSIDE slot
+  content.** The top-level builders handle `slots.name` → `SlotOutletBinding` and (.nv)
+  ternary-`html` → `ConditionalBinding` (recursive); the sub-builders do neither (flat
+  attr/prop/event/text walk only). Same degraded-copy class as B1.
+
+**Decisions LOCKED.**
+1. **Fix all three** (B1, B2, B3).
+2. **Take the longer no-baggage path:**
+   - **Option A — shared per-hole binding constructor**, extracted in each file and used by
+     BOTH the top-level walk AND the slot sub-walk. The top-level construction was inlined
+     in each main walk's per-hole loop (not a callable unit), which is exactly why the slot
+     sub-builders reimplemented a degraded flat copy. Extracting one constructor kills the
+     degraded-copy CLASS that produced both B1 and B3, rather than patching symptoms.
+     (Rejected **Option B** — fatten the sub-builders without extracting; completes the
+     copy but leaves the divergence trap armed.) Shared *within each file*; each file's
+     constructor handles the kinds that file produces (html-tag: text/attr/prop/event/
+     slot-outlet; .nv: those + conditional).
+   - **B2 = structural marker**, killing `.toString()` entirely. The shared constructor
+     uses the SAME outlet check at top level and inside slots, so B3's outlet-inside-slot
+     falls out for free once detection is structural.
+3. **B2 marker mechanism (OPEN-1 resolved) = `slots('name')` sentinel function.** Author
+   writes `${slots('header')}` on the tagged-template side; `slots(name)` returns a tagged
+   sentinel `{ __nvSlotOutlet: name }` (NOT a thunk). html-tag detects by property check,
+   exempts the sentinel from the all-holes-must-be-functions guard, and emits
+   `SlotOutletBinding`. Smallest authoring delta (still a `${}` hole), dead-simple
+   detection, zero build-target failure modes. Cost: one tiny new public API on the
+   tagged-template path + the guard exemption. Rejected: **Option 3** element sentinel
+   `<slot-out>` (larger surface-syntax change: hole → structure); **Option 2**
+   reference-identity (html-tag has no `slots` value at parse time).
+4. **Marker name (OPEN-2 resolved) = `slots('name')`, not `outlet('name')`.**
+   `slots('header')` reads as "from the `slots` collection, get header" — the call mirrors
+   `.nv`'s `slots.header` member access (same noun, same mental model). Pairing across the
+   two roles and two front-ends:
+
+   | role | `.nv` | tagged-template |
+   |---|---|---|
+   | child renders | `slots.header` | `slots('header')` |
+   | parent fills | `<slot name="header">` | `<slot name="header">` |
+
+   The fill side stays singular `<slot name=…>` (each element fills one slot; the
+   collection framing applies only to the child-side read). `outlet` was the clearer
+   standalone concept (Angular `ng-content`/`router-outlet` precedent) but added a second
+   vocabulary word for a feature nv already names "slot"; `slots('name')` wins on surface
+   coherence and front-end symmetry.
+5. **`.nv` NOT changed to `slots('name')`.** `.nv` keeps `slots.header` (AST
+   property-access detection — robust, idiomatic bare-read, the `.nv` thesis). The
+   tagged-template call form is the no-build workaround for the constraint that html-tag
+   cannot do property access at parse time, not a canonical form to propagate. Both
+   front-ends already produce identical IR (`SlotOutletBinding`) — that is the uniformity
+   that matters; matching surface syntax where capabilities genuinely differ is false
+   economy.
+6. **Default slot stays implicit.** When named slots exist, residue (non-`<slot>`
+   children) is still the default slot, captured if non-empty — no explicit authoring,
+   position-irrelevant (named slots keyed by name; default = residue; outlet positions
+   on the child side decide render order). Confirmed already-correct in both front-ends;
+   no change. An unrendered/unfilled default renders nothing (`wireSlotOutlet` early-return).
+
+**Root cause (durable).** The §8.2 differential corpus has ZERO slot/component cases — the
+shared root cause behind B1, B3, AND the earlier G3.1 near-miss. The corpus extension is
+the durable fix; reaffirms *new binding kinds land WITH differential corpus coverage in the
+same change*.
+
+**Contract impact.** reactive-core **v0.4.2 unchanged** (no core touch). Template-IR: the
+`slots()` marker is a new tagged-template authoring construct producing the **existing**
+`SlotOutletBinding` (IR shape unchanged). Recommend a **doc-only v0.3.1 → v0.3.2** note in
+§6.1 + changelog recording the two outlet-detection mechanisms (`.nv` AST property-access;
+tagged-template `slots()` sentinel) producing identical IR — parallels the v0.2.1 doc
+clarification. No semantic change. Apply when the fix lands.
+
+**Status.** DESIGNED; CC fix commissioned (`cc-handoff-slot-defects.md`). **Supersedes** the
+stale earlier-session drafts `decision-log-b1-b2.md` (frames B2 as an open
+source-string-vs-marker question, no B3, no shared-constructor) and
+`cc-handoff-b1-b2-corpus.md` (Option-B-shaped, no B3) — discard both.
