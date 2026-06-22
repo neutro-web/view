@@ -33,6 +33,7 @@ import type {
   ComponentBinding,
   EventBinding,
   HandlerExpr,
+  ListBinding,
   NodePath,
   PropBinding,
   PropEntry,
@@ -107,6 +108,39 @@ function isSlotFillSentinel(v: unknown): v is SlotFillSentinel {
  */
 export function slot(name: string, factory: SlotContent): SlotFillSentinel {
   return { __nvSlotFill: name, factory }
+}
+
+// ── Each sentinel ─────────────────────────────────────────────────────────────
+
+/** Opaque sentinel returned by `each(items, key, factory)` — the tagged-template list form. */
+export interface EachSentinel {
+  readonly __nvEach: true
+  readonly items: () => readonly unknown[]
+  readonly key: (item: unknown, i: number) => string | number
+  readonly factory: SlotContent
+}
+
+function isEachSentinel(v: unknown): v is EachSentinel {
+  return (
+    v !== null &&
+    typeof v === 'object' &&
+    (v as Record<string, unknown>).__nvEach === true &&
+    typeof (v as EachSentinel).items === 'function' &&
+    typeof (v as EachSentinel).key === 'function' &&
+    typeof (v as EachSentinel).factory === 'function'
+  )
+}
+
+/**
+ * Create an each-list sentinel for the tagged-template side.
+ * Write `${each(() => items(), key, ({ item, index }) => html`...`)}` for a keyed list.
+ */
+export function each(
+  items: () => readonly unknown[],
+  key: (item: unknown, i: number) => string | number,
+  factory: SlotContent,
+): EachSentinel {
+  return { __nvEach: true, items, key, factory }
 }
 
 function isSlotSentinel(v: unknown): v is SlotSentinel {
@@ -240,6 +274,13 @@ function computePath(node: Node, root: Node): NodePath {
 
 // ── Shared node-list walk (GATE-2 collapse) ───────────────────────────────────
 
+/** A list anchor discovered during the walk — the hole's expr was an EachSentinel. */
+interface WalkedList {
+  anchorPath: NodePath
+  origIdx: number
+  sentinel: EachSentinel
+}
+
 /**
  * A component element discovered during the walk, with its anchor path (relative
  * to the walk root) and captured slot content. Recorded by walkNodeList; each
@@ -268,6 +309,7 @@ interface WalkResult {
   holePaths: NodePath[]
   components: WalkedComponent[]
   consumed: Set<number>
+  lists: WalkedList[]
 }
 
 /**
@@ -286,6 +328,7 @@ function walkNodeList(nodes: Node[], exprs: unknown[], root: Node, doc: Document
   const holePaths: NodePath[] = []
   const components: WalkedComponent[] = []
   const consumed = new Set<number>()
+  const lists: WalkedList[] = []
 
   function walk(node: Node): void {
     if (node.nodeType === 8 /* COMMENT_NODE */) {
@@ -293,8 +336,18 @@ function walkNodeList(nodes: Node[], exprs: unknown[], root: Node, doc: Document
       if (m !== null) {
         // biome-ignore lint/style/noNonNullAssertion: regex match guarantees group
         const idx = Number.parseInt(m[1]!, 10)
-        holeInfos.push({ kind: 'text', origIdx: idx })
-        holePaths.push(computePath(node, root))
+        if (isEachSentinel(exprs[idx])) {
+          // Each sentinel: the comment IS the list anchor — record path, skip text-hole.
+          lists.push({
+            anchorPath: computePath(node, root),
+            origIdx: idx,
+            sentinel: exprs[idx] as EachSentinel,
+          })
+          consumed.add(idx)
+        } else {
+          holeInfos.push({ kind: 'text', origIdx: idx })
+          holePaths.push(computePath(node, root))
+        }
       }
     } else if (node.nodeType === 1 /* ELEMENT_NODE */) {
       const el = node as Element
@@ -439,7 +492,7 @@ function walkNodeList(nodes: Node[], exprs: unknown[], root: Node, doc: Document
   }
 
   for (const n of nodes) walk(n)
-  return { holeInfos, holePaths, components, consumed }
+  return { holeInfos, holePaths, components, consumed, lists }
 }
 
 // ── Slot content IR builder (collapse: uses the shared walkNodeList) ───────────
@@ -633,7 +686,8 @@ export function createHtmlTag(document: Document) {
       if (
         typeof exprs[i] !== 'function' &&
         !isSlotSentinel(exprs[i]) &&
-        !isSlotFillSentinel(exprs[i])
+        !isSlotFillSentinel(exprs[i]) &&
+        !isEachSentinel(exprs[i])
       ) {
         throw new TypeError(
           `[nv/html] Expression at hole ${i} is not a function. Wrap reactive values in thunks: \${() => signal()} not \${signal()}. Received: ${typeof exprs[i]}`,
@@ -664,6 +718,7 @@ export function createHtmlTag(document: Document) {
       holePaths,
       components,
       consumed: consumedByComponent,
+      lists,
     } = walkNodeList(Array.from(frag.childNodes), exprs, frag, document)
     // Map encounter-order hole paths back to GLOBAL hole indices (top-level convention).
     for (let h = 0; h < holeInfos.length; h++) {
@@ -697,6 +752,22 @@ export function createHtmlTag(document: Document) {
       // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
       const hole = holes[i]!
       bindings.push(buildHtmlHoleBinding(hole, i, exprs[i]))
+    }
+
+    // Add list bindings (each() sentinels): anchor paths appended after component + hole paths.
+    // The adapter wraps SlotContent factory → itemTemplate signature (Variant A).
+    for (const wl of lists) {
+      const pathIndex = allPaths.length
+      allPaths.push(wl.anchorPath)
+      const { items, key, factory } = wl.sentinel
+      bindings.push({
+        kind: 'list',
+        pathIndex,
+        items,
+        key,
+        itemTemplate: (valueSig, indexSig) =>
+          factory({ item: () => valueSig(), index: () => indexSig() }),
+      } satisfies ListBinding)
     }
 
     const shape: TemplateShape = {
