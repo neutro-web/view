@@ -143,6 +143,64 @@ export function each(
   return { __nvEach: true, items, key, factory }
 }
 
+// ── Class name builder ────────────────────────────────────────────────────────
+
+/**
+ * Pure class-string builder: concatenates truthy class tokens, space-joined.
+ *
+ * Args are: string | Record<string, unknown> | Array<...> | null | undefined | false | 0
+ * - Strings: include if non-empty
+ * - Objects: include each key whose value is truthy
+ * - Arrays: recurse (flatten/process each element)
+ * - Falsy (null, undefined, false, 0, ''): skip entirely
+ *
+ * Returns a single space-joined string of truthy tokens.
+ *
+ * Usage:
+ *   cx('btn', { primary: true, disabled: false }) // 'btn primary'
+ *   cx('a', ['b', { c: true }]) // 'a b c'
+ *   cx({ active: true }, null, false, undefined) // 'active'
+ */
+export function cx(
+  ...args: (
+    | string
+    | Record<string, unknown>
+    | (string | Record<string, unknown>)[]
+    | null
+    | undefined
+    | false
+    | 0
+  )[]
+): string {
+  const tokens: string[] = []
+
+  for (const arg of args) {
+    if (arg === null || arg === undefined || arg === false || arg === 0 || arg === '') {
+      continue
+    }
+    if (typeof arg === 'string') {
+      if (arg.length > 0) {
+        tokens.push(arg)
+      }
+    } else if (Array.isArray(arg)) {
+      // Recurse into arrays
+      const nested = cx(...arg)
+      if (nested.length > 0) {
+        tokens.push(nested)
+      }
+    } else if (typeof arg === 'object') {
+      // Record: include keys whose values are truthy
+      for (const [key, value] of Object.entries(arg)) {
+        if (value) {
+          tokens.push(key)
+        }
+      }
+    }
+  }
+
+  return tokens.join(' ')
+}
+
 function isSlotSentinel(v: unknown): v is SlotSentinel {
   return (
     typeof v === 'object' &&
