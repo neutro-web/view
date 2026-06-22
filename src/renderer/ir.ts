@@ -196,13 +196,17 @@ export type SyncBinding = BaseBinding & {
 
 /** Local structural type — DOM-free and core-free (per ir.ts header discipline). */
 export type PropsObject = { readonly [name: string]: ReactiveExpr }
+/** Child-exposed accessor thunks readable by parent-authored slot content (v0.4). */
+export type SlotProps = PropsObject
+/** Factory: parent-authored slot content receives child-exposed props, returns TemplateIR. */
+export type SlotContent = (props: SlotProps) => TemplateIR
 /** Local structural type — slot content keyed by name. */
-export type SlotFns = { readonly [name: string]: TemplateIR }
-/** Factory the back-end calls: receives live props + slot IRs, returns child TemplateIR. */
+export type SlotFns = { readonly [name: string]: SlotContent }
+/** Factory the back-end calls: receives live props + slot factories, returns child TemplateIR. */
 export type ComponentRef = (props: PropsObject, slots: SlotFns) => TemplateIR
 
 export type PropEntry = { name: string; expr: ReactiveExpr }
-export type SlotEntry = { name: string; content: TemplateIR }
+export type SlotEntry = { name: string; content: SlotContent }
 
 export type ComponentBinding = BaseBinding & {
   kind: 'component'
@@ -223,7 +227,9 @@ export type ComponentBinding = BaseBinding & {
 export type SlotOutletBinding = BaseBinding & {
   kind: 'slot-outlet'
   name: string
-  /** Child-authored default content, rendered when the slot is absent (increment 1). */
+  /** Child-exposed accessor thunks readable by parent-authored slot content (v0.4). */
+  props?: readonly PropEntry[]
+  /** Child-authored default content, rendered when the slot is absent (v0.3.3). */
   fallback?: TemplateIR
 }
 

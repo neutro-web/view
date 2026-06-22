@@ -85,7 +85,9 @@ describe('G3.1 — FE-equivalence: html-tag vs nv-parser slot sub-IRs are struct
     const nvSlot = nvComp!.slots.find((s) => s.name === 'default')
     expect(nvSlot).toBeDefined()
 
-    const r = irStructurallyEqual(doc, htmlSlot!.content, nvSlot!.content)
+    const htmlSlotIR = htmlSlot!.content({})
+    const nvSlotIR = nvSlot!.content({})
+    const r = irStructurallyEqual(doc, htmlSlotIR, nvSlotIR)
     expect(r.equal, `default-slot sub-IR divergence: ${r.reason}`).toBe(true)
   })
 
@@ -115,10 +117,12 @@ describe('G3.1 — FE-equivalence: html-tag vs nv-parser slot sub-IRs are struct
     const nvHeader = nvComp!.slots.find((s) => s.name === 'header')
     expect(nvHeader).toBeDefined()
 
-    const r = irStructurallyEqual(doc, htmlHeader!.content, nvHeader!.content)
+    const htmlHeaderIR = htmlHeader!.content({})
+    const nvHeaderIR = nvHeader!.content({})
+    const r = irStructurallyEqual(doc, htmlHeaderIR, nvHeaderIR)
     expect(r.equal, `named-slot sub-IR divergence: ${r.reason}`).toBe(true)
-    expect(nvHeader!.content.bindings.length).toBeGreaterThan(0)
-    expect(nvHeader!.content.bindings[0]!.kind).toBe('text')
+    expect(nvHeaderIR.bindings.length).toBeGreaterThan(0)
+    expect(nvHeaderIR.bindings[0]!.kind).toBe('text')
   })
 })
 
@@ -161,8 +165,8 @@ describe('G4.1 — Named slot renders at outlet', () => {
           props: [],
           propNames: [],
           slots: [
-            { name: 'header', content: headerSlotIR },
-            { name: 'footer', content: footerSlotIR },
+            { name: 'header', content: () => headerSlotIR },
+            { name: 'footer', content: () => footerSlotIR },
           ],
         },
       ],
@@ -221,8 +225,8 @@ describe('G4.2 — Default + named slots coexist', () => {
           props: [],
           propNames: [],
           slots: [
-            { name: 'default', content: defaultSlotIR },
-            { name: 'header', content: headerSlotIR },
+            { name: 'default', content: () => defaultSlotIR },
+            { name: 'header', content: () => headerSlotIR },
           ],
         },
       ],
@@ -266,7 +270,7 @@ describe('G4.3 — Reactive hole inside a slot updates on parent signal write', 
           component: () => childIR,
           props: [],
           propNames: [],
-          slots: [{ name: 'default', content: slotContentIR }],
+          slots: [{ name: 'default', content: () => slotContentIR }],
         },
       ],
     }
@@ -368,7 +372,7 @@ describe('G4.5 — Parent dispose: slot effects and DOM torn down', () => {
           component: () => childIR,
           props: [],
           propNames: [],
-          slots: [{ name: 'default', content: slotContentIR }],
+          slots: [{ name: 'default', content: () => slotContentIR }],
         },
       ],
     }
@@ -449,7 +453,7 @@ describe('G4.6 — Child-dispose: parent signal live, disposed region does NOT m
           component: () => childIR,
           props: [],
           propNames: [],
-          slots: [{ name: 'default', content: slotContentIR }],
+          slots: [{ name: 'default', content: () => slotContentIR }],
         },
       ],
     }
@@ -502,7 +506,7 @@ describe('G4.6 — Child-dispose: parent signal live, disposed region does NOT m
           component: () => childIR,
           props: [],
           propNames: [],
-          slots: [{ name: 'default', content: slotContentIR }],
+          slots: [{ name: 'default', content: () => slotContentIR }],
         },
       ],
     }
@@ -552,7 +556,7 @@ describe('§8.2-B1 — slot-with-prop-hole: sub-builder emits PropBinding, not T
     expect(comp).toBeDefined()
     const body = comp!.slots.find((s) => s.name === 'body')
     expect(body).toBeDefined()
-    expect(body!.content.bindings[0]?.kind).toBe('prop')
+    expect(body!.content({}).bindings[0]?.kind).toBe('prop')
   })
 
   it('FE: nv-parser slot sub-IR has PropBinding for .prop= hole', () => {
@@ -570,7 +574,7 @@ describe('§8.2-B1 — slot-with-prop-hole: sub-builder emits PropBinding, not T
     expect(nvComp).toBeDefined()
     const nvBody = nvComp!.slots.find((s) => s.name === 'body')
     expect(nvBody).toBeDefined()
-    expect(nvBody!.content.bindings[0]?.kind).toBe('prop')
+    expect(nvBody!.content({}).bindings[0]?.kind).toBe('prop')
   })
 
   it('FE-equivalence: both front-ends produce identical prop-hole slot sub-IRs', () => {
@@ -592,7 +596,9 @@ describe('§8.2-B1 — slot-with-prop-hole: sub-builder emits PropBinding, not T
     const nvComp = nvIR.bindings.find((b) => b.kind === 'component') as ComponentBinding | undefined
     const nvBody = nvComp!.slots.find((s) => s.name === 'body')!
 
-    const r = irStructurallyEqual(doc, htmlBody.content, nvBody.content)
+    const htmlBodyIR = htmlBody.content({})
+    const nvBodyIR = nvBody.content({})
+    const r = irStructurallyEqual(doc, htmlBodyIR, nvBodyIR)
     expect(r.equal, `prop-slot sub-IR divergence: ${r.reason}`).toBe(true)
   })
 
@@ -618,7 +624,7 @@ describe('§8.2-B1 — slot-with-prop-hole: sub-builder emits PropBinding, not T
           component: () => childIR,
           props: [],
           propNames: [],
-          slots: [{ name: 'body', content: slotIR }],
+          slots: [{ name: 'body', content: () => slotIR }],
         },
       ],
     }
@@ -651,7 +657,7 @@ describe('§8.2-B1 — slot-with-prop-hole: sub-builder emits PropBinding, not T
           component: () => childIR,
           props: [],
           propNames: [],
-          slots: [{ name: 'body', content: slotIR }],
+          slots: [{ name: 'body', content: () => slotIR }],
         },
       ],
     }
@@ -674,7 +680,7 @@ describe('§8.2-B1 — slot-with-event-hole: sub-builder emits EventBinding, not
     expect(comp).toBeDefined()
     const body = comp!.slots.find((s) => s.name === 'body')
     expect(body).toBeDefined()
-    expect(body!.content.bindings[0]?.kind).toBe('event')
+    expect(body!.content({}).bindings[0]?.kind).toBe('event')
     void clicks
   })
 
@@ -693,7 +699,7 @@ describe('§8.2-B1 — slot-with-event-hole: sub-builder emits EventBinding, not
     expect(nvComp).toBeDefined()
     const nvBody = nvComp!.slots.find((s) => s.name === 'body')
     expect(nvBody).toBeDefined()
-    expect(nvBody!.content.bindings[0]?.kind).toBe('event')
+    expect(nvBody!.content({}).bindings[0]?.kind).toBe('event')
   })
 
   it('FE-equivalence: both front-ends produce identical event-hole slot sub-IRs', () => {
@@ -718,7 +724,9 @@ describe('§8.2-B1 — slot-with-event-hole: sub-builder emits EventBinding, not
     const nvComp = nvIR.bindings.find((b) => b.kind === 'component') as ComponentBinding | undefined
     const nvBody = nvComp!.slots.find((s) => s.name === 'body')!
 
-    const r = irStructurallyEqual(doc, htmlBody.content, nvBody.content)
+    const htmlBodyIR = htmlBody.content({})
+    const nvBodyIR = nvBody.content({})
+    const r = irStructurallyEqual(doc, htmlBodyIR, nvBodyIR)
     expect(r.equal, `event-slot sub-IR divergence: ${r.reason}`).toBe(true)
   })
 
@@ -754,7 +762,7 @@ describe('§8.2-B1 — slot-with-event-hole: sub-builder emits EventBinding, not
           component: () => childIR,
           props: [],
           propNames: [],
-          slots: [{ name: 'body', content: evtSlotIR }],
+          slots: [{ name: 'body', content: () => evtSlotIR }],
         },
       ],
     }
@@ -797,7 +805,7 @@ describe('§8.2-B1 — slot-with-event-hole: sub-builder emits EventBinding, not
           component: () => childIR,
           props: [],
           propNames: [],
-          slots: [{ name: 'body', content: evtSlotIR }],
+          slots: [{ name: 'body', content: () => evtSlotIR }],
         },
       ],
     }
@@ -865,7 +873,7 @@ describe('§8.2-B2 — outlet-via-slots-sentinel: slots("name") produces SlotOut
           component: () => childIR,
           props: [],
           propNames: [],
-          slots: [{ name: 'header', content: headerContentIR }],
+          slots: [{ name: 'header', content: () => headerContentIR }],
         },
       ],
     }
@@ -894,7 +902,7 @@ describe('§8.2-B2 — outlet-via-slots-sentinel: slots("name") produces SlotOut
           component: () => childIR,
           props: [],
           propNames: [],
-          slots: [{ name: 'header', content: headerContentIR }],
+          slots: [{ name: 'header', content: () => headerContentIR }],
         },
       ],
     }
@@ -911,8 +919,8 @@ describe('§8.2-B3 — outlet-inside-slot-content: slot sub-builder detects slot
     expect(comp).toBeDefined()
     const body = comp!.slots.find((s) => s.name === 'body')
     expect(body).toBeDefined()
-    expect(body!.content.bindings[0]?.kind).toBe('slot-outlet')
-    expect((body!.content.bindings[0] as SlotOutletBinding).name).toBe('inner')
+    expect(body!.content({}).bindings[0]?.kind).toBe('slot-outlet')
+    expect((body!.content({}).bindings[0] as SlotOutletBinding).name).toBe('inner')
   })
 
   it('FE: nv-parser slot sub-IR has SlotOutletBinding when slot content contains slots.x outlet', () => {
@@ -929,8 +937,8 @@ describe('§8.2-B3 — outlet-inside-slot-content: slot sub-builder detects slot
     expect(nvComp).toBeDefined()
     const nvBody = nvComp!.slots.find((s) => s.name === 'body')
     expect(nvBody).toBeDefined()
-    expect(nvBody!.content.bindings[0]?.kind).toBe('slot-outlet')
-    expect((nvBody!.content.bindings[0] as SlotOutletBinding).name).toBe('inner')
+    expect(nvBody!.content({}).bindings[0]?.kind).toBe('slot-outlet')
+    expect((nvBody!.content({}).bindings[0] as SlotOutletBinding).name).toBe('inner')
   })
 
   it('FE-equivalence: both front-ends agree on outlet-inside-slot-content sub-IR', () => {
@@ -950,7 +958,9 @@ describe('§8.2-B3 — outlet-inside-slot-content: slot sub-builder detects slot
     const nvComp = nvIR.bindings.find((b) => b.kind === 'component') as ComponentBinding | undefined
     const nvBody = nvComp!.slots.find((s) => s.name === 'body')!
 
-    const r = irStructurallyEqual(doc, htmlBody.content, nvBody.content)
+    const htmlBodyIR = htmlBody.content({})
+    const nvBodyIR = nvBody.content({})
+    const r = irStructurallyEqual(doc, htmlBodyIR, nvBodyIR)
     expect(r.equal, `outlet-in-slot-content sub-IR divergence: ${r.reason}`).toBe(true)
   })
 })
@@ -971,8 +981,8 @@ describe('§8.2-B3 — conditional-inside-slot-content: nv-parser slot sub-build
     expect(nvComp).toBeDefined()
     const nvBody = nvComp!.slots.find((s) => s.name === 'body')
     expect(nvBody).toBeDefined()
-    expect(nvBody!.content.bindings[0]?.kind).toBe('conditional')
-    const cond = nvBody!.content.bindings[0] as ConditionalBinding
+    expect(nvBody!.content({}).bindings[0]?.kind).toBe('conditional')
+    const cond = nvBody!.content({}).bindings[0] as ConditionalBinding
     expect(cond.consequent.shape.html).toBe('<p>Yes</p>')
     expect(cond.alternate?.shape.html).toBe('<p>No</p>')
   })
@@ -987,7 +997,7 @@ describe('§8.2-B3 — conditional-inside-slot-content: nv-parser slot sub-build
     expect(comp).toBeDefined()
     const body = comp!.slots.find((s) => s.name === 'body')
     expect(body).toBeDefined()
-    expect(body!.content.bindings[0]?.kind).toBe('text')
+    expect(body!.content({}).bindings[0]?.kind).toBe('text')
   })
 })
 
@@ -1002,7 +1012,7 @@ describe('component-as-slot-child — <Card/> in a named slot produces Component
     expect(outer).toBeDefined()
     const body = outer!.slots.find((s) => s.name === 'body')
     expect(body).toBeDefined()
-    const nested = body!.content.bindings.find((b) => b.kind === 'component') as
+    const nested = body!.content({}).bindings.find((b) => b.kind === 'component') as
       | ComponentBinding
       | undefined
     expect(nested).toBeDefined()
@@ -1010,7 +1020,7 @@ describe('component-as-slot-child — <Card/> in a named slot produces Component
     // The nested component's own default slot captured its <p>inner</p> content.
     const nestedDefault = nested!.slots.find((s) => s.name === 'default')
     expect(nestedDefault).toBeDefined()
-    expect(nestedDefault!.content.shape.html).toBe('<p>inner</p>')
+    expect(nestedDefault!.content({}).shape.html).toBe('<p>inner</p>')
   })
 
   it('FE: nv-parser named-slot sub-IR contains a ComponentBinding for nested <Card/>', () => {
@@ -1026,7 +1036,7 @@ describe('component-as-slot-child — <Card/> in a named slot produces Component
     expect(outer).toBeDefined()
     const body = outer!.slots.find((s) => s.name === 'body')
     expect(body).toBeDefined()
-    const nested = body!.content.bindings.find((b) => b.kind === 'component') as
+    const nested = body!.content({}).bindings.find((b) => b.kind === 'component') as
       | ComponentBinding
       | undefined
     expect(nested).toBeDefined()
@@ -1054,7 +1064,9 @@ describe('component-as-slot-child — <Card/> in a named slot produces Component
       | undefined
     const nvBody = nvOuter!.slots.find((s) => s.name === 'body')!
 
-    const r = irStructurallyEqual(doc, htmlBody.content, nvBody.content)
+    const htmlBodyIR = htmlBody.content({})
+    const nvBodyIR = nvBody.content({})
+    const r = irStructurallyEqual(doc, htmlBodyIR, nvBodyIR)
     expect(r.equal, `component-in-slot sub-IR divergence: ${r.reason}`).toBe(true)
   })
 
@@ -1097,7 +1109,7 @@ describe('component-as-slot-child — <Card/> in a named slot produces Component
             component: () => outerChildIR,
             props: [],
             propNames: [],
-            slots: [{ name: 'body', content: slotContentIR }],
+            slots: [{ name: 'body', content: () => slotContentIR }],
           },
         ],
       }
@@ -1128,7 +1140,7 @@ describe('component-in-default-slot — <Card/> in the default slot produces Com
     expect(outer).toBeDefined()
     const def = outer!.slots.find((s) => s.name === 'default')
     expect(def).toBeDefined()
-    const nested = def!.content.bindings.find((b) => b.kind === 'component') as
+    const nested = def!.content({}).bindings.find((b) => b.kind === 'component') as
       | ComponentBinding
       | undefined
     expect(nested).toBeDefined()
@@ -1147,7 +1159,7 @@ describe('component-in-default-slot — <Card/> in the default slot produces Com
     expect(outer).toBeDefined()
     const def = outer!.slots.find((s) => s.name === 'default')
     expect(def).toBeDefined()
-    const nested = def!.content.bindings.find((b) => b.kind === 'component') as
+    const nested = def!.content({}).bindings.find((b) => b.kind === 'component') as
       | ComponentBinding
       | undefined
     expect(nested).toBeDefined()
@@ -1174,7 +1186,9 @@ describe('component-in-default-slot — <Card/> in the default slot produces Com
       | undefined
     const nvDef = nvOuter!.slots.find((s) => s.name === 'default')!
 
-    const r = irStructurallyEqual(doc, htmlDef.content, nvDef.content)
+    const htmlDefIR = htmlDef.content({})
+    const nvDefIR = nvDef.content({})
+    const r = irStructurallyEqual(doc, htmlDefIR, nvDefIR)
     expect(r.equal, `component-in-default-slot sub-IR divergence: ${r.reason}`).toBe(true)
   })
 })
@@ -1222,7 +1236,7 @@ describe('nested-component-in-slot-disposes — parent dispose tears down the ne
           component: () => outerChildIR,
           props: [],
           propNames: [],
-          slots: [{ name: 'body', content: slotContentIR }],
+          slots: [{ name: 'body', content: () => slotContentIR }],
         },
       ],
     }
@@ -1313,7 +1327,7 @@ describe('§8.3 — fallback: child-authored default when slot is absent', () =>
           component: () => childIR,
           props: [],
           propNames: [],
-          slots: fillSlot ? [{ name: 'header', content: filledIR }] : [],
+          slots: fillSlot ? [{ name: 'header', content: () => filledIR }] : [],
         },
       ],
     }
