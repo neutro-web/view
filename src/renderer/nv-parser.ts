@@ -1827,28 +1827,36 @@ function computeThunkSource(
         (ts.isIdentifier(e) && (e.text === 'null' || e.text === 'undefined'))
       if (isHtmlTTE(whenTrue) && (isHtmlTTE(whenFalse) || isNullish(whenFalse))) {
         const conditionSrc = eraseSignalReadsInNode(condition, symbols.all, propsAccessors)
-        // Recursively compute thunks for branch bindings
+        // Use computeBindingThunks (E-2b collapse) so components inside branches are handled
         const consequentResult = processHtmlTemplate(whenTrue, doc, symbols.all)
-        const consequentThunks = computeThunksForTemplate(
-          whenTrue,
+        const cHoles = extractTemplateHoles(whenTrue)
+        const consequentThunks = computeBindingThunks(
+          consequentResult.pendingComponents,
+          consequentResult.consumedByComponent,
+          cHoles.holeExprs,
+          cHoles.positions,
           doc,
           symbols,
           diagnostics,
-          new Set(),
           propsParamName,
           propsAccessors,
         )
-        void consequentResult
         const alternateSrc = isHtmlTTE(whenFalse)
-          ? computeThunksForTemplate(
-              whenFalse,
-              doc,
-              symbols,
-              diagnostics,
-              new Set(),
-              propsParamName,
-              propsAccessors,
-            )
+          ? (() => {
+              const altResult = processHtmlTemplate(whenFalse, doc, symbols.all)
+              const aHoles = extractTemplateHoles(whenFalse)
+              return computeBindingThunks(
+                altResult.pendingComponents,
+                altResult.consumedByComponent,
+                aHoles.holeExprs,
+                aHoles.positions,
+                doc,
+                symbols,
+                diagnostics,
+                propsParamName,
+                propsAccessors,
+              )
+            })()
           : null
         return {
           kind: 'conditional',
@@ -1872,6 +1880,100 @@ function computeThunkSource(
     kind: 'event',
     handlerSrc: eraseHandlerExpr(holeExpr, symbols, diagnostics, propsParamName),
   }
+}
+
+/**
+ * Extract holeExprs and positions from a tagged-template expression.
+ * Shared by computeBindingThunks and computeThunksForTemplate.
+ */
+function extractTemplateHoles(tte: ts.TaggedTemplateExpression): {
+  holeExprs: ts.Expression[]
+  positions: PosKind[]
+} {
+  const template = tte.template
+  if (ts.isNoSubstitutionTemplateLiteral(template)) {
+    return { holeExprs: [], positions: [] }
+  }
+  const strings: string[] = [template.head.text]
+  const holeExprs: ts.Expression[] = []
+  for (const span of template.templateSpans) {
+    holeExprs.push(span.expression)
+    strings.push(span.literal.text)
+  }
+  const positions: PosKind[] = holeExprs.map((_, i) =>
+    classifyPosition(strings[i] ?? '', strings[i + 1] ?? ''),
+  )
+  return { holeExprs, positions }
+}
+
+/**
+ * Compute ThunkSource[] for all bindings (components + holes) given a ProcessResult
+ * plus the raw holeExprs/positions from the template.
+ *
+ * Used by both the top-level emit path (parseNvFileForEmit) and the conditional
+ * branch path (computeThunkSource) — this is the E-2b collapse.
+ */
+function computeBindingThunks(
+  pendingComponents: PendingNvComponentInfo[],
+  consumedByComponent: ReadonlySet<number>,
+  holeExprs: ts.Expression[],
+  positions: PosKind[],
+  doc: Document,
+  symbols: ScriptSymbols,
+  diagnostics: NvDiagnostic[],
+  propsParamName?: string,
+  propsAccessors?: ReadonlyMap<string, string>,
+): ThunkSource[] {
+  const componentThunks: ThunkSource[] = pendingComponents.map((pc) => ({
+    kind: 'component' as const,
+    componentSrc: pc.tagName,
+    propSrcs: pc.reactiveHoles.map((rh) => ({
+      name: rh.name,
+      exprSrc: eraseSignalReadsInNode(
+        holeExprs[rh.holeIndex] as ts.Expression,
+        symbols.all,
+        propsAccessors,
+      ),
+    })),
+    propNames: pc.propNames,
+    slots: pc.slots.map((slot, slotIdx) => {
+      const holeIndices = pc.slotHoleGroups[slotIdx] ?? []
+      const thunks: ThunkSource[] = holeIndices.map((holeIdx) => {
+        const holeExpr = holeExprs[holeIdx]
+        if (holeExpr === undefined) {
+          throw new Error(`[nv/emitter] Slot hole index ${holeIdx} out of range`)
+        }
+        return computeThunkSource(
+          holeExpr,
+          positions[holeIdx] as PosKind,
+          doc,
+          symbols,
+          diagnostics,
+          propsParamName,
+          propsAccessors,
+        )
+      })
+      return { name: slot.name, holeIndices: [...holeIndices], thunks }
+    }),
+  }))
+
+  const holeThunks = holeExprs
+    .map((expr, i) =>
+      consumedByComponent.has(i)
+        ? null
+        : computeThunkSource(
+            expr,
+            positions[i] as PosKind,
+            doc,
+            symbols,
+            diagnostics,
+            propsParamName,
+            propsAccessors,
+          ),
+    )
+    .filter((t): t is ThunkSource => t !== null)
+
+  return [...componentThunks, ...holeThunks]
 }
 
 /**
@@ -2088,57 +2190,18 @@ export function parseNvFileForEmit(
           )
             continue
           const { pendingComponents, consumedByComponent } = renderResult
-          const bodyHoleExprs: ts.Expression[] = ts.isNoSubstitutionTemplateLiteral(body.template)
-            ? []
-            : body.template.templateSpans.map((s) => s.expression)
-          const bodyStrings: string[] = ts.isNoSubstitutionTemplateLiteral(body.template)
-            ? [body.template.text]
-            : [body.template.head.text, ...body.template.templateSpans.map((s) => s.literal.text)]
-          const bodyPositions: PosKind[] = bodyHoleExprs.map((_, i) =>
-            classifyPosition(bodyStrings[i] ?? '', bodyStrings[i + 1] ?? ''),
-          )
-          const componentThunks: ThunkSource[] = pendingComponents.map((pc) => ({
-            kind: 'component' as const,
-            componentSrc: pc.tagName,
-            propSrcs: pc.reactiveHoles.map((rh) => ({
-              name: rh.name,
-              exprSrc: eraseSignalReadsInNode(
-                bodyHoleExprs[rh.holeIndex] as ts.Expression,
-                symbols.all,
-                emitPropsAccessors,
-              ),
-            })),
-            propNames: pc.propNames,
-            slots: pc.slots.map((slot, slotIdx) => {
-              const holeIndices = pc.slotHoleGroups[slotIdx] ?? []
-              const thunks: ThunkSource[] = holeIndices.map((holeIdx) => {
-                const holeExpr = bodyHoleExprs[holeIdx]
-                if (holeExpr === undefined) {
-                  throw new Error(`[nv/emitter] Slot hole index ${holeIdx} out of range`)
-                }
-                return computeThunkSource(
-                  holeExpr,
-                  bodyPositions[holeIdx] as PosKind,
-                  doc,
-                  symbols,
-                  emitDiagnostics,
-                  emitPropsParamName,
-                  emitPropsAccessors,
-                )
-              })
-              return { name: slot.name, holeIndices: [...holeIndices], thunks }
-            }),
-          }))
-          const holeThunks = computeThunksForTemplate(
-            body,
+          const { holeExprs: bodyHoleExprs, positions: bodyPositions } = extractTemplateHoles(body)
+          bindingThunks = computeBindingThunks(
+            pendingComponents,
+            consumedByComponent,
+            bodyHoleExprs,
+            bodyPositions,
             doc,
             symbols,
             emitDiagnostics,
-            consumedByComponent,
             emitPropsParamName,
             emitPropsAccessors,
           )
-          bindingThunks = [...componentThunks, ...holeThunks]
           break
         }
       }
