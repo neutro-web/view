@@ -9,7 +9,8 @@ import { __test, flushSync, signal } from '../../src/core/core.js'
 import { createHtmlTag, each } from '../../src/renderer/html-tag.js'
 import { mount } from '../../src/renderer/interpreter.js'
 import type { ListBinding, TemplateIR, WritableSignal } from '../../src/renderer/ir.js'
-import { parseNvFile } from '../../src/renderer/nv-parser.js'
+import { emitModule } from '../../src/renderer/nv-emitter.js'
+import { parseNvFile, parseNvFileForEmit } from '../../src/renderer/nv-parser.js'
 import { irStructurallyEqual } from './ir-equivalence.js'
 
 const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>')
@@ -311,4 +312,28 @@ test('TC-EA-G4  fail-shows-teeth: snapshot adapter freezes DOM on value change',
   expect(parent.querySelector('li')!.textContent).toBe('Initial')
   dispose()
   rmParent(parent)
+})
+
+// TC-EA-E1: emit path — .nv <each> emits valid module with itemTemplate adapter
+test('TC-EA-E1  emit: .nv <each> emits module with list binding + adapter', async () => {
+  const source =
+    'const List = $component(() => {\n' +
+    '  $script(() => {\n' +
+    "    const items = signal([{ id: 1, label: 'A' }])\n" +
+    '  })\n' +
+    '  $render(() => html`<ul><each .of="${items}" key="${(item) => item.id}" let={item, index}><li>${item} #${index}</li></each></ul>`)\n' +
+    '})\n'
+  const results = parseNvFileForEmit(source, 'list.nv', document)
+  expect(results.length).toBe(1)
+  const moduleText = emitModule(results)
+  // Verify emitted module contains list binding
+  expect(moduleText).toContain("kind: 'list'")
+  expect(moduleText).toContain('items: () => (')
+  expect(moduleText).toContain('itemTemplate: (valueSig, indexSig) =>')
+  // Verify adapter references slotProps
+  expect(moduleText).toContain('slotProps')
+  expect(moduleText).toContain('() => valueSig()')
+  expect(moduleText).toContain('() => indexSig()')
+  // Verify items thunk erases signal read
+  expect(moduleText).toContain('items()')
 })

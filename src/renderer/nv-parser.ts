@@ -112,6 +112,13 @@ export type ThunkSource =
         letNames?: readonly string[]
       }>
     }
+  | {
+      kind: 'list'
+      itemsSrc: string
+      keySrc: string
+      bodyThunks: ThunkSource[]
+      letNames: string[]
+    }
 
 /** Emit payload attached to NvComponentResult when using parseNvFileForEmit. */
 export interface NvEmitPayload {
@@ -2027,6 +2034,7 @@ function computeThunkSource(
         const cHoles = extractTemplateHoles(whenTrue)
         const consequentThunks = computeBindingThunks(
           consequentResult.pendingComponents,
+          consequentResult.pendingEachItems,
           consequentResult.consumedByComponent,
           cHoles.holeExprs,
           cHoles.positions,
@@ -2042,6 +2050,7 @@ function computeThunkSource(
               const aHoles = extractTemplateHoles(whenFalse)
               return computeBindingThunks(
                 altResult.pendingComponents,
+                altResult.pendingEachItems,
                 altResult.consumedByComponent,
                 aHoles.holeExprs,
                 aHoles.positions,
@@ -2110,6 +2119,7 @@ function extractTemplateHoles(tte: ts.TaggedTemplateExpression): {
  */
 function computeBindingThunks(
   pendingComponents: PendingNvComponentInfo[],
+  pendingEachItems: PendingNvEachInfo[],
   consumedByComponent: ReadonlySet<number>,
   holeExprs: ts.Expression[],
   positions: PosKind[],
@@ -2167,6 +2177,47 @@ function computeBindingThunks(
     }),
   }))
 
+  const listThunks: ThunkSource[] = pendingEachItems.map((pe) => {
+    const itemsExpr = holeExprs[pe.itemsHoleIdx] as ts.Expression
+    const keyExpr = holeExprs[pe.keyHoleIdx] as ts.Expression
+
+    // .of: erase signal reads (it's a reactive list signal read)
+    const itemsSrc = eraseSignalReadsInNode(itemsExpr, symbols.all, propsAccessors)
+
+    // key: emit verbatim — it's a pure function, not a signal read
+    const keySrc = keyExpr.getText()
+
+    // Body thunks: use slotPropsAccessors for item/index
+    const slotPropsParam = 'slotProps'
+    const slotPropsAccessors: Map<string, string> = new Map(
+      pe.letNames.map((n) => [n, `${slotPropsParam}.${n}()`]),
+    )
+    const mergedAccessors = new Map([...(propsAccessors ?? []), ...slotPropsAccessors])
+
+    const bodyThunks: ThunkSource[] = pe.bodyHoleIndices.map((holeIdx) => {
+      const holeExpr = holeExprs[holeIdx]
+      if (holeExpr === undefined)
+        throw new Error(`[nv/each] Body hole index ${holeIdx} out of range`)
+      return computeThunkSource(
+        holeExpr,
+        positions[holeIdx] as PosKind,
+        doc,
+        symbols,
+        diagnostics,
+        propsParamName,
+        mergedAccessors,
+      )
+    })
+
+    return {
+      kind: 'list' as const,
+      itemsSrc,
+      keySrc,
+      bodyThunks,
+      letNames: pe.letNames,
+    }
+  })
+
   const holeThunks = holeExprs
     .map((expr, i) =>
       consumedByComponent.has(i)
@@ -2183,7 +2234,7 @@ function computeBindingThunks(
     )
     .filter((t): t is ThunkSource => t !== null)
 
-  return [...componentThunks, ...holeThunks]
+  return [...componentThunks, ...listThunks, ...holeThunks]
 }
 
 /**
@@ -2403,6 +2454,7 @@ export function parseNvFileForEmit(
           const { holeExprs: bodyHoleExprs, positions: bodyPositions } = extractTemplateHoles(body)
           bindingThunks = computeBindingThunks(
             pendingComponents,
+            renderResult.pendingEachItems,
             consumedByComponent,
             bodyHoleExprs,
             bodyPositions,

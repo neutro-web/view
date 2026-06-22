@@ -17,12 +17,14 @@
  * Throws if any result has an error-level diagnostic (§7).
  */
 
+import { signal } from '../core/core.js'
 import type {
   AttrBinding,
   Binding,
   ComponentBinding,
   ConditionalBinding,
   EventBinding,
+  ListBinding,
   PropBinding,
   SlotOutletBinding,
   TemplateIR,
@@ -157,6 +159,25 @@ function emitBindingLiteral(
         parts.push(`fallback: ${emitIrLiteral(sob.fallback, fallbackThunks, indent)}`)
       }
       return `{ ${parts.join(', ')} }`
+    }
+    case 'list': {
+      if (thunk.kind !== 'list') throw new Error('[nv/emitter] ListBinding thunk kind mismatch')
+      const lb = binding as ListBinding
+      const i2 = `${indent}  `
+      // Get body IR structure by calling itemTemplate with stub signals (structure only; thunks come from bodyThunks)
+      const stubVs = signal<unknown>(null)
+      const stubIs = signal<number>(0)
+      const bodyIR = lb.itemTemplate(stubVs, stubIs)
+      const bodyLiteral = emitIrLiteral(bodyIR, thunk.bodyThunks, i2)
+      // letNames default to ['item', 'index'] if empty; first name maps to valueSig, second to indexSig
+      const [itemName = 'item', indexName = 'index'] = thunk.letNames
+      const slotPropsBody = `{ ${itemName}: () => valueSig(), ${indexName}: () => indexSig() }`
+      return [
+        `{ kind: 'list', ${pathEntry},`,
+        `${i2}items: () => (${thunk.itemsSrc}),`,
+        `${i2}key: ${thunk.keySrc},`,
+        `${i2}itemTemplate: (valueSig, indexSig) => ((slotProps) => ${bodyLiteral})(${slotPropsBody}) }`,
+      ].join('\n')
     }
     default:
       throw new Error(
