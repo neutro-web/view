@@ -83,7 +83,7 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4**._
   encapsulation) — narrowed, not closed.
 - Effect-flush timing primitive (microtask vs. custom scheduler).
 - Compile-time DOM encapsulation — still open (Shadow-DOM opt-in path unspecced).
-  STYLE encapsulation RESOLVED 2026-06-22 (see Log) — Light-DOM scoping via hybrid
+  STYLE encapsulation APPROVED 2026-06-22 (see Log) — Light-DOM scoping via hybrid
   routing; not a contract concern.
 
 ### Genuine research / deferred-on-evidence
@@ -105,16 +105,18 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4**._
   **retains D-slot-1**; Template-IR → v0.4. **D-slot-2 invocation-scoped ownership flip
   re-phased (2026-06-22) to land WITH `each`** — its leak gate requires real per-row
   invocations to be failable; flipping it earlier is an unfalsifiable §6 gate.
-- **`$style` scoping — design RESOLVED 2026-06-22, spec drafted (`spec-style-scoping-and-class-selection.md`),
-  NOT yet a CC handoff.** Hybrid per-entry routing (key→class-rewrite, selector→attribute-hash);
+- **`$style` scoping — design APPROVED 2026-06-22, spec APPROVED (`spec-style-scoping-and-class-selection.md`),
+  NOT yet a CC handoff (approved ≠ commissioned).** Hybrid per-entry routing (key→class-rewrite, selector→attribute-hash);
   `factory` form → CSS-custom-property lowering (values reactive, factory NOT re-run);
   injection = hoist-once-per-component-identity + dedup. Renderer/compiler-layer only —
   NOT a reactive-core contract concern (Template-IR §scope already fences this).
-- **Class-selection (`class={...}`) — design RESOLVED 2026-06-22, same spec, own increment
-  (NOT a `$style` rider).** Three compile-time-routed forms: function/string/template →
-  one full-string AttrBinding; object/array literal → per-key `classList.toggle` effects;
-  `cx()` pure string helper. Per-key default for object form gated on `ReactiveNode`-width
-  evidence (ties to the kind-split watch-item).
+- **Class-selection (`class={...}`) — design APPROVED 2026-06-22, same spec, own increment
+  (NOT a `$style` rider).** Compile-time-routed forms: function/string/template → one
+  full-string AttrBinding; per-key `classList.toggle` via `.nv` bare object/array literal
+  OR tagged-template `classes(...)` sentinel (same lowering, FE-equivalence-gated, mirrors
+  `each`/`slot`). Helpers: `cx()` (pure string builder, both FEs) + `classes()` (tagged-
+  template sentinel). Per-key default for object/sentinel form gated on `ReactiveNode`-width
+  evidence (ties to kind-split watch-item).
 - `$style × slots` — STILL parked behind `$style` scoping *implementation* (design tractable
   now that axis-a is chosen, but specced after `$style` lands).
 - SyncBinding (throws at both back-ends today).
@@ -159,8 +161,11 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4**._
 ### Naming
 - `neutro/view` / `nv` working name; package under `@neutro` (view engine is
   *portable/interoperable*, not strong-agnostic like the pure-logic packages).
-- `cx` — pure class-string builder helper (provisional name, may be reconsidered).
-  Reads booleans, returns a string, subscribes to nothing. Not reactive itself.
+- `cx` — pure class-string builder helper (provisional name). Reads booleans, returns a
+  string, subscribes to nothing. Both FEs. Result → full-string class AttrBinding.
+- `classes` — tagged-template class sentinel (provisional name), the FE analogue of the
+  `.nv` bare object/array `class` literal. Lowers to per-key `classList.toggle`. NOT a
+  string builder; carries the toggle map. Mirrors `each`/`slot` FE-split.
 
 ### Superseded
 - **D-slot-2 in increment 2** — superseded 2026-06-22; flip re-phased to land with `each` (see log entry).
@@ -881,11 +886,12 @@ Current State header edits applied.
 
 ---
 
-### 2026-06-22 — `$style` scoping + class-selection: design RESOLVED (rulings 1–4 + class axis)
+### 2026-06-22 — `$style` scoping + class-selection: design APPROVED (rulings 1–4 + class axis)
 
 **Event:** Architect-stream research open (`research-style-scoping.md`) resolved by
-owner rulings. Produces a drafted spec (`spec-style-scoping-and-class-selection.md`);
-NOT yet a CC handoff. Two independently-shippable designs settled: `$style` scoping,
+owner rulings, then APPROVED (owner, 2026-06-22) along with the spec
+(`spec-style-scoping-and-class-selection.md`). NOT yet a CC handoff (approved ≠
+commissioned). Two independently-shippable designs settled: `$style` scoping,
 and class-selection (`class={...}`). Class-selection surfaced from the `$style` thread
 but is a SEPARATE axis and ships as its own increment.
 
@@ -942,25 +948,36 @@ to spec/implementation; constructable stylesheets favored for cross-instance ded
 not locked.
 
 **CLASS-SELECTION (`class={...}`) — separate axis, own increment.** Compile-time
-routing on the expression SHAPE inside `class={...}` (all three stay `class={...}`,
+routing on the expression SHAPE inside `class={...}` (all forms stay `class={...}`,
 no new attribute):
 - **function call / string / template literal** (e.g. `class={cx(...)}`,
-  `class={\`a ${b}\`}`) → ONE full-string AttrBinding (reassigns whole attribute).
-- **object literal** (`class={{ active: isActive() }}`) → per-key `classList.toggle`
-  effects, ONE EFFECT PER KEY (strictly finer than Solid's single looping effect:
-  toggling `active` never reads `big`). No diffing (toggle is idempotent).
-- **array literal** (`class={['btn', { active: isActive() }]}`) → sugar over the two
-  above: bare strings static, object entries per-key toggle.
+  `class=${() => cx(...)}`) → ONE full-string AttrBinding (reassigns whole attribute).
+- **per-key toggle**, reached by each FE's idiom (forms differ by FE constraint, not
+  inconsistency — matches `each` `<each>`/`each(...)` and slots `slots.x`/`slot(...)`):
+  - **`.nv`:** bare object/array literal — `class={{ active: isActive() }}`.
+  - **tagged-template:** `classes(...)` SENTINEL — `class=${classes({ active: isActive() })}`
+    (bare object throws the FE thunk-validator; sentinel is forced by the medium, like
+    `each`/`slot`).
+  Both lower to per-key `classList.toggle` effects, ONE EFFECT PER KEY (strictly finer
+  than Solid's single looping effect). No diffing (toggle idempotent). FE-equivalence-gated
+  against each other (shared oracle, as TC-EA-G2 for `each`).
 - static classes stay in shape.html `class="..."` literal, untouched.
 nv-beats-Solid point: the compiler emits the right strategy PER SITE; Solid applies one
 runtime strategy uniformly. Per-key emission avoids Solid's documented `class`+`classList`
 full-reassign footgun BY CONSTRUCTION (toggle owns only its keys).
 
-**`cx` helper:** APPROVED. Pure, non-reactive string builder (reads booleans → returns
-string, subscribes to nothing). Lives INSIDE `class={...}`; the compiler sees a function
-call returning a string → one AttrBinding; `cx` carries zero machinery and never appears
-in IR/contract. Provisional name (owner may reconsider). Explicitly NOT magic/reactive —
-reactivity comes only from the enclosing thunk.
+**Helpers — both FEs, distinct roles:**
+- **`cx(...)`** — pure, non-reactive STRING builder (reads booleans → returns string,
+  subscribes to nothing). Result → full-string AttrBinding. `.nv`: `class={cx(...)}`
+  (compiler wraps). tagged-template: `class=${() => cx(...)}` (bare `cx(...)` throws —
+  string, not function). Carries zero machinery; never in IR/contract.
+- **`classes(...)`** — tagged-template SENTINEL (NOT a string builder). Same arg shape as
+  `cx`/the object literal. Recognized by `html-tag.ts` validator/walk alongside
+  `each`/`slot`; lowers to the SAME per-key toggle as the `.nv` object literal. MUST retain
+  map structure — never collapse to a string (that would lose per-key granularity).
+Both provisional names (owner may reconsider). `classes` is explicitly the tagged-template
+analogue of the `.nv` object literal; `.nv` does NOT accept `classes(...)` call-form
+(object literal only), mirroring `<each>` vs `each(...)`.
 
 **DX seam (document, not an impl problem):** do not MIX strategies on one element's
 `class` — `class={cx(...)}` is full-reassign; `class={{...}}` is per-key-toggle; pick one
@@ -981,6 +998,9 @@ coexist with either.
   extend `extractStyleInfo` to retain the factory node (preferred) or re-parse `source`,
   before the split/erasure can run on real nodes. Parse-layer extension, not contract/IR.
 
-**Status:** design RESOLVED. Spec drafted. Two increments queued, NOT commissioned:
-(I) `$style` scoping + injection; (II) class-selection + `cx`. `$style × slots` remains
-parked behind (I). No code landed. No contract/IR bump from the decision itself.
+**Status:** design APPROVED 2026-06-22 (owner). Spec `spec-style-scoping-and-class-selection.md`
+APPROVED. Two increments queued, NOT commissioned: (S) `$style` scoping + injection;
+(C) class-selection + `cx` + `classes` sentinel. `$style × slots` remains parked behind
+(S). No code landed. No contract/IR bump from the decision itself; Template-IR may grow a
+thin `ClassListBinding` (lean (b)) and/or `StyleVarBinding` at build time — renderer
+contract only, never reactive-core.
