@@ -54,7 +54,7 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4**._
 - **Perf-validation phase:** COMPLETE. All three tripwires resolved (createSignals
   cleared structural-accepted; FALSE-heavy characterized watch-item; cross-engine
   closed). No redesign triggered.
-- **Tests:** 564 green (`each` inc-3 behavioral e2e, 2026-06-22). `tsc --strict` + DOM lib, biome, build all clean.
+- **Tests:** 593 green (class-selection increment C, 2026-06-22). `tsc --strict` + DOM lib, biome, build all clean.
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state graph-coloring, push-down
@@ -110,13 +110,11 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4**._
   `factory` form → CSS-custom-property lowering (values reactive, factory NOT re-run);
   injection = hoist-once-per-component-identity + dedup. Renderer/compiler-layer only —
   NOT a reactive-core contract concern (Template-IR §scope already fences this).
-- **Class-selection (`class={...}`) — design APPROVED 2026-06-22, same spec, own increment
-  (NOT a `$style` rider).** Compile-time-routed forms: function/string/template → one
-  full-string AttrBinding; per-key `classList.toggle` via `.nv` bare object/array literal
-  OR tagged-template `classes(...)` sentinel (same lowering, FE-equivalence-gated, mirrors
-  `each`/`slot`). Helpers: `cx()` (pure string builder, both FEs) + `classes()` (tagged-
-  template sentinel). Per-key default for object/sentinel form gated on `ReactiveNode`-width
-  evidence (ties to kind-split watch-item).
+- **Class-selection (`class={...}`) — LANDED (branch feat/class-selection, 2026-06-22).**
+  `cx` helper + `ClassListBinding` IR (v0.4.1) + `classes()` sentinel + both FE routing +
+  both back-end wiring. G1 per-key isolation, G2 FE-equivalence, G3 differential parity,
+  G4/G5 fail-shows-teeth all verified. T=6 width-threshold shipped (looping fallback >6).
+  Named debt: D-cx-1 (`cx` + `classes` exported from renderer surface; sub-path TBD).
 - `$style × slots` — STILL parked behind `$style` scoping *implementation* (design tractable
   now that axis-a is chosen, but specced after `$style` lands).
 - SyncBinding (throws at both back-ends today).
