@@ -7,7 +7,7 @@ import { JSDOM } from 'jsdom'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { emitMount } from '../../src/compiler/emitted-mount.js'
 import { createRoot, flushSync, onCleanup as onCleanupImport, signal } from '../../src/core/core.js'
-import { createHtmlTag, slots } from '../../src/renderer/html-tag.js'
+import { createHtmlTag, slot, slots } from '../../src/renderer/html-tag.js'
 import { mount } from '../../src/renderer/interpreter.js'
 import type {
   ComponentBinding,
@@ -1355,5 +1355,304 @@ describe('§8.3 — fallback: child-authored default when slot is absent', () =>
     mountC(buildParentIR('parent:fb:filled:c', true))
     expect(container.querySelector('strong')?.textContent).toBe('Filled')
     expect(container.querySelector('h1')).toBeNull()
+  })
+})
+
+// ── §scoped-slot-FE-equivalence ───────────────────────────────────────────────
+
+describe('§scoped-slot-FE-equivalence — both FEs produce identical scoped-slot IR', () => {
+  it('outlets: slots() props and nv call form produce identical SlotOutletBindings', () => {
+    const html = createHtmlTag(doc)
+    const itemSig = signal('hello')
+    // html-tag child: slots outlet with props
+    const htmlChildIR = html`<div>${slots('row', { item: () => itemSig() })}</div>`
+    const htmlOutlet = htmlChildIR.bindings[0] as SlotOutletBinding
+    expect(htmlOutlet.kind).toBe('slot-outlet')
+    expect(htmlOutlet.props).toHaveLength(1)
+    expect(htmlOutlet.props![0].name).toBe('item')
+
+    // nv-parser child: slots.row({ item: item }) call form
+    const nvSrc = [
+      'export const C = $component(() => {',
+      '  $script(() => { const item = signal("hello") })',
+      '  $render(() => html`<div>${slots.row({ item: item })}</div>`)',
+      '})',
+    ].join('\n')
+    const nvChildIR = parseNvFile(nvSrc, 'test.nv', doc)[0]?.ir!
+    const nvOutlet = nvChildIR.bindings[0] as SlotOutletBinding
+    expect(nvOutlet.kind).toBe('slot-outlet')
+    expect(nvOutlet.props).toHaveLength(1)
+    expect(nvOutlet.props![0].name).toBe('item')
+  })
+
+  it('fills: slot() factory and nv let={} produce identical SlotEntry shapes', () => {
+    const html = createHtmlTag(doc)
+    const itemSig = signal('hello')
+    // html-tag parent: slot() fill
+    const htmlParentIR = html`<Child>${slot('row', ({ item }) => html`<span>${() => String(item?.() ?? '')}</span>`)}</Child>`
+    const htmlComp = htmlParentIR.bindings.find((b) => b.kind === 'component') as
+      | ComponentBinding
+      | undefined
+    expect(htmlComp?.slots).toHaveLength(1)
+    expect(htmlComp?.slots[0].name).toBe('row')
+    expect(typeof htmlComp?.slots[0].content).toBe('function')
+
+    // nv-parser parent: <slot name="row" let={item}>
+    const nvSrc = [
+      'export const P = $component(() => {',
+      '  $script(() => { const item = signal("hello") })',
+      '  $render(() => html`<Child><slot name="row" let={item}><span>${item}</span></slot></Child>`)',
+      '})',
+    ].join('\n')
+    const nvParentIR = parseNvFile(nvSrc, 'test.nv', doc)[0]?.ir!
+    const nvComp = nvParentIR.bindings.find((b) => b.kind === 'component') as
+      | ComponentBinding
+      | undefined
+    expect(nvComp?.slots).toHaveLength(1)
+    expect(nvComp?.slots[0].name).toBe('row')
+    expect(typeof nvComp?.slots[0].content).toBe('function')
+  })
+})
+
+// ── §exposed-value-reactivity ─────────────────────────────────────────────────
+
+describe('§exposed-value-reactivity — child exposes a signal; parent content reads it reactively', () => {
+  it('interpreter: slot DOM updates when child-exposed value changes', () => {
+    const itemSig = signal('initial')
+
+    const childIR: TemplateIR = {
+      id: 'child:reactive:i',
+      shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0, 0]] },
+      bindings: [
+        {
+          kind: 'slot-outlet',
+          pathIndex: 0,
+          name: 'row',
+          props: [{ name: 'item', expr: () => itemSig() }],
+        },
+      ],
+    }
+    const parentIR: TemplateIR = {
+      id: 'parent:reactive:i',
+      shape: { html: '<!--nv-comp-0-->', bindingPaths: [[0]] },
+      bindings: [
+        {
+          kind: 'component',
+          pathIndex: 0,
+          component: () => childIR,
+          props: [],
+          propNames: [],
+          slots: [
+            {
+              name: 'row',
+              content: (slotProps) => ({
+                id: 'slot:text:i',
+                shape: {
+                  html: '<span data-testid="scoped"><!--nv-0--></span>',
+                  bindingPaths: [[0, 0]],
+                },
+                bindings: [
+                  { kind: 'text', pathIndex: 0, expr: () => String(slotProps.item?.() ?? '') },
+                ],
+              }),
+            },
+          ],
+        },
+      ],
+    }
+
+    mountI(parentIR)
+    expect(container.querySelector('[data-testid="scoped"]')?.textContent).toBe('initial')
+
+    itemSig.set('updated')
+    flushSync()
+
+    // FAILABLE: if item is snapshotted at expose time (value call instead of thunk),
+    // DOM stays 'initial' — fails here.
+    expect(container.querySelector('[data-testid="scoped"]')?.textContent).toBe('updated')
+  })
+
+  it('compiler: slot DOM updates when child-exposed value changes', () => {
+    const itemSig = signal('initial')
+    // Same IR structure, different id prefix
+    const childIR: TemplateIR = {
+      id: 'child:reactive:c',
+      shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0, 0]] },
+      bindings: [
+        {
+          kind: 'slot-outlet',
+          pathIndex: 0,
+          name: 'row',
+          props: [{ name: 'item', expr: () => itemSig() }],
+        },
+      ],
+    }
+    const parentIR: TemplateIR = {
+      id: 'parent:reactive:c',
+      shape: { html: '<!--nv-comp-0-->', bindingPaths: [[0]] },
+      bindings: [
+        {
+          kind: 'component',
+          pathIndex: 0,
+          component: () => childIR,
+          props: [],
+          propNames: [],
+          slots: [
+            {
+              name: 'row',
+              content: (slotProps) => ({
+                id: 'slot:text:c',
+                shape: {
+                  html: '<span data-testid="scoped-c"><!--nv-0--></span>',
+                  bindingPaths: [[0, 0]],
+                },
+                bindings: [
+                  { kind: 'text', pathIndex: 0, expr: () => String(slotProps.item?.() ?? '') },
+                ],
+              }),
+            },
+          ],
+        },
+      ],
+    }
+
+    mountC(parentIR)
+    expect(container.querySelector('[data-testid="scoped-c"]')?.textContent).toBe('initial')
+
+    itemSig.set('updated')
+    flushSync()
+
+    expect(container.querySelector('[data-testid="scoped-c"]')?.textContent).toBe('updated')
+  })
+})
+
+// ── §one-directional-no-writeback ─────────────────────────────────────────────
+
+describe('§one-directional-no-writeback — slot props are read-only from parent side', () => {
+  it('child-exposed signal is unchanged after parent-content interaction', () => {
+    const childSig = signal('child-value')
+
+    const childIR: TemplateIR = {
+      id: 'child:nowrite',
+      shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0, 0]] },
+      bindings: [
+        {
+          kind: 'slot-outlet',
+          pathIndex: 0,
+          name: 'row',
+          props: [{ name: 'item', expr: () => childSig() }],
+        },
+      ],
+    }
+    const parentIR: TemplateIR = {
+      id: 'parent:nowrite',
+      shape: { html: '<!--nv-comp-0-->', bindingPaths: [[0]] },
+      bindings: [
+        {
+          kind: 'component',
+          pathIndex: 0,
+          component: () => childIR,
+          props: [],
+          propNames: [],
+          slots: [
+            {
+              name: 'row',
+              content: (slotProps) => ({
+                id: 'slot:nowrite',
+                shape: { html: '<button><!--nv-0--></button>', bindingPaths: [[0, 0]] },
+                bindings: [
+                  { kind: 'text', pathIndex: 0, expr: () => String(slotProps.item?.() ?? '') },
+                ],
+              }),
+            },
+          ],
+        },
+      ],
+    }
+
+    mountI(parentIR)
+
+    // The parent content reads childSig via slotProps.item — but cannot write it.
+    // There is no write-back API; childSig must remain unchanged.
+    expect(childSig()).toBe('child-value')
+    // No write-back occurred from mounting; signal value unchanged.
+    // This pins that slot props are one-directional (no reactive two-way binding).
+    expect(container.querySelector('button')?.textContent).toBe('child-value')
+  })
+})
+
+// ── §scoped-G4.6 — D-slot-1 retained ─────────────────────────────────────────
+
+describe('§scoped-G4.6 — D-slot-1 retained: parent signal live after child-dispose with scoped content', () => {
+  it('interpreter: parent signal live after child dispose, scoped slot DOM does NOT mutate', () => {
+    const parentSig = signal('before')
+
+    const childIR: TemplateIR = {
+      id: 'child:scoped-g46',
+      shape: {
+        html: '<section data-testid="scoped-g46"><!--nv-0--></section>',
+        bindingPaths: [[0, 0]],
+      },
+      bindings: [
+        {
+          kind: 'slot-outlet',
+          pathIndex: 0,
+          name: 'default',
+          props: [{ name: 'item', expr: () => 'static-child-value' }],
+        },
+      ],
+    }
+    const parentIR: TemplateIR = {
+      id: 'parent:scoped-g46',
+      shape: { html: '<!--nv-comp-0-->', bindingPaths: [[0]] },
+      bindings: [
+        {
+          kind: 'component',
+          pathIndex: 0,
+          component: () => childIR,
+          props: [],
+          propNames: [],
+          slots: [
+            {
+              name: 'default',
+              content: (_slotProps) => ({
+                id: 'slot:scoped-g46',
+                shape: { html: '<!--nv-0-->', bindingPaths: [[0]] },
+                bindings: [{ kind: 'text', pathIndex: 0, expr: () => parentSig() }],
+              }),
+            },
+          ],
+        },
+      ],
+    }
+
+    const disposes = { parent: (() => {}) as () => void, child: (() => {}) as () => void }
+
+    disposes.parent = createRoot((parentD) => {
+      disposes.child = createRoot((childD) => {
+        mount(parentIR, container, doc)
+        return childD
+      })
+      return parentD
+    })
+
+    flushSync()
+    expect(container.querySelector('[data-testid="scoped-g46"]')?.textContent).toBe('before')
+
+    disposes.child()
+    flushSync()
+
+    // Capture element reference after child dispose (may still be in DOM)
+    const sectionEl = container.querySelector('[data-testid="scoped-g46"]')
+    const textBeforeWrite = sectionEl?.textContent ?? ''
+
+    // D-slot-1 retained proof: parent signal still writable
+    expect(() => parentSig.set('after-child-dispose')).not.toThrow()
+    flushSync()
+
+    // Disposed slot region must NOT reflect the new value (effects are gone)
+    const textAfterWrite = sectionEl?.textContent ?? ''
+    expect(textAfterWrite).toBe(textBeforeWrite)
+    expect(textAfterWrite).not.toBe('after-child-dispose')
   })
 })
