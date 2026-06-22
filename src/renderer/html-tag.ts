@@ -51,16 +51,60 @@ import type {
 export interface SlotSentinel {
   readonly __nvSlotOutlet: string
   readonly __nvFallback?: TemplateIR
+  readonly __nvProps?: readonly PropEntry[]
 }
+
+type SlotsOpts = { fallback?: TemplateIR } & { [propName: string]: ReactiveExpr | TemplateIR | undefined }
 
 /**
  * Create a slot outlet sentinel for the tagged-template side.
  * Write `${slots('header')}` where the child component renders the named slot.
  * Mirrors `.nv`'s `{slots.header}` bare-read; both produce `SlotOutletBinding`.
  * An optional `fallback` TemplateIR renders when the slot is absent (increment 1).
+ * Additional non-`fallback` function values become slot props (scoped slots).
  */
-export function slots(name: string, opts?: { fallback?: TemplateIR }): SlotSentinel {
-  return { __nvSlotOutlet: name, __nvFallback: opts?.fallback }
+export function slots(name: string, opts?: SlotsOpts): SlotSentinel {
+  const propEntries: PropEntry[] = []
+  if (opts) {
+    for (const [key, val] of Object.entries(opts)) {
+      if (key === 'fallback') continue
+      if (typeof val === 'function') {
+        propEntries.push({ name: key, expr: val as ReactiveExpr })
+      }
+    }
+  }
+  return {
+    __nvSlotOutlet: name,
+    ...(opts?.fallback !== undefined && { __nvFallback: opts.fallback }),
+    ...(propEntries.length > 0 && { __nvProps: propEntries }),
+  }
+}
+
+// ── Slot fill sentinel ────────────────────────────────────────────────────────
+
+/** Opaque sentinel returned by `slot(name, factory)` — the tagged-template scoped fill form. */
+export interface SlotFillSentinel {
+  readonly __nvSlotFill: string
+  readonly factory: SlotContent
+}
+
+function isSlotFillSentinel(v: unknown): v is SlotFillSentinel {
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    typeof (v as Record<string, unknown>).__nvSlotFill === 'string' &&
+    typeof (v as Record<string, unknown>).factory === 'function'
+  )
+}
+
+/**
+ * Create a scoped-slot fill for the tagged-template parent side.
+ * Write `${slot('row', ({ item, index }) => html`...`)}` inside a component hole.
+ * The factory receives the child-exposed SlotProps and returns the slot content IR.
+ * Mirrors `.nv`'s `<slot name="row" let={item, index}>...</slot>`.
+ */
+export function slot(name: string, factory: SlotContent): SlotFillSentinel {
+  return { __nvSlotFill: name, factory }
 }
 
 function isSlotSentinel(v: unknown): v is SlotSentinel {
@@ -138,6 +182,7 @@ function buildHtmlHoleBinding(holeKind: HoleKind, pathIndex: number, origExpr: u
         pathIndex,
         name: origExpr.__nvSlotOutlet,
         ...(origExpr.__nvFallback !== undefined && { fallback: origExpr.__nvFallback }),
+        ...(origExpr.__nvProps !== undefined && origExpr.__nvProps.length > 0 && { props: origExpr.__nvProps }),
       }
       return b
     }
@@ -283,11 +328,40 @@ function walkNodeList(nodes: Node[], exprs: unknown[], root: Node, doc: Document
 
         // Capture slot content via the SAME walk (recursion = component-as-slot-child).
         const slots: SlotEntry[] = []
+        const consumedFillIndices = new Set<number>()
         if (el.childNodes.length > 0) {
+          // First pass: detect slot-fill sentinels in direct-child holes of this component element.
+          for (const child of Array.from(el.childNodes)) {
+            if (child.nodeType === 8 /* COMMENT_NODE */) {
+              const commentText = (child as Comment).data
+              const holeMatch = /^nv-(\d+)$/.exec(commentText)
+              if (holeMatch !== null) {
+                // biome-ignore lint/style/noNonNullAssertion: regex match guarantees group
+                const holeIdx = parseInt(holeMatch[1]!, 10)
+                const expr = exprs[holeIdx]
+                if (isSlotFillSentinel(expr)) {
+                  slots.push({ name: expr.__nvSlotFill, content: expr.factory })
+                  consumedFillIndices.add(holeIdx)
+                  consumed.add(holeIdx)
+                }
+              }
+            }
+          }
+
           const defaultNodes: Node[] = []
           const namedGroups = new Map<string, Node[]>()
 
           for (const child of Array.from(el.childNodes)) {
+            // Skip comment nodes that were consumed as slot-fill sentinels
+            if (child.nodeType === 8 /* COMMENT_NODE */) {
+              const commentText = (child as Comment).data
+              const holeMatch = /^nv-(\d+)$/.exec(commentText)
+              if (holeMatch !== null) {
+                // biome-ignore lint/style/noNonNullAssertion: regex match guarantees group
+                const holeIdx = parseInt(holeMatch[1]!, 10)
+                if (consumedFillIndices.has(holeIdx)) continue
+              }
+            }
             if (
               child.nodeType === 1 &&
               (child as Element).tagName.toLowerCase() === 'slot' &&
@@ -551,9 +625,9 @@ function buildHtmlStrings(
  */
 export function createHtmlTag(document: Document) {
   return function html(strings: TemplateStringsArray, ...exprs: unknown[]): TemplateIR {
-    // Validate: all expressions must be functions (thunks) OR slot sentinels.
+    // Validate: all expressions must be functions (thunks) OR slot sentinels OR slot-fill sentinels.
     for (let i = 0; i < exprs.length; i++) {
-      if (typeof exprs[i] !== 'function' && !isSlotSentinel(exprs[i])) {
+      if (typeof exprs[i] !== 'function' && !isSlotSentinel(exprs[i]) && !isSlotFillSentinel(exprs[i])) {
         throw new TypeError(
           `[nv/html] Expression at hole ${i} is not a function. Wrap reactive values in thunks: \${() => signal()} not \${signal()}. Received: ${typeof exprs[i]}`,
         )

@@ -87,7 +87,7 @@ export interface NvDiagnostic {
 export type ThunkSource =
   | { kind: 'text' | 'attr' | 'prop'; exprSrc: string }
   | { kind: 'event'; handlerSrc: string }
-  | { kind: 'slot-outlet'; name: string; fallbackThunks?: ThunkSource[] }
+  | { kind: 'slot-outlet'; name: string; fallbackThunks?: ThunkSource[]; propSrcs?: Array<{ name: string; exprSrc: string }> }
   | {
       kind: 'conditional'
       conditionSrc: string
@@ -232,6 +232,32 @@ function buildNvHoleBinding(
   stubHandler: HandlerExpr,
 ): Binding {
   if (info.kind === 'text') {
+    // Check scoped slot outlet: expression is `slots.name({ item: expr, index: expr })` — CallExpression form.
+    if (
+      ts.isCallExpression(holeExpr) &&
+      ts.isPropertyAccessExpression(holeExpr.expression) &&
+      ts.isIdentifier(holeExpr.expression.expression) &&
+      holeExpr.expression.expression.text === 'slots' &&
+      ts.isIdentifier(holeExpr.expression.name)
+    ) {
+      const slotName = (holeExpr.expression.name as ts.Identifier).text
+      const props: PropEntry[] = []
+      const arg = holeExpr.arguments[0]
+      if (arg && ts.isObjectLiteralExpression(arg)) {
+        for (const prop of arg.properties) {
+          if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name)) {
+            props.push({ name: (prop.name as ts.Identifier).text, expr: stubExpr })
+          }
+        }
+      }
+      const b: SlotOutletBinding = {
+        kind: 'slot-outlet',
+        pathIndex,
+        name: slotName,
+        ...(props.length > 0 && { props }),
+      }
+      return b
+    }
     // Check slot outlet: expression is `slots.name` property access.
     const isSlotOutlet =
       ts.isPropertyAccessExpression(holeExpr) &&
@@ -325,6 +351,8 @@ interface NvWalkedComponent {
   reactiveHoles: Array<{ name: string; holeIndex: number }>
   slots: SlotEntry[]
   slotHoleGroups: number[][]
+  /** For each slot entry (index-aligned with slots), the let-bound names from `let={...}` attr. */
+  slotLetNames: string[][]
 }
 
 interface NvWalkResult {
@@ -397,9 +425,11 @@ function walkNvNodeList(
         // Capture slot content via the SAME walk (component-as-slot-child).
         const slots: SlotEntry[] = []
         const slotHoleGroups: number[][] = []
+        const slotLetNames: string[][] = []
         if (el.childNodes.length > 0) {
           const defaultNodes: Node[] = []
           const namedGroups = new Map<string, Node[]>()
+          const namedLetNames = new Map<string, string[]>()
 
           for (const child of Array.from(el.childNodes)) {
             if (
@@ -407,8 +437,15 @@ function walkNvNodeList(
               (child as Element).tagName.toLowerCase() === 'slot' &&
               (child as Element).hasAttribute('name')
             ) {
-              const slotName = (child as Element).getAttribute('name') as string
-              namedGroups.set(slotName, Array.from((child as Element).childNodes))
+              const slotEl = child as Element
+              const slotName = slotEl.getAttribute('name') as string
+              namedGroups.set(slotName, Array.from(slotEl.childNodes))
+              // Extract let={item, index} attribute for scoped slots
+              const letAttr = slotEl.getAttribute('let')
+              if (letAttr) {
+                const identifiers = letAttr.replace(/[{}]/g, '').split(',').map((s) => s.trim()).filter(Boolean)
+                namedLetNames.set(slotName, identifiers)
+              }
             } else {
               defaultNodes.push(child)
             }
@@ -418,7 +455,7 @@ function walkNvNodeList(
             (n) => n.nodeType !== 3 || (n as Text).data.trim() !== '',
           )
           if (hasDefaultContent || defaultNodes.some((n) => n.nodeType === 8)) {
-            const { ir: defaultIR, holeIndices } = buildNvSlotContentIR(
+            const { ir: defaultIR, holeIndices, letNames: defaultLetNames } = buildNvSlotContentIR(
               defaultNodes,
               holeExprs,
               doc,
@@ -428,20 +465,24 @@ function walkNvNodeList(
             const defaultContent: SlotContent = (_props) => defaultIR
             slots.push({ name: 'default', content: defaultContent })
             slotHoleGroups.push(holeIndices)
+            slotLetNames.push(defaultLetNames)
             for (const idx of holeIndices) consumed.add(idx)
           }
 
           for (const [slotName, slotChildNodes] of namedGroups) {
-            const { ir: namedIR, holeIndices } = buildNvSlotContentIR(
+            const slotLet = namedLetNames.get(slotName) ?? []
+            const { ir: namedIR, holeIndices, letNames: namedLetNamesResult } = buildNvSlotContentIR(
               slotChildNodes,
               holeExprs,
               doc,
               `slot:${tagName}:${slotName}`,
               signals,
+              slotLet,
             )
             const namedContent: SlotContent = (_props) => namedIR
             slots.push({ name: slotName, content: namedContent })
             slotHoleGroups.push(holeIndices)
+            slotLetNames.push(namedLetNamesResult)
             for (const idx of holeIndices) consumed.add(idx)
           }
         }
@@ -458,6 +499,7 @@ function walkNvNodeList(
           reactiveHoles,
           slots,
           slotHoleGroups,
+          slotLetNames,
         })
         return // don't recurse into component children
       }
@@ -506,7 +548,8 @@ function buildNvSlotContentIR(
   doc: Document,
   slotId: string,
   signals: ReadonlySet<string>,
-): { ir: TemplateIR; holeIndices: number[] } {
+  letNames: string[] = [],
+): { ir: TemplateIR; holeIndices: number[]; letNames: string[] } {
   const stubExpr = (() => undefined) as ReactiveExpr<unknown>
   const stubHandler = (() => (_e: Event) => undefined) as HandlerExpr
 
@@ -514,8 +557,12 @@ function buildNvSlotContentIR(
     return {
       ir: { id: slotId, shape: { html: '', bindingPaths: [] }, bindings: [] },
       holeIndices: [],
+      letNames,
     }
   }
+
+  // Extend signals set with letNames so slot-bound identifiers are treated as reactive.
+  const slotSignals = letNames.length > 0 ? new Set([...signals, ...letNames]) : signals
 
   const fragWrapper = doc.createElement('div')
   for (const n of slotNodes) {
@@ -527,7 +574,7 @@ function buildNvSlotContentIR(
     holeExprs,
     doc,
     fragWrapper,
-    signals,
+    slotSignals,
   )
 
   const rawHtml = fragWrapper.innerHTML.replace(
@@ -565,6 +612,7 @@ function buildNvSlotContentIR(
       meta: { frontEnd: 'nv-file' },
     },
     holeIndices,
+    letNames,
   }
 }
 
@@ -675,6 +723,8 @@ interface PendingNvComponentInfo {
   slots: SlotEntry[]
   /** For each slot entry (index-aligned with slots), the original hole indices in the parent template. */
   slotHoleGroups: ReadonlyArray<ReadonlyArray<number>>
+  /** For each slot entry (index-aligned with slots), the let-bound names from `let={...}` attr. */
+  slotLetNames?: ReadonlyArray<ReadonlyArray<string>>
 }
 
 interface ProcessResult {
@@ -824,12 +874,13 @@ function processHtmlTemplate(
     },
     verdicts,
     pendingComponents: pendingComponents.map(
-      ({ tagName, propNames, reactiveHoles, slots, slotHoleGroups }) => ({
+      ({ tagName, propNames, reactiveHoles, slots, slotHoleGroups, slotLetNames }) => ({
         tagName,
         propNames,
         reactiveHoles,
         slots,
         slotHoleGroups,
+        slotLetNames,
       }),
     ),
     consumedByComponent,
@@ -1779,6 +1830,33 @@ function computeThunkSource(
   propsAccessors?: ReadonlyMap<string, string>,
 ): ThunkSource {
   if (pos.kind === 'text') {
+    // Scoped slot outlet: expression is `slots.name({ item: expr, ... })` — CallExpression form.
+    if (
+      ts.isCallExpression(holeExpr) &&
+      ts.isPropertyAccessExpression(holeExpr.expression) &&
+      ts.isIdentifier(holeExpr.expression.expression) &&
+      holeExpr.expression.expression.text === 'slots' &&
+      ts.isIdentifier(holeExpr.expression.name)
+    ) {
+      const slotName = (holeExpr.expression.name as ts.Identifier).text
+      const propSrcs: Array<{ name: string; exprSrc: string }> = []
+      const arg = holeExpr.arguments[0]
+      if (arg && ts.isObjectLiteralExpression(arg)) {
+        for (const prop of arg.properties) {
+          if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name)) {
+            propSrcs.push({
+              name: (prop.name as ts.Identifier).text,
+              exprSrc: eraseSignalReadsInNode(prop.initializer, symbols.all, propsAccessors),
+            })
+          }
+        }
+      }
+      return {
+        kind: 'slot-outlet' as const,
+        name: slotName,
+        ...(propSrcs.length > 0 && { propSrcs }),
+      }
+    }
     // Slot outlet: expression is `slots.name` property access.
     if (
       ts.isPropertyAccessExpression(holeExpr) &&
@@ -1941,6 +2019,15 @@ function computeBindingThunks(
     propNames: pc.propNames,
     slots: pc.slots.map((slot, slotIdx) => {
       const holeIndices = pc.slotHoleGroups[slotIdx] ?? []
+      // Build slotPropsAccessors: letNames → 'slotProps.name()' (for emit path)
+      const slotLet = pc.slotLetNames?.[slotIdx] ?? []
+      const slotPropsParam = 'slotProps'
+      const slotPropsAccessors: Map<string, string> | undefined = slotLet.length > 0
+        ? new Map(slotLet.map((n) => [n, `${slotPropsParam}.${n}()`]))
+        : undefined
+      const mergedPropsAccessors = slotPropsAccessors
+        ? new Map([...(propsAccessors ?? []), ...slotPropsAccessors])
+        : propsAccessors
       const thunks: ThunkSource[] = holeIndices.map((holeIdx) => {
         const holeExpr = holeExprs[holeIdx]
         if (holeExpr === undefined) {
@@ -1953,7 +2040,7 @@ function computeBindingThunks(
           symbols,
           diagnostics,
           propsParamName,
-          propsAccessors,
+          mergedPropsAccessors,
         )
       })
       return { name: slot.name, holeIndices: [...holeIndices], thunks }
