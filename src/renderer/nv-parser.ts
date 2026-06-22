@@ -940,6 +940,9 @@ function processHtmlTemplate(
   for (const wl of pendingLists) {
     const pathIndex = allPaths.length
     allPaths.push(wl.anchorPath)
+    // PARSE-PATH ONLY: This ListBinding is for structural IR shape checking (parseNvFile path).
+    // The items, key, and itemTemplate are intentional stubs — they are non-functional placeholders.
+    // Never call mount() on this IR; use parseNvFileForEmit for runtime consumption and proper factories.
     bindings.push({
       kind: 'list',
       pathIndex,

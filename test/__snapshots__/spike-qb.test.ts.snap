@@ -1,0 +1,21 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`emitted-mount — D-slot-2 ownership witness > records exact delta for oracle comparison 1`] = `
+{
+  "countWith1": 1,
+  "countWith2": 2,
+  "countWith3": 3,
+  "delta": 1,
+  "delta2": 1,
+}
+`;
+
+exports[`interpreter — D-slot-2 ownership witness > records exact delta for oracle comparison 1`] = `
+{
+  "countWith1": 1,
+  "countWith2": 2,
+  "countWith3": 3,
+  "delta": 1,
+  "delta2": 1,
+}
+`;
