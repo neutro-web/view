@@ -459,4 +459,4 @@ Anti-vacuous sweeps: 0 `expect(true/false).toBe`, 0 `expect(!...` patterns.
 - Option A shared constructor — `buildHtmlHoleBinding` / `buildNvHoleBinding` used by both top-level walk and slot sub-builder
 - `.nv` front-end unchanged — `slots.name` PropertyAccessExpression path untouched
 
-**References.** Prior entry `2026-06-21 — Slot-builder defects B1/B2/B3 designed and LOCKED (decision log)`.
+**References.** Prior entry `2026-06-21 — Slot-builder defects B1/B2/B3 — resolution DESIGNED; unified CC fix commissioned`.

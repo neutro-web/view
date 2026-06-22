@@ -1,13 +1,14 @@
-# nv Template IR — Design v0.3.1
+# nv Template IR — Design v0.3.2
  
 **Stream:** (3) Renderer/templating  
 **Contract reference:** nv Reactive Core Runtime Contract v0.4.2  
-**Status:** Approved — v0.3.1 (arch review closed 2026-06-21). Slot consumption landed.  
+**Status:** Approved — v0.3.2 (doc-only bump 2026-06-21). Slot-builder defects B1/B2/B3 fixed.  
 **Changelog:**  
 - v0.2 (2026-06-17): initial approved IR spec — six binding kinds (PoC scope) + two designed-deferred (List, Sync).  
 - v0.2.1 (2026-06-20): multi-root template shapes; list item single-root constraint noted.  
 - v0.3 (2026-06-20): add ComponentBinding, PropEntry, SlotEntry, ComponentRef, PropsObject, SlotFns.
 - v0.3.1 (2026-06-21): add SlotOutletBinding (kind:'slot-outlet', name, no expr); named + reactive slot capture on both front-ends.
+- v0.3.2 (2026-06-21): doc-only. Tagged-template front-end now uses `slots('name')` sentinel for outlet detection; `.nv` front-end keeps `slots.name` AST detection. Both mechanisms produce identical `SlotOutletBinding` — IR shape unchanged. See §6.1.
  
 ---
  
@@ -547,6 +548,12 @@ Concretely:
 - `meta` (source spans, front-end label) does NOT affect structural equality.
 The delimiter difference (`{}` in `.nv`, `${}` in tagged template) is a front-end
 lexing detail and MUST be erased before producing the IR.
+
+**Outlet detection (v0.3.2 note).** The two front-ends detect slot outlets via different
+mechanisms but produce identical `SlotOutletBinding` nodes. The `.nv` front-end detects
+a `slots.name` `PropertyAccessExpression` in the AST. The tagged-template front-end
+detects a `slots('name')` sentinel object (`{ __nvSlotOutlet: string }`) by structural
+property check — immune to minification. Both paths produce `{ kind: 'slot-outlet', pathIndex, name }`.
  
 **How to verify.** The differential conformance suite (§8) covers this
 implicitly: both back-ends are tested against the same corpus, and the corpus
