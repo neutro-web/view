@@ -14,7 +14,7 @@ it disagrees with the source, the source wins and this file is stale → fix it.
 **Maintenance.** Update in the same pass that lands code, as a ready-to-commit edit (same
 discipline as log entries). Keep it to roughly this length; detail belongs in the code.
 
-Last verified against source: **2026-06-21.** Contract **v0.4.2**, Template IR **v0.3.2** (doc-only bump).
+Last verified against source: **2026-06-22.** Contract **v0.4.2**, Template IR **v0.3.3**.
 
 ---
 
@@ -39,10 +39,10 @@ Legend: **REAL** = production-complete & verified · **PARTIAL** = works for a s
 ### `src/renderer/` → `@neutro/view/renderer`
 | File | Status | Notes |
 |---|---|---|
-| `ir.ts` | REAL | IR types, matches Template-IR **v0.3.2** (doc-only bump; IR shape unchanged). 10 binding kinds (6 PoC + List + ComponentBinding + **SlotOutletBinding** landed; Sync deferred). `ComponentBinding` adds `component: ComponentRef`, `props: PropEntry[]`, `propNames`, `slots: SlotEntry[]`. `SlotOutletBinding` = `{ kind:'slot-outlet', pathIndex, name }` — no expr. All types local-structural (no DOM/core imports). |
+| `ir.ts` | REAL | IR types, matches Template-IR **v0.3.3**. 10 binding kinds (6 PoC + List + ComponentBinding + **SlotOutletBinding** landed; Sync deferred). `ComponentBinding` adds `component: ComponentRef`, `props: PropEntry[]`, `propNames`, `slots: SlotEntry[]`. `SlotOutletBinding` = `{ kind:'slot-outlet', pathIndex, name, fallback?: TemplateIR }` — `fallback` additive (v0.3.3). All types local-structural (no DOM/core imports). |
 | `interpreter.ts` | REAL | Back-end / **semantic ground truth**. Exports `mount(ir, parent, doc): () => void` and `walkPath`. `mount` **creates its own `createRoot`**; effects enqueued, run on first flush. `mountFragment(ir,parent,doc,before?,slotContext?)` is **internal (not exported)**. Handles all 6 PoC kinds + list + component + **slot-outlet** (`wireSlotOutlet`); sync throws. Slot content rendered via `runWithOwner(capturedParentOwner, () => createRoot(...))` — parent-lexical ownership (D-slot-1). Nested roots (conditional/list/component) bridged via `onCleanup`. |
-| `html-tag.ts` | REAL | Tagged-template front-end (`createHtmlTag(doc)`). Handles `text`, `attr`, `prop` (`.name=`), `event` (`@name=`), `component`, and **`slot-outlet`** (`${slots('name')}` sentinel; B2 fix). Named slot capture: `<slot name="x">` wrappers → `SlotEntry{name, content: TemplateIR}`; slot sub-IR uses shared `buildHtmlHoleBinding` constructor — correctly emits `PropBinding`/`EventBinding`/`SlotOutletBinding` inside slot content (B1+B3 fix). Exports `slots(name)` from renderer barrel. |
-| `nv-parser.ts` | PARTIAL → **REAL for the build path** | Adds `parseNvFileForEmit` + `eraseHandlerExpr` + `computeThunksForTemplate`/`computeThunkSource` + `extractScriptBodySource`/`extractModuleScope`. `parseNvFile` (structural-only, stub thunks) unchanged. `parseNvFileForEmit` returns the real `emit` payload: erased `scriptBody`, index-aligned `bindingThunks` (recursive for conditional + component + **slot-outlet**), `moduleScope`. Named slot capture: `<slot name="x">` → `slotHoleGroups` (index-aligned with `slots[]`). `ThunkSource` includes `{ kind:'slot-outlet'; name }` variant. `computeThunkSource` detects `slots.name` PropertyAccessExpression → slot-outlet ThunkSource. Slot sub-builder (`buildNvSlotSubIR`) now uses shared `buildNvHoleBinding` — correctly emits `PropBinding`/`EventBinding`/`SlotOutletBinding`/`ConditionalBinding` inside slot content (B1+B3 fix). |
+| `html-tag.ts` | REAL | Tagged-template front-end (`createHtmlTag(doc)`). Handles `text`, `attr`, `prop` (`.name=`), `event` (`@name=`), `component`, and **`slot-outlet`** (`${slots('name')}` sentinel; B2 fix). Named slot capture: `<slot name="x">` wrappers → `SlotEntry{name, content: TemplateIR}`; slot content goes through the unified `walkNodeList` (GATE-2 collapse; `buildSlotSubIR` RETIRED). `ComponentBinding` inside slot content falls out of the unified walk (component-as-slot-child). Fallback sentinel: `slots('name', { fallback: html\`...\` })`. Exports `slots(name)` from renderer barrel. |
+| `nv-parser.ts` | PARTIAL → **REAL for the build path** | Adds `parseNvFileForEmit` + `eraseHandlerExpr` + `computeThunksForTemplate`/`computeThunkSource` + `extractScriptBodySource`/`extractModuleScope`. `parseNvFile` (structural-only, stub thunks) unchanged. `parseNvFileForEmit` returns the real `emit` payload: erased `scriptBody`, index-aligned `bindingThunks` (recursive for conditional + component + **slot-outlet**), `moduleScope`. Named slot capture: `<slot name="x">` → `slotHoleGroups` (index-aligned with `slots[]`). `ThunkSource` includes `{ kind:'slot-outlet'; name }` variant. `computeThunkSource` detects `slots.name` PropertyAccessExpression → slot-outlet ThunkSource; `{slots.x ?? html\`...\`}` → fallback detection. Slot content goes through the unified `walkNvNodeList` (GATE-2 collapse; `buildNvSlotSubIR` RETIRED). |
 | `nv-emitter.ts` | **REAL** | `emitModule(results) → ES module text`. A2 shape: `(props, slots) => TemplateIR` ComponentRef + `Name.mount` sugar. **Slot thunks fully erased** — `slots:[]` hardcode replaced with `slotHoleGroups`-driven thunk computation under parent scope. `emitBindingLiteral` handles `slot-outlet`. Imports: only $script-referenced primitives + `mount`. No forced `createRoot`/`onCleanup`. Composition gap CLOSED. Spec §5. |
 | `nv-esbuild-plugin.ts` | **REAL** | `nvPlugin()`: `onLoad(/\.nv$/)` → jsdom doc → `parseNvFileForEmit` → `emitModule` → `{ contents, loader: 'js' }`. Thin I/O glue. |
 | build pipeline (overall) | **REAL** | Transform + erasure layer verified. Executable-module gate CLOSED (EX-01..03, dynamic import, esbuild alias). Multi-root dispose fixed. |
@@ -113,7 +113,7 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
   `Name.mount = (parent, doc, props = {}, slots = {}) => mount(Name(props, slots), parent, doc)`
   root sugar. A parent emitting a `<Child/>` binding threads prop accessor thunks
   (`expr: () => (n())`) into the child factory; the parent root owns the child's effects by
-  construction. Slot **consumption** still deferred (factories accept `slots` but ignore them).
+  construction. Slot **consumption** LANDED (increment 1, 2026-06-22): walk-collapse, component-as-slot-child, fallback (`SlotOutletBinding.fallback?`). Increment 2 (scoped slots) queued.
 - **Equality hook inert; step 4 shelved** — neither specialization is wired to save work.
 - **SyncBinding** throws at both back-ends.
 - **Multi-root mount/dispose — FIXED (v0.2.1).** Both back-ends now snapshot all fragment
@@ -125,7 +125,7 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
 ---
 
 ## Not built at all (forward queue)
-`$style` scoping, SyncBinding, slot consumption (emitted/interpreter factories accept `slots`
-but do not consume them), LIS list move-minimization (parked), kind-split (parked behind
+`$style` scoping, SyncBinding, LIS list move-minimization (parked), kind-split (parked behind
 real-app evidence), `roots[0] as Node` biome-laundering cleanup (replace with `biome-ignore`
-+ `!`; no runtime impact).
++ `!`; no runtime impact). Increment 2 (scoped slots + `SlotOutletBinding.props?` + `let={...}`
+authoring + D-slot-2 invocation-scoped ownership) queued.

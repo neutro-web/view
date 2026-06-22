@@ -1,14 +1,15 @@
-# nv Template IR — Design v0.3.2
+# nv Template IR — Design v0.3.3
  
 **Stream:** (3) Renderer/templating  
 **Contract reference:** nv Reactive Core Runtime Contract v0.4.2  
-**Status:** Approved — v0.3.2 (doc-only bump 2026-06-21). Slot-builder defects B1/B2/B3 fixed.  
+**Status:** Approved — v0.3.3 (2026-06-22). Slot increment 1 landed.  
 **Changelog:**  
 - v0.2 (2026-06-17): initial approved IR spec — six binding kinds (PoC scope) + two designed-deferred (List, Sync).  
 - v0.2.1 (2026-06-20): multi-root template shapes; list item single-root constraint noted.  
 - v0.3 (2026-06-20): add ComponentBinding, PropEntry, SlotEntry, ComponentRef, PropsObject, SlotFns.
 - v0.3.1 (2026-06-21): add SlotOutletBinding (kind:'slot-outlet', name, no expr); named + reactive slot capture on both front-ends.
 - v0.3.2 (2026-06-21): doc-only. Tagged-template front-end now uses `slots('name')` sentinel for outlet detection; `.nv` front-end keeps `slots.name` AST detection. Both mechanisms produce identical `SlotOutletBinding` — IR shape unchanged. See §6.1.
+- v0.3.3 (2026-06-22): additive `fallback?: TemplateIR` on `SlotOutletBinding`; walk-collapse (GATE-2) — slot content now processed by the same recursive walk as top-level content; component-as-slot-child falls out. reactive-core v0.4.2 unchanged. D-slot-1 retained.
  
 ---
  
@@ -154,7 +155,7 @@ type Binding =
   | ListBinding        //  ── designed, deferred (§3.7)
   | SyncBinding        //  ── designed, deferred (§3.8)
   | ComponentBinding   //  ── v0.3 (component API)
-  | SlotOutletBinding; //  ── v0.3.1 (slot consumption)
+  | SlotOutletBinding; //  ── v0.3.1 (slot consumption); v0.3.3 adds optional `fallback?: TemplateIR`
  
 type BaseBinding = {
   pathIndex: number;   // index into shape.bindingPaths — which node this targets
@@ -922,6 +923,13 @@ type ComponentBinding = BaseBinding & {
   props: readonly PropEntry[]
   propNames: readonly string[]
   slots: readonly SlotEntry[]
+};
+ 
+// ── SlotOutletBinding (v0.3.1; v0.3.3 adds fallback) ────────────────────────
+type SlotOutletBinding = BaseBinding & {
+  kind:      'slot-outlet';
+  name:      string;
+  fallback?: TemplateIR;  // v0.3.3: rendered when the parent does not fill this slot
 };
  
 type Binding =

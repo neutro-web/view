@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.3.2**._
+_Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.3.3**._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
 > `nv-decision-log-archive.md` (moved 2026-06-21). This snapshot is the resolved
@@ -46,13 +46,10 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.3.2**._
 - **Build pipeline `.nv → .js`:** Mode A, landed. Executable-module gate closed.
 - **Component API v1:** LANDED. Composition works end-to-end through the compiled
   path (A2 factory-shape convergence).
-- **Slot consumption:** LANDED (named + reactive, both FEs + emit + both back-ends,
-  parent-lexical ownership). FE-equivalence enforced via the structural comparator
-  (G3.1 read-back addendum). **Three slot-content defects B1/B2/B3 LANDED (2026-06-21):**
-  B1+B3 — shared per-hole binding constructor kills degraded-copy class; sub-builders now
-  emit correct binding kinds inside slot content. B2 — `slots('name')` sentinel replaces
-  `.toString()` outlet detection (minification-safe; `.nv` keeps `slots.name` AST).
-  §8.2 corpus extended (+5 differential cases). Template-IR v0.3.2 (doc-only).
+- **Slot consumption — increment 1 LANDED (2026-06-22):** GATE-2 walk-collapse (retired
+  `buildSlotSubIR`/`buildNvSlotSubIR`); component-as-slot-child (nested-component deferral
+  closed); fallback (`SlotOutletBinding.fallback?`). Template-IR → v0.3.3. D-slot-1
+  retained. Increment 2 (scoped slots + D-slot-2) queued.
 - **Real-browser gate:** PASSED across Blink/Gecko/WebKit (36/36). Phase 0 closed.
 - **Perf-validation phase:** COMPLETE. All three tripwires resolved (createSignals
   cleared structural-accepted; FALSE-heavy characterized watch-item; cross-engine
@@ -96,7 +93,7 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.3.2**._
   steady-state-update harness).
 
 ### Forward queue (named, not blocking)
-- **Slots — design APPROVED (2026-06-22), Path B phasing:** Increment 1 (commissioned) =
+- **Slots — design APPROVED (2026-06-22), Path B phasing:** Increment 1 (LANDED 2026-06-22) =
   GATE-2 walk-collapse (retire `buildSlotSubIR`/`buildNvSlotSubIR` → recursive
   `processHtmlTemplate`) + component-as-slot-child + fallback (`SlotOutletBinding.fallback?`);
   retains D-slot-1; Template-IR → v0.3.3. Increment 2 (queued) = scoped slots
@@ -529,3 +526,26 @@ so `each` reuses them rather than forking a parallel construct.
 until CC lands increment 1. Cites *Slot-builder defects B1/B2/B3 LANDED [2026-06-21]*
 (removed the degraded-copy class at the per-hole constructor level; this collapse removes it
 at the walk level).
+
+### 2026-06-22 — Slot increment 1 LANDED: walk-collapse + component-as-slot-child + fallback
+
+**Gate.** All gates passed: `tsc --noEmit` clean, `vitest run` 3237/3237, `biome check` clean.
+Fail-shows-teeth pair confirmed (interpreter fallback-renders test). Anti-vacuous sweep clean.
+
+**What landed:**
+- **GATE-2 collapse** — `buildSlotSubIR` and `buildNvSlotSubIR` retired; slot content now
+  processed by the same shared `walkNodeList`/`walkNvNodeList` as top-level content. The
+  degraded-copy class (B1/B3 root cause) removed at the walk level.
+- **Component-as-slot-child** — `ComponentBinding` in slot sub-IRs now falls out of the
+  unified walk. The B1/B3 LANDED entry's nested-component deferral is closed.
+- **Fallback** — `SlotOutletBinding.fallback?: TemplateIR` (additive). Tagged-template:
+  `slots('x', { fallback: html\`...\` })`; `.nv`: `{slots.x ?? html\`...\`}`. Both back-ends
+  render fallback when absent; suppress when filled. Both front-ends agree on the IR.
+- **Template-IR v0.3.2 → v0.3.3** (additive optional `fallback`).
+- **reactive-core v0.4.2 unchanged**. D-slot-1 retained (D-slot-2 is increment 2).
+
+**Corpus delta.** 3223 → 3237 (+14: component-as-slot-child × 9 + fallback × 5).
+
+**Cites.** *Scoped slots design APPROVED [2026-06-22]* (increment 1 commissioned);
+*Slot-builder defects B1/B2/B3 LANDED [2026-06-21]* (removed degraded-copy at constructor
+level; this collapse removes it at the walk level).
