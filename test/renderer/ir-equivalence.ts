@@ -12,6 +12,7 @@ import type {
   AttrBinding,
   Binding,
   ClassListBinding,
+  ComponentBinding,
   ConditionalBinding,
   EventBinding,
   ListBinding,
@@ -63,7 +64,14 @@ export function pathsEqual(a: TemplateIR, b: TemplateIR): boolean {
   return true
 }
 
-function bindingEqual(a: Binding, b: Binding, i: number, aIr: TemplateIR, bIr: TemplateIR): IrDiff {
+function bindingEqual(
+  a: Binding,
+  b: Binding,
+  i: number,
+  aIr: TemplateIR,
+  bIr: TemplateIR,
+  slotDoc: Document | undefined,
+): IrDiff {
   const p = `binding[${i}]`
   if (a.kind !== b.kind) return { equal: false, reason: `${p}.kind: ${a.kind} vs ${b.kind}` }
   // Compare actual DOM paths rather than raw pathIndex — different front-ends may assign
@@ -142,6 +150,49 @@ function bindingEqual(a: Binding, b: Binding, i: number, aIr: TemplateIR, bIr: T
       if (!bodyRes.equal) return { equal: false, reason: `${p}.itemBody → ${bodyRes.reason}` }
       break
     }
+    case 'component': {
+      // Slot content was previously UNCOMPARED — a ComponentBinding matched on
+      // kind+path alone, so <each>-in-slot and static-class rewrites in slot
+      // content went unchecked across FEs/back-ends. Recurse into slots (same
+      // stub-call pattern as `list`: empty stub props, matching production
+      // patchClasslistTokens and the G3.1/G5 tests).
+      const ac = a as ComponentBinding
+      const bc = b as ComponentBinding
+      if (ac.propNames.length !== bc.propNames.length)
+        return {
+          equal: false,
+          reason: `${p}.propNames.length: ${ac.propNames.length} vs ${bc.propNames.length}`,
+        }
+      for (let j = 0; j < ac.propNames.length; j++) {
+        if (ac.propNames[j] !== bc.propNames[j])
+          return {
+            equal: false,
+            reason: `${p}.propNames[${j}]: ${ac.propNames[j]} vs ${bc.propNames[j]}`,
+          }
+      }
+      if (ac.slots.length !== bc.slots.length)
+        return {
+          equal: false,
+          reason: `${p}.slots.length: ${ac.slots.length} vs ${bc.slots.length}`,
+        }
+      for (let j = 0; j < ac.slots.length; j++) {
+        const aSlot = ac.slots[j]!
+        const bSlot = bc.slots[j]!
+        if (aSlot.name !== bSlot.name)
+          return {
+            equal: false,
+            reason: `${p}.slots[${j}].name: ${aSlot.name} vs ${bSlot.name}`,
+          }
+        // Stub-call the slot content factory (empty props) and recurse. shape.html
+        // IS compared here (pass `doc` through) so slot-content static-class rewrites
+        // are caught — the D-slot-style-1 surface. doc is threaded via closure below.
+        const aSlotIR = aSlot.content({})
+        const bSlotIR = bSlot.content({})
+        const slotRes = irStructurallyEqual(slotDoc, aSlotIR, bSlotIR)
+        if (!slotRes.equal) return { equal: false, reason: `${p}.slots[${j}] → ${slotRes.reason}` }
+      }
+      break
+    }
     case 'conditional': {
       const bc = b as ConditionalBinding
       const cRes = irStructurallyEqual(undefined, a.consequent, bc.consequent)
@@ -167,10 +218,76 @@ function bindingEqual(a: Binding, b: Binding, i: number, aIr: TemplateIR, bIr: T
 }
 
 /**
+ * Compare the IR-root $style outputs (`styleArtifact` + `classRewrites`).
+ * Both are `.nv`-FE-only and optional: both-absent is equal (the FE-vs-FE case);
+ * presence-mismatch is unequal; both-present compares scopeHash, staticCss,
+ * varBindingDescs (varName + propertyName + exprSrc), and the classRewrites map.
+ * This is the surface the FE-equivalence + style differential were previously blind to.
+ */
+export function styleArtifactEqual(a: TemplateIR, b: TemplateIR): IrDiff {
+  const aSa = a.styleArtifact
+  const bSa = b.styleArtifact
+  if ((aSa === undefined) !== (bSa === undefined))
+    return {
+      equal: false,
+      reason: `styleArtifact presence: ${aSa === undefined ? 'absent' : 'present'} vs ${bSa === undefined ? 'absent' : 'present'}`,
+    }
+  if (aSa !== undefined && bSa !== undefined) {
+    if (aSa.scopeHash !== bSa.scopeHash)
+      return {
+        equal: false,
+        reason: `styleArtifact.scopeHash: ${aSa.scopeHash} vs ${bSa.scopeHash}`,
+      }
+    if (aSa.staticCss !== bSa.staticCss)
+      return { equal: false, reason: 'styleArtifact.staticCss mismatch' }
+    const aVb = aSa.varBindingDescs ?? []
+    const bVb = bSa.varBindingDescs ?? []
+    if (aVb.length !== bVb.length)
+      return {
+        equal: false,
+        reason: `styleArtifact.varBindingDescs.length: ${aVb.length} vs ${bVb.length}`,
+      }
+    for (let i = 0; i < aVb.length; i++) {
+      const av = aVb[i]!
+      const bv = bVb[i]!
+      if (av.varName !== bv.varName)
+        return {
+          equal: false,
+          reason: `varBindingDescs[${i}].varName: ${av.varName} vs ${bv.varName}`,
+        }
+      if (av.propertyName !== bv.propertyName)
+        return {
+          equal: false,
+          reason: `varBindingDescs[${i}].propertyName: ${av.propertyName} vs ${bv.propertyName}`,
+        }
+      if (av.exprSrc !== bv.exprSrc)
+        return { equal: false, reason: `varBindingDescs[${i}].exprSrc mismatch` }
+    }
+  }
+  const aCr = a.classRewrites
+  const bCr = b.classRewrites
+  if ((aCr === undefined) !== (bCr === undefined))
+    return {
+      equal: false,
+      reason: `classRewrites presence: ${aCr === undefined ? 'absent' : 'present'} vs ${bCr === undefined ? 'absent' : 'present'}`,
+    }
+  if (aCr !== undefined && bCr !== undefined) {
+    if (aCr.size !== bCr.size)
+      return { equal: false, reason: `classRewrites.size: ${aCr.size} vs ${bCr.size}` }
+    for (const [k, v] of aCr) {
+      if (bCr.get(k) !== v)
+        return { equal: false, reason: `classRewrites[${k}]: ${v} vs ${bCr.get(k)}` }
+    }
+  }
+  return { equal: true, reason: '' }
+}
+
+/**
  * Structurally compare two IRs: bindingPaths, binding kinds, non-expr fields,
- * recursing into conditional branches. If `doc` is provided, shape.html is also
- * compared via the DOM structural comparator. (Pass `undefined` for `doc` when
- * recursing — outer caller compares shape once.)
+ * recursing into conditional branches AND component slots. If `doc` is provided,
+ * shape.html is also compared via the DOM structural comparator, AND the IR-root
+ * $style outputs (styleArtifact/classRewrites) are compared. (Pass `undefined`
+ * for `doc` when recursing — outer caller compares shape + style once at the root.)
  */
 export function irStructurallyEqual(
   doc: Document | undefined,
@@ -180,12 +297,14 @@ export function irStructurallyEqual(
   if (doc !== undefined) {
     const s = shapeHtmlEqual(doc, a, b)
     if (!s.equal) return { equal: false, reason: `shape.html → ${s.diffPath}` }
+    const st = styleArtifactEqual(a, b)
+    if (!st.equal) return st
   }
   if (a.bindings.length !== b.bindings.length)
     return { equal: false, reason: `binding count: ${a.bindings.length} vs ${b.bindings.length}` }
   if (!pathsEqual(a, b)) return { equal: false, reason: 'bindingPaths mismatch' }
   for (let i = 0; i < a.bindings.length; i++) {
-    const r = bindingEqual(a.bindings[i] as Binding, b.bindings[i] as Binding, i, a, b)
+    const r = bindingEqual(a.bindings[i] as Binding, b.bindings[i] as Binding, i, a, b, doc)
     if (!r.equal) return r
   }
   return { equal: true, reason: '' }

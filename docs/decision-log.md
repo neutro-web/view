@@ -46,6 +46,10 @@ _Last updated: 2026-06-23. Contract **v0.4.2** · Template-IR **v0.4.2**._
   Template-IR doc reconciled to v0.4.2 (2026-06-23) — now matches `ir.ts`
   (12-member union incl. `ClassListBinding`, `StyleVarBinding`; `ListBinding`
   factory `itemTemplate`; root `styleArtifact`/`classRewrites`).
+  Equivalence oracle extended (2026-06-23, Action 2): `bindingEqual` now recurses
+  component slots (forwarding doc → slot shape.html compared); `styleArtifactEqual`
+  compares root `styleArtifact`/`classRewrites`. Slot content + style outputs are
+  no longer FE/back-end-equivalence blind spots.
 - **Build pipeline `.nv → .js`:** Mode A, landed. Executable-module gate closed.
 - **Component API v1:** LANDED. Composition works end-to-end through the compiled
   path (A2 factory-shape convergence).
@@ -1755,3 +1759,37 @@ implementation-state fix is in this paste set).
 **Verdict:** Doc now matches code. No contract bump (reactive-core stays v0.4.2);
 Template-IR doc version was already claimed v0.4.2 by `ir.ts` — this aligns the
 prose to it.
+
+### 2026-06-23 — Equivalence-oracle blind spots closed (Action 2; test-infra only)
+
+**Decision.** Close the two `ir-equivalence.ts` blind spots from the drift audit.
+Test-infra only; no production code.
+
+**Blind spot 1 — slot content uncompared.** `bindingEqual` had no `component` case,
+so a `ComponentBinding` matched on kind+path alone and its `slots` were never
+recursed. Slot-content IR (where `<each>`-in-slot bindings and the D-slot-style-1
+static-class rewrite live) was invisible to FE-equivalence AND the slot G3.1 gate.
+**Fix:** `component` case compares propNames + slot names and recurses
+`slot.content({})` forwarding `doc` (slot shape.html now compared).
+
+**Blind spot 2 — IR-root $style outputs uncompared.** `styleArtifact` and
+`classRewrites` were never compared. **Fix:** `styleArtifactEqual` (scopeHash,
+staticCss, varBindingDescs, classRewrites map), called from `irStructurallyEqual`
+at the root. Both-absent → equal (FE-vs-FE N/A preserved); presence-mismatch →
+unequal.
+
+**Unchanged:** `list`/`conditional` recursion still passes `undefined` doc — no
+scope creep into their shape-comparison behavior.
+
+**Consequence (recorded, not a defect):** the oracle now inspects surfaces it
+previously ignored. A latent FE/back-end divergence could surface as a newly-failing
+test — that is correct behavior, triage as a real divergence, do NOT weaken the oracle.
+
+**Why this had to land before `<each>`-in-slot:** that increment's structural-identity
+gate asserts the slot-path list binding equals the main-path shape. With the old
+oracle, "green" did not actually inspect slot content — the gate would have been
+unfalsifiable. Now it is failable.
+
+**Verdict:** Oracle now covers slot content + style artifacts. tsc --strict clean;
+teeth proven to fire (sandbox smoke). reactive-core v0.4.2 + Template-IR v0.4.2
+untouched.
