@@ -1,6 +1,6 @@
 /**
  * nv Template IR — Type Definitions
- * Source of truth: nv-template-ir.md v0.4.1 (arch-approved 2026-06-22)
+ * Source of truth: nv-template-ir.md v0.4.2 (arch-approved 2026-06-22)
  * Stream: (3) Renderer/templating
  *
  * These types are the contract between the two front-ends and two back-ends.
