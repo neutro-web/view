@@ -122,6 +122,10 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4.1**._
     [sandbox, no IR]; (2) static scoping+injection [browser]; (3) StyleVarBinding+dynamic
     [browser, **Template-IR v0.4.2**]; (4) ×classlist [browser, OPEN-7 → CLOSED 2026-06-22]. Seven OPEN points ruled
     against the plan, not pre-decided. Locked constraints L.1–L.6 fenced as G0.
+    - **OPEN-7 RULED 2026-06-23** (`$style` × `<each>` classlist): `patchClasslistTokens` recurses
+      into `list` bindings (total walk via L172 stub factory call); parent-IR call covers all
+      nesting depths. Literal depth-1 patch rejected (misses nested `<each>`, verified L772 discard).
+      In-stream. Gate O7.2 (nested depth-2) is load-bearing, real-browser. Remaining OPEN: 1–6.
 - **Class-selection (`class={...}`) — LANDED, architect-verified 2026-06-22** (branch
   feat/class-selection, Increment C). `ClassListBinding` (kind `classlist`, entries
   static|toggle) added to IR union; Template-IR bumped v0.4 → v0.4.1; `AttrBinding`
@@ -1378,8 +1382,36 @@ against CC's plan (Gate P). reactive-core v0.4.2, Template-IR v0.4.1 unchanged u
 
 ### 2026-06-22 — OPEN-7 (`$style` × `<each>` classlist) RULED: total-recursion patch, not depth-1
 
-**Question:** `patchClasslistTokens` only iterates the top-level `bindings` array. Nested `<each>` items have their own `TemplateIR` returned by `itemTemplate()` — those are never visited. Should the patch depth-limit to 1 or recurse fully?
+Resolves the fork in CC's `$style × $each` seam briefing (Gate-P plan stage, branch
+`feat/style-s1s2`). Ruling artifact: `ruling-style-each-classlist.md`.
 
-**Ruling (Architect):** Total recursion. Call `itemTemplate` once with stub signals to get the item IR, then recurse into it. Stubs are pure (no side effects). Depth-1 bounding was rejected because `<each>` inside `<each>` is a valid and expected pattern.
+**Decision.** Rewrite `$style` class-form tokens inside `<each>` bodies via `patchClasslistTokens`
+(Option A), **with the recursion fix making the walk total** — NOT CC's literal Option A
+(patch each `pendingLists[i].bodyIR`), and NOT Option B (runtime threading).
 
-**Outcome:** `patchClasslistTokens` now recurses into every `list` binding's item IR. Unit tests O7.unit-1 and O7.unit-2 added. Browser test O7.1 added. OPEN-7 closed.
+**Why the literal Option A fails (verified on branch).** `buildNvSlotContentIR` discards
+`walkNvNodeList`'s `lists` return (L772, `// lists is intentionally ignored in slot content
+builder`). Nested `<each>`-inside-`<each>` body IRs are therefore absent from the outer
+`pendingLists` (loop L1039). Patching `pendingLists[i].bodyIR` covers depth-1 only; combined with
+`patchClasslistTokens`'s current `list`-skip (L1887–1889), a depth-≥2 inner body is never
+rewritten → silent wrong DOM. This is the degraded-second-path pattern (slot subsystem bitten 4×):
+a walk that re-skips a kind handled elsewhere.
+
+**The fix.** Make `patchClasslistTokens` recurse into `list` bindings (mirroring its `conditional`
+recursion) by calling `itemTemplate` once with the existing L172 stub signals to obtain the item
+`bodyIR`, then recursing. The single existing call at L1997 (interp) / L2908 (emit) on the parent
+IR becomes total over all nesting depths, with no dependency on `pendingLists` flatness or
+iteration order. Collapses to one walk per the "collapse, don't patch, the degraded-copy"
+principle. Reuse the existing stubs (no new ones); confirm the stub-call is inert.
+
+**Escalation verdict: in-stream, not contract-level.** `classRewrites` is a compile-time-fixed
+`Map<string,string>` — no reactive reads, static capture like `itemsSrc`/`keySrc`/`letNames`.
+The patch introduces no tracked read and no write-during-propagation; the factory stub-call runs
+at preprocess time outside any reactive scope. No §1 invariant touched, no change to what a
+computation observes mid-propagation. Renderer-layer.
+
+**Gate.** Phase 4 / OPEN-7 table gains O7.1 (depth-1), **O7.2 (nested depth-2 — load-bearing;
+the case literal Option A passes structurally while emitting wrong DOM; real-browser mount)**,
+O7.3 (conditional-inside-each), O7.4 (differential), O7.5 (stub-call inert).
+
+No contract touch. No Template-IR touch. reactive-core v0.4.2, Template-IR v0.4.1 unchanged.
