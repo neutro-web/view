@@ -152,7 +152,10 @@ export interface NvComponentResult {
 
 export interface NvStyleInfo {
   form: 'object' | 'factory'
+  /** Static property keys only. Computed keys ([expr]: ...) are excluded — check hasComputedKeys. */
   keys: readonly string[]
+  /** True if any property key was computed ([expr]: ...) — those keys are absent from `keys`. */
+  hasComputedKeys: boolean
   /** Raw source text of the $style argument. For factory form, signal reads are NOT erased — use objExpr + eraseSignalReadsInNode for erased output. */
   source: string
   objExpr: ts.ObjectLiteralExpression
@@ -1248,14 +1251,18 @@ function extractStyleInfo(
     const src = arg.getText()
     if (ts.isObjectLiteralExpression(arg)) {
       const keys: string[] = []
+      let hasComputedKeys = false
       for (const p of arg.properties) {
         if (ts.isPropertyAssignment(p)) {
           const k = propertyKeyText(p.name)
-          if (k === null) continue
-          if (k) keys.push(k)
+          if (k === null) {
+            hasComputedKeys = true
+            continue
+          }
+          if (k !== null) keys.push(k)
         }
       }
-      return { form: 'object', keys, source: src, objExpr: arg }
+      return { form: 'object', keys, hasComputedKeys, source: src, objExpr: arg }
     }
     if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) {
       const fnBody = arg.body
@@ -1266,19 +1273,21 @@ function extractStyleInfo(
           : null
       if (objExpr === null) return null
       const keys: string[] = []
+      let hasComputedKeys = false
       for (const p of objExpr.properties) {
         if (ts.isPropertyAssignment(p)) {
           const k = propertyKeyText(p.name)
           if (k === null) {
-            // computed key in factory: still return NvStyleInfo but mark key as absent
-            // (callers use objExpr directly for emission; keys is metadata only)
+            hasComputedKeys = true
             continue
           }
-          if (k) keys.push(k)
+          if (k !== null) keys.push(k)
           eraseSignalReadsInNode(p.initializer, symbols.all) // proof-of-wire; result unused in S0
+        } else if (ts.isSpreadAssignment(p)) {
+          eraseSignalReadsInNode(p.expression, symbols.all) // proof-of-wire; result unused in S0
         }
       }
-      return { form: 'factory', keys, source: src, objExpr, factory: arg }
+      return { form: 'factory', keys, hasComputedKeys, source: src, objExpr, factory: arg }
     }
     return null
   }
