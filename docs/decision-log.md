@@ -86,7 +86,7 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4.1**._
 - Compile-time DOM encapsulation — still open (Shadow-DOM opt-in path unspecced).
   STYLE encapsulation APPROVED 2026-06-22 (see Log) — Light-DOM scoping via hybrid
   routing; not a contract concern.
-- **`$style` key discriminant + StyleVarBinding APPROVED-PENDING (spec drafted 2026-06-22).**
+- **`$style` key discriminant + StyleVarBinding APPROVED (spec 2026-06-22).**
   Two-way class/selector routing; new `StyleVarBinding` IR member (Template-IR v0.4.2 on land).
   nv-does-not-invent-CSS principle. Renderer-layer; not a contract concern.
 
@@ -115,9 +115,8 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4.1**._
   injection = hoist-once-per-component-identity + dedup. Renderer/compiler-layer only —
   NOT a reactive-core contract concern (Template-IR §scope already fences this).
   - **S0 (F1 + D-cl-3): LANDED 2026-06-22 (`6baa64e`).** Parser seam in place.
-  - **S1+S2 (MERGED 2026-06-22): scoping emission + dynamic value lowering.** Spec DRAFTED
-    (`spec-style-s1s2-scoping-and-lowering.md`), awaiting architect approval; not yet a CC
-    handoff. Key discriminant ruled (class-form iff all-bare-class-tokens & no tag name, else
+  - **S1+S2 (MERGED 2026-06-22): scoping emission + dynamic value lowering.** Spec APPROVED 2026-06-22
+    (`spec-style-s1s2-scoping-and-lowering.md`); not yet a CC handoff. Key discriminant ruled (class-form iff all-bare-class-tokens & no tag name, else
     selector-form; nv does not invent CSS semantics). Static/dynamic split = reactivity-based.
     **New `StyleVarBinding` → Template-IR v0.4.2** (lands with dynamic sub-phase; not PropBinding
     reuse). Injection built new, through `doc`, dedup'd per component identity. Seven OPEN points
@@ -1281,13 +1280,12 @@ reactive-core v0.4.2, Template-IR v0.4.1 unchanged.
 
 ---
 
-### 2026-06-22 — Increment S1+S2 MERGED; `StyleVarBinding` IR decision; key discriminant ruled; spec DRAFTED
+### 2026-06-22 — Increment S1+S2 MERGED; `StyleVarBinding` IR decision; key discriminant ruled; spec APPROVED
 
 Supersedes the S1/S2 split in the 2026-06-22 phasing entry ("Increment S PHASED into S0/S1/S2").
 S0/F1 landed (`6baa64e`); S1 (static scoping) and S2 (dynamic lowering) are now **one
 increment, S1+S2**, because the seam S2 needs is in place and a static-only S1 was an
-artificial slice. Spec drafted: `spec-style-s1s2-scoping-and-lowering.md` (DRAFT, awaiting
-architect approval — not yet a CC handoff).
+artificial slice. Spec APPROVED 2026-06-22: `spec-style-s1s2-scoping-and-lowering.md` (not yet a CC handoff).
 
 **Decisions locked in this entry:**
 
