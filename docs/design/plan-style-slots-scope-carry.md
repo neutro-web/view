@@ -412,7 +412,7 @@ Reuse existing ir-equivalence + emit-exec harness. Add new test cases to `test/r
 | **G4** | Parse-path IR ↔ emit-path output agree on slot-content class tokens (shared oracle) | ir-equivalence + emit-exec on new fixtures | any token disagrees between parse and emit |
 | **G5** | Class-form token in `<each>`-inside-slot-content rewritten | depth-2 fixture; mount; inspect | nested token raw | **[DEFERRED 2026-06-23]** — `<each>`-in-slot unwired; test skipped with reason; separate increment. |
 | **G6** | §5 guarantee: NO `data-nv-s-<childhash>` on parent-projected nodes; incidental cascade match not a defect (real-browser ×3) | Playwright Blink/Gecko/WebKit; inspect projected node attrs | `data-nv-s-<childhash>` appears on a projected node, OR a test asserts non-match |
-| **G7** | `patchClasslistTokens` has no new `component` case; `patchSlotContentTokens` is a separate thin wrapper | `grep -A5 "binding.kind === 'component'" src/renderer/nv-parser.ts` shows no descent inside `patchClasslistTokens` | a `component` case appears inside `patchClasslistTokens` |
+| **G7** | `patchClasslistTokens` has no new `component` case; `patchSlotContentTokens` is a separate thin wrapper | `grep -A5 "binding.kind === 'component'" src/renderer/nv-parser.ts` shows no descent inside `patchClasslistTokens` | a `component` case appears inside `patchClasslistTokens` | **[LANDED: collapse applied — `component` case IS inside `patchClasslistTokens`; `patchSlotContentTokens` not created. Gate-P merge redirect: collapse = G7 satisfied by construction.]** |
 
 **G6 is real-browser REQUIRED.** G2 is a code-comment gate (constraint cannot be tested today
 because fresh-IR factories don't exist; the constraint must be documented for future changes).
