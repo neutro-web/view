@@ -703,7 +703,7 @@ export function emitMount(
           throw new Error('[nv/emitted-mount] $style on multi-root template is not supported')
         }
         if (ir.styleArtifact.staticCss) {
-          injectComponentStyle(doc, ir.id, ir.styleArtifact.staticCss)
+          injectComponentStyle(doc, ir.styleArtifact.scopeHash, ir.styleArtifact.staticCss)
         }
         const scopeAttr = `data-nv-s-${ir.styleArtifact.scopeHash}`
         const root = roots[0]

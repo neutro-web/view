@@ -101,6 +101,15 @@ leave `ir.id` untouched.
 - **Behavioral change:** scopeHash values change for styled components containing child
   components (`shapeHtml` ≠ `reserializedShape`). S1+S2 hash-pinned fixtures regenerate. See G3'.
 
+**Implementation note (Gate-P redirect, 2026-06-23).** The final implementation rewrites slot
+IR post-walk via a `component` case inside the existing `patchClasslistTokens` function — NOT
+inside `buildNvSlotContentIR` as the original Mechanism B description above implies. This is
+semantically equivalent because slot content is captured by reference (`(_props) => namedIR`),
+so patching the IR after the walk patches what the closure holds. The "as slot content is built"
+phrasing describes the original plan; the Gate-P collapse redirect changed the rewrite site from
+inside-the-builder to post-walk-inside-`patchClasslistTokens` (mirrors the `list` case; satisfies
+G7 by construction). The mechanism's semantic guarantee is unchanged.
+
 ## 5. RULED — slot content is opaque to child selector-form scope (NO, reading (b))
 
 **Ruling (architect, 2026-06-23): NO.** A child's selector-form scope does **not** deliberately

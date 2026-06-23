@@ -1898,7 +1898,9 @@ export function patchClasslistTokens(ir: TemplateIR, classRewrites: Map<string, 
       const itemIR = binding.itemTemplate(stubVs, stubIs)
       patchClasslistTokens(itemIR, classRewrites)
     }
-    // NEW: component case — mirrors list; slot content is the structurally identical missing case.
+    // NEW: component case — same pattern as list (stub-call + recurse). Diverges from list in one
+    // way: also rewrites static class attrs in slotIR.shape.html (slot content may carry literal
+    // class="card" strings, not only classlist bindings; list-item bodies don't have this).
     if (binding.kind === 'component') {
       const stubSlotProps = {}
       for (const slot of (binding as ComponentBinding).slots) {
@@ -1908,7 +1910,7 @@ export function patchClasslistTokens(ir: TemplateIR, classRewrites: Map<string, 
         // break this patch silently. Same latent fragility as the 'list' case above. (G2)
         const slotIR = slot.content(stubSlotProps)
         // Rewrite static class attr tokens in the slot's shape HTML
-        if (slotIR.shape.html.includes('class=')) {
+        if (slotIR.shape.html?.includes('class=')) {
           ;(slotIR.shape as { html: string }).html = slotIR.shape.html.replace(
             /\bclass="([^"]*)"/g,
             (_, cls: string) =>

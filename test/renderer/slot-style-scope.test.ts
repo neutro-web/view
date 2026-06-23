@@ -119,8 +119,10 @@ describe("G3': same $style definition + same template shape shares scopeHash", (
 
     // Directly call injectComponentStyle — this is exactly what mount() calls for styleArtifact IRs.
     // We test the dedup guarantee at the injection level without needing a real browser
-    // Element global. The browser-level mount+dedup test is covered by G2.4 in
-    // test/browser/style-scoping.spec.ts.
+    // Element global. Both back-ends (interpreter.ts and emitted-mount.ts) key on
+    // ir.styleArtifact.scopeHash (not ir.id) after the B3 fix — they converge to the same
+    // injectComponentStyle call site, so this test covers the dedup semantic for both.
+    // The full browser-level mount+dedup path is covered by G6 in test/browser/slot-style-scope.spec.ts.
     injectComponentStyle(doc, scopeHash, cssText) // first injection
     injectComponentStyle(doc, scopeHash, cssText) // second — must be a no-op (deduped)
 
@@ -267,7 +269,7 @@ describe('G4: parse-path IR and emit-path agree on slot-content classlist tokens
 
 describe('G5: <each>-in-slot class token (deferred)', () => {
   // DEFERRED: <each> in slot content is not wired. buildNvSlotContentIR discards the
-  // `lists` return from walkNvNodeList (L772). patchClasslistTokens list-case handles
+  // `lists` return from walkNvNodeList (L773). patchClasslistTokens list-case handles
   // this automatically once <each>-in-slot is wired in the dedicated increment.
   it.skip('class-form token in <each>-inside-slot-content is rewritten with parent scopeHash', () => {})
 })
