@@ -1745,9 +1745,11 @@ function buildStyleArtifact(
 ): {
   staticCss: string
   varBindingDescs: VarBindingDesc[]
+  classRewrites: Map<string, string>
 } {
   const rules: string[] = []
   const varBindingDescs: VarBindingDesc[] = []
+  const classRewrites = new Map<string, string>()
 
   for (const p of info.objExpr.properties) {
     if (!ts.isPropertyAssignment(p)) continue
@@ -1781,6 +1783,7 @@ function buildStyleArtifact(
           : declPairs.map(([prop, val]) => `${prop}: ${val}`).join('; ')
       if (classify.form === 'class') {
         for (const token of classify.tokens) {
+          classRewrites.set(token, `${token}_${scopeHash}`)
           rules.push(`.${token}_${scopeHash} { ${declarationBlock} }`)
         }
       } else {
@@ -1791,6 +1794,7 @@ function buildStyleArtifact(
       const val = getValueText(initializer)
       if (classify.form === 'class') {
         for (const token of classify.tokens) {
+          classRewrites.set(token, `${token}_${scopeHash}`)
           rules.push(`.${token}_${scopeHash} { ${val} }`)
         }
       } else {
@@ -1799,7 +1803,7 @@ function buildStyleArtifact(
     }
   }
 
-  return { staticCss: rules.join('\n'), varBindingDescs }
+  return { staticCss: rules.join('\n'), varBindingDescs, classRewrites }
 }
 
 // Inject StyleVarBinding entries into a mutable TemplateIR for each VarBindingDesc.
@@ -1932,6 +1936,21 @@ export function parseNvFile(source: string, fileName: string, doc: Document): Nv
         if (artifact.varBindingDescs.length > 0) {
           applyVarBindingsToIr(renderResult.ir, artifact.varBindingDescs)
         }
+        if (artifact.classRewrites.size > 0) {
+          for (const b of renderResult.ir.bindings) {
+            if (b.kind !== 'classlist') continue
+            for (const entry of b.entries) {
+              if (entry.kind === 'static') {
+                const rw = artifact.classRewrites.get(entry.token)
+                if (rw) (entry as { token: string }).token = rw
+              } else {
+                const rw = artifact.classRewrites.get(entry.key)
+                if (rw) (entry as { key: string }).key = rw
+              }
+            }
+          }
+        }
+        renderResult.ir.classRewrites = artifact.classRewrites
       }
       results.push({
         name,
@@ -2841,6 +2860,21 @@ export function parseNvFileForEmit(
         if (artifact.varBindingDescs.length > 0) {
           applyVarBindingsToIr(renderResult.ir, artifact.varBindingDescs, bindingThunks)
         }
+        if (artifact.classRewrites.size > 0) {
+          for (const b of renderResult.ir.bindings) {
+            if (b.kind !== 'classlist') continue
+            for (const entry of b.entries) {
+              if (entry.kind === 'static') {
+                const rw = artifact.classRewrites.get(entry.token)
+                if (rw) (entry as { token: string }).token = rw
+              } else {
+                const rw = artifact.classRewrites.get(entry.key)
+                if (rw) (entry as { key: string }).key = rw
+              }
+            }
+          }
+        }
+        renderResult.ir.classRewrites = artifact.classRewrites
       }
       results.push({
         name,

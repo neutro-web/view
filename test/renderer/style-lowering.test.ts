@@ -225,3 +225,31 @@ describe('G3.wire  StyleVarBinding wires setProperty / removeProperty reactively
     sharedDoc.body.removeChild(parent)
   })
 })
+
+// ── G4.unit: classRewrites map ────────────────────────────────────────────────
+
+describe('G4.unit  classRewrites built from buildStyleArtifact via parseNvFile', () => {
+  test('class-form key populates classRewrites', () => {
+    const source = `
+const C = $component(() => {
+  $style({ card: 'color: red' })
+  $render(() => html\`<div></div>\`)
+})`
+    const results = parseNvFile(source, 'c.nv', sharedDoc)
+    const ir = results[0]?.ir
+    expect(ir?.classRewrites).toBeDefined()
+    const hash = ir?.styleArtifact?.scopeHash
+    expect(ir?.classRewrites?.get('card')).toBe(`card_${hash}`)
+  })
+
+  test('selector-form key does NOT populate classRewrites', () => {
+    const source = `
+const C = $component(() => {
+  $style({ button: 'padding: 0' })
+  $render(() => html\`<div></div>\`)
+})`
+    const results = parseNvFile(source, 'c.nv', sharedDoc)
+    const ir = results[0]?.ir
+    expect(ir?.classRewrites?.size ?? 0).toBe(0)
+  })
+})

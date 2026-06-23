@@ -496,3 +496,115 @@ test('G3.7: wireStyleVar owner cleanup — effect torn down on dispose, no updat
   }, VAR_NAME)
   expect(result.ok, result.findings.join('\n')).toBe(true)
 })
+
+const CL_HASH = 'cl42hash'
+
+test('G4.1: classlist toggle uses rewritten class name', async ({ page }) => {
+  await loadNv(page)
+  const result = await page.evaluate((hash) => {
+    const { signal, flushSync, mount } = window.__nv
+    const show = signal(true)
+    const rewClass = `card_${hash}`
+    const ir = {
+      id: `g41-${hash}`,
+      shape: { html: '<div></div>', bindingPaths: [[0]] },
+      bindings: [
+        {
+          kind: 'classlist' as const,
+          pathIndex: 0,
+          entries: [{ kind: 'toggle' as const, key: rewClass, expr: () => show() }],
+        },
+      ],
+      styleArtifact: { staticCss: `.${rewClass} { color: rgb(255,0,0) }`, scopeHash: hash },
+      classRewrites: new Map([['card', rewClass]]),
+    }
+    const parent = document.createElement('div')
+    document.body.appendChild(parent)
+    mount(ir, parent, document)
+    flushSync()
+    const el = parent.querySelector('div') as HTMLElement
+    const findings: string[] = []
+    if (!el.classList.contains(rewClass)) findings.push(`missing class ${rewClass}`)
+    if (el.classList.contains('card')) findings.push('has unrewritten class card')
+    show.set(false)
+    flushSync()
+    if (el.classList.contains(rewClass))
+      findings.push(`class ${rewClass} still present after toggle off`)
+    parent.remove()
+    return { ok: findings.length === 0, findings }
+  }, CL_HASH)
+  expect(result.ok, result.findings.join('\n')).toBe(true)
+})
+
+test('G4.2: styled when toggled on — scoped CSS applies', async ({ page }) => {
+  await loadNv(page)
+  const result = await page.evaluate((hash) => {
+    const { signal, flushSync, mount } = window.__nv
+    const show = signal(true)
+    const rewClass = `card_${hash}`
+    const ir = {
+      id: `g42-${hash}`,
+      shape: { html: '<div></div>', bindingPaths: [[0]] },
+      bindings: [
+        {
+          kind: 'classlist' as const,
+          pathIndex: 0,
+          entries: [{ kind: 'toggle' as const, key: rewClass, expr: () => show() }],
+        },
+      ],
+      styleArtifact: { staticCss: `.${rewClass} { color: rgb(255, 0, 0) }`, scopeHash: hash },
+      classRewrites: new Map([['card', rewClass]]),
+    }
+    const parent = document.createElement('div')
+    document.body.appendChild(parent)
+    mount(ir, parent, document)
+    flushSync()
+    const el = parent.querySelector('div') as HTMLElement
+    const color = getComputedStyle(el).color
+    parent.remove()
+    return { color }
+  }, CL_HASH)
+  expect(result.color).toBe('rgb(255, 0, 0)')
+})
+
+test('G4.3: differential — both mount and emitMount produce rewritten class', async ({ page }) => {
+  await loadNv(page)
+  const result = await page.evaluate((hash) => {
+    const { signal, flushSync, mount, emitMount } = window.__nv
+    const rewClass = `card_${hash}`
+    const makeIr = (id: string) => ({
+      id,
+      shape: { html: '<div></div>', bindingPaths: [[0]] },
+      bindings: [
+        {
+          kind: 'classlist' as const,
+          pathIndex: 0,
+          entries: [{ kind: 'toggle' as const, key: rewClass, expr: () => true }],
+        },
+      ],
+      styleArtifact: { staticCss: `.${rewClass} { color: rgb(255, 0, 0) }`, scopeHash: hash },
+      classRewrites: new Map([['card', rewClass]]),
+    })
+    const pA = document.createElement('div')
+    const pB = document.createElement('div')
+    document.body.appendChild(pA)
+    document.body.appendChild(pB)
+    mount(makeIr(`g43a-${hash}`), pA, document)
+    emitMount(makeIr(`g43b-${hash}`)).mountFn(pB, document)
+    flushSync()
+    const elA = pA.querySelector('div') as HTMLElement
+    const elB = pB.querySelector('div') as HTMLElement
+    const findings: string[] = []
+    if (!elA.classList.contains(rewClass)) findings.push(`mount: missing ${rewClass}`)
+    if (elA.classList.contains('card')) findings.push('mount: has unrewritten card')
+    if (!elB.classList.contains(rewClass)) findings.push(`emitMount: missing ${rewClass}`)
+    if (elB.classList.contains('card')) findings.push('emitMount: has unrewritten card')
+    const colorA = getComputedStyle(elA).color
+    const colorB = getComputedStyle(elB).color
+    if (colorA !== colorB) findings.push(`color mismatch: ${colorA} vs ${colorB}`)
+    pA.remove()
+    pB.remove()
+    return { ok: findings.length === 0, findings }
+  }, CL_HASH)
+  expect(result.ok, result.findings.join('\n')).toBe(true)
+})

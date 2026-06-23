@@ -85,6 +85,7 @@ export type TemplateIR = {
     scopeHash: string
     varBindingDescs?: ReadonlyArray<{ varName: string; exprSrc: string; propertyName: string }>
   }
+  classRewrites?: ReadonlyMap<string, string>
 }
 
 // ── Bindings ──────────────────────────────────────────────────────────────────
