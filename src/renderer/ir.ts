@@ -259,9 +259,10 @@ export type ClassListBinding = BaseBinding & {
   entries: readonly ClassListEntry[]
 }
 
-// ── StyleVarBinding (v0.4.2 — Phase 3 stub) ──────────────────────────────────
+// ── StyleVarBinding (v0.4.2) ─────────────────────────────────────────────────
 
-// Reactive CSS custom property binding. Phase 2: exhaustiveness stub. Phase 3: wires setProperty.
+// Reactive CSS custom property binding. expr() written via el.style.setProperty;
+// null/undefined → removeProperty. Wired in interpreter (wireStyleVar) + emitted-mount.
 export type StyleVarBinding = BaseBinding & {
   kind: 'style-var'
   /** CSS custom property name, e.g. '--nv-1a2b3c4d' */
