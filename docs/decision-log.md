@@ -179,6 +179,14 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4.1**._
   `ListBinding` (`buildNvSlotContentIR` ignores returned `lists`).
 - **D-each-5:** `signal()` imported in `nv-emitter.ts` for stub-IR extraction in
   the list emit case (plan-mandated, couples emitter to core at runtime).
+- **R-style-1 — OPEN research: `<style>` fallback performance at the compiler level.**
+  S1+S2 injection uses `adoptedStyleSheets`-first with graceful `<style>` fallback (OPEN-5,
+  architect-ruled 2026-06-23). The fallback path appends a `<style>` element at mount time,
+  which triggers a style recalc per component identity. **Research question:** can the nv
+  compiler pre-compute and batch stylesheet text at build time (AOT), so the fallback path at
+  mount does a single bulk inject rather than per-component appends? Relevant when
+  `adoptedStyleSheets` is unavailable (jsdom, older Safari, SSR). Not blocking S1+S2
+  (fallback is correct today; this is a performance question for the compiler workstream).
 - **D-cl-3 — CLOSED 2026-06-22 (merge `6baa64e`).** `.nv` classlist key unquoting fixed via
   `propertyKeyText` helper at all four sites; quote-inclusion + whitespace mis-split + numeric
   latent bug all resolved. `.nv`-FE-only (tagged-template paths were always immune).

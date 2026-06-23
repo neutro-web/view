@@ -137,15 +137,38 @@
 
 **Resolution trigger:** Phase 2 implementation. CC uses (a).
 
-### OPEN-5 — `<style>` vs `adoptedStyleSheets` (browser-gated)
+### OPEN-5 — `<style>` vs `adoptedStyleSheets` — **RULED: `adoptedStyleSheets`-first with graceful `<style>` fallback**
 
-**Options:**
-- (a) `doc.head.appendChild(styleEl)` — universal baseline; works everywhere
-- (b) `doc.adoptedStyleSheets.push(sheet)` — constructable stylesheets; better perf for many components; Chrome 73+, Firefox 101+, Safari 16.4+
+**Ruling (architect, 2026-06-23):** attempt `adoptedStyleSheets` first; fall back gracefully to `<style>` injection when not supported.
 
-**Recommendation:** (a) as the Phase 2 baseline. Report browser compat from the Phase 2 gate. `adoptedStyleSheets` is an optimization that can be added in a follow-on without changing the injection contract (the `StyleRegistry` shape abstracts the insertion mechanism).
+**Implementation in `style-inject.ts`:**
+```ts
+function injectComponentStyle(doc: Document, identityHash: string, cssText: string): void {
+  // Already injected for this doc?
+  const registry = getOrCreateRegistry(doc)
+  if (registry.has(identityHash)) return
 
-**Resolution trigger:** Phase 2 browser gate. CC uses (a); architect may approve (b) as a follow-on.
+  if (typeof doc.adoptedStyleSheets !== 'undefined') {
+    // adoptedStyleSheets path — Chrome 73+, Safari 16.4+, Firefox 101+
+    const sheet = new CSSStyleSheet()
+    sheet.replaceSync(cssText)
+    doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, sheet]
+    registry.set(identityHash, { kind: 'adopted', sheet })
+  } else {
+    // Graceful fallback — <style> element
+    const styleEl = doc.createElement('style')
+    styleEl.textContent = cssText
+    doc.head.appendChild(styleEl)
+    registry.set(identityHash, { kind: 'style-el', el: styleEl })
+  }
+}
+```
+
+The `StyleRegistry` value is a discriminated union `{ kind: 'adopted', sheet } | { kind: 'style-el', el }` so teardown (if ever implemented) can remove correctly from either mechanism.
+
+**jsdom note:** jsdom does not implement `adoptedStyleSheets` — tests that run under `pnpm test` (vitest/jsdom) will take the `<style>` fallback path automatically. Browser gate (`pnpm test:browser`, Playwright/Chromium) takes the `adoptedStyleSheets` path. Both code paths are exercised by the two-tier test suite.
+
+**Follow-up research (non-blocking, logged separately):** how to make the `<style>` fallback performant at the nv compiler level — e.g. pre-computing and batching stylesheet text at build time rather than at mount, so the fallback path approaches the `adoptedStyleSheets` path in hot-mount scenarios. Tracked as `R-style-1` in the decision log.
 
 ### OPEN-6 — Teardown policy
 
