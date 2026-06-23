@@ -37,9 +37,11 @@ import type {
   AttrBinding,
   Binding,
   ChildBinding,
+  ClassListBinding,
   ComponentBinding,
   ConditionalBinding,
   EventBinding,
+  ListBinding,
   PropBinding,
   TemplateIR,
   TextBinding,
@@ -1322,6 +1324,59 @@ describe('TC-slot-warning: slot content in component element', () => {
     const ir = results[0]!.ir
     expect(ir.shape.html).not.toContain('Counter')
     expect(ir.shape.html).toContain('<!--nv-comp-')
+  })
+})
+
+describe('G1: classlist token in slot content carries parent scopeHash', () => {
+  it('G1: classlist toggle token in slot content carries parent scopeHash', () => {
+    const src = `
+      const Parent = $component((_props) => {
+        $style({ card: { color: 'red' } })
+        $render(() => html\`<ChildComp><div class="\${{card: true}}">x</div></ChildComp>\`)
+      })
+    `
+    const results = parseNvFile(src, 'test.nv', document)
+    const parent = results.find((r) => r.name === 'Parent')!
+    const childComp = parent.ir.bindings.find((b) => b.kind === 'component') as ComponentBinding
+    const slotIR = childComp.slots[0]!.content({})
+    const cl = slotIR.bindings.find((b) => b.kind === 'classlist') as ClassListBinding
+    const toggle = cl.entries.find((e) => e.kind === 'toggle')!
+    const expectedHash = parent.ir.styleArtifact!.scopeHash
+    expect(toggle.key).toBe(`card_${expectedHash}`)
+  })
+})
+
+// G5 SKIPPED: <each> inside slot content is not yet supported at parse time.
+// The slot content builder (buildNvSlotContentIR) calls walkNvNodeList but intentionally
+// ignores the `lists` return — so <each> elements inside slots throw a parse error.
+// G5 would require wiring `lists` into slot IR first (a separate fix).
+describe.skip('G5: classlist token in <each>-inside-slot carries parent scopeHash', () => {
+  it('G5: classlist token in <each>-inside-slot carries parent scopeHash', () => {
+    const items = signal<unknown[]>([])
+    const src = `
+      const Parent = $component((_props) => {
+        $style({ card: { color: 'red' } })
+        $render(() => html\`
+          <ChildComp>
+            <each .of=\${items} key="\${(item) => item}" let={item}>
+              <div class="\${{card: true}}">\${item}</div>
+            </each>
+          </ChildComp>
+        \`)
+      })
+    `
+    const results = parseNvFile(src, 'test.nv', document)
+    const parent = results.find((r) => r.name === 'Parent')!
+    const childComp = parent.ir.bindings.find((b) => b.kind === 'component') as ComponentBinding
+    const slotIR = childComp.slots[0]!.content({})
+    const listBinding = slotIR.bindings.find((b) => b.kind === 'list') as ListBinding
+    const stubVs = signal<unknown>(null)
+    const stubIs = signal<number>(0)
+    const itemIR = listBinding.itemTemplate(stubVs, stubIs)
+    const cl = itemIR.bindings.find((b) => b.kind === 'classlist') as ClassListBinding
+    const toggle = cl.entries.find((e) => e.kind === 'toggle')!
+    const expectedHash = parent.ir.styleArtifact!.scopeHash
+    expect(toggle.key).toBe(`card_${expectedHash}`)
   })
 })
 

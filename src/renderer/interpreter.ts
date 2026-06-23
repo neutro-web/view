@@ -708,7 +708,7 @@ export function mount(ir: TemplateIR, parent: Element, doc: Document): () => voi
         throw new Error('[nv/interpreter] $style on multi-root template is not supported')
       }
       if (ir.styleArtifact.staticCss) {
-        injectComponentStyle(doc, ir.id, ir.styleArtifact.staticCss)
+        injectComponentStyle(doc, ir.styleArtifact.scopeHash, ir.styleArtifact.staticCss)
       }
       const scopeAttr = `data-nv-s-${ir.styleArtifact.scopeHash}`
       const root = roots[0]

@@ -1889,12 +1889,34 @@ export function patchClasslistTokens(ir: TemplateIR, classRewrites: Map<string, 
       if (binding.alternate) patchClasslistTokens(binding.alternate, classRewrites)
     }
     if (binding.kind === 'list') {
+      // NOTE: patches stub-call return; sticks only while itemTemplate returns same IR by ref.
+      // Fresh-IR itemTemplate would break this silently. Same latent fragility as 'component' below.
       // Call the factory once with stub signals to get the item bodyIR, then recurse.
       // Stubs are inert: the interp stub is () => wl.bodyIR (pure); emit stub is equally pure.
       const stubVs = signal<unknown>(null)
       const stubIs = signal<number>(0)
       const itemIR = binding.itemTemplate(stubVs, stubIs)
       patchClasslistTokens(itemIR, classRewrites)
+    }
+    // NEW: component case — mirrors list; slot content is the structurally identical missing case.
+    if (binding.kind === 'component') {
+      const stubSlotProps = {}
+      for (const slot of (binding as ComponentBinding).slots) {
+        // NOTE: safe only while .nv slot factories return the same captured-by-ref IR object
+        // (true for `(_props) => namedIR` closures built by buildNvSlotContentIR today).
+        // The scoped-slot shape (props) => TemplateIR permits fresh-IR-per-call; that would
+        // break this patch silently. Same latent fragility as the 'list' case above. (G2)
+        const slotIR = slot.content(stubSlotProps)
+        // Rewrite static class attr tokens in the slot's shape HTML
+        if (slotIR.shape.html.includes('class=')) {
+          ;(slotIR.shape as { html: string }).html = slotIR.shape.html.replace(
+            /\bclass="([^"]*)"/g,
+            (_, cls: string) =>
+              `class="${cls.replace(/\b([\w-]+)\b/g, (tok) => classRewrites.get(tok) ?? tok)}"`,
+          )
+        }
+        patchClasslistTokens(slotIR, classRewrites)
+      }
     }
   }
 }
