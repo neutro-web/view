@@ -1880,11 +1880,17 @@ export function parseNvFile(source: string, fileName: string, doc: Document): Nv
       const symbols = extractScriptSymbols(componentFn)
       const renderResult = extractRenderTemplate(componentFn, doc, symbols)
       if (renderResult === null) continue
+      const styleInfo = extractStyleInfo(componentFn, symbols)
+      const scopeHash = simpleHash(renderResult.ir.id)
+      if (styleInfo !== null) {
+        const artifact = buildStyleArtifact(styleInfo, scopeHash)
+        renderResult.ir.styleArtifact = { ...artifact, scopeHash }
+      }
       results.push({
         name,
         ir: renderResult.ir,
         scriptSignals: [...symbols.writable, ...symbols.readonly],
-        style: extractStyleInfo(componentFn, symbols),
+        style: styleInfo,
         verdicts: renderResult.verdicts,
         diagnostics: [...diagnostics, ...renderResult.diagnostics],
       })
@@ -2772,11 +2778,17 @@ export function parseNvFileForEmit(
 
       const allDiagnostics = [...diagnostics, ...emitDiagnostics, ...renderResult.diagnostics]
 
+      const styleInfo = extractStyleInfo(componentFn, symbols)
+      const scopeHash = simpleHash(renderResult.ir.id)
+      if (styleInfo !== null) {
+        const artifact = buildStyleArtifact(styleInfo, scopeHash)
+        renderResult.ir.styleArtifact = { ...artifact, scopeHash }
+      }
       results.push({
         name,
         ir: renderResult.ir,
         scriptSignals: [...symbols.writable, ...symbols.readonly],
-        style: extractStyleInfo(componentFn, symbols),
+        style: styleInfo,
         verdicts: renderResult.verdicts,
         diagnostics: allDiagnostics,
         emit: {
