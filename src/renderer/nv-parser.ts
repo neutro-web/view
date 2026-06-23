@@ -1901,6 +1901,12 @@ export function patchClasslistTokens(ir: TemplateIR, classRewrites: Map<string, 
     // NEW: component case — same pattern as list (stub-call + recurse). Diverges from list in one
     // way: also rewrites static class attrs in slotIR.shape.html (slot content may carry literal
     // class="card" strings, not only classlist bindings; list-item bodies don't have this).
+    // KNOWN LIMITATION: a ComponentBinding is only produced when the slot content contains at
+    // least one interpolation hole (the parser requires a hole to detect the component boundary).
+    // Purely static slot content (<ChildComp><div class="card">x</div></ChildComp> with no holes)
+    // produces no bindings and is therefore not reached here — the static class remains unrewritten.
+    // This is a pre-existing parser constraint, not a regression. The mixed case (static class +
+    // any hole) works correctly: the hole triggers component detection and the regex branch fires.
     if (binding.kind === 'component') {
       const stubSlotProps = {}
       for (const slot of (binding as ComponentBinding).slots) {

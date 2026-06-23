@@ -285,6 +285,36 @@ describe('G4: parse-path IR and emit-path agree on slot-content classlist tokens
   })
 })
 
+// ── Static-class regex branch coverage ───────────────────────────────────────
+// The component case in patchClasslistTokens has two rewrite paths:
+//   (a) classlist binding keys — exercised by G1/G3/G4 tests above
+//   (b) slotIR.shape.html regex rewrite — exercised here (requires a hole to trigger
+//       component detection; purely static slot content is a known parser limitation)
+
+describe('Static-class-in-slot: literal class attr rewritten via shape.html regex', () => {
+  it('static class + text hole in slot content: literal class attr carries parent scopeHash', () => {
+    // A text hole (${1+1}) forces the parser to detect <ChildComp> as a ComponentBinding.
+    // Once detected, the shape.html regex rewrites the literal class="card extra" string.
+    // "extra" is not in classRewrites → passes through unchanged.
+    const src = `const P = $component((_props) => {
+      $style({ card: { color: 'red' } })
+      $render(() => html\`<ChildComp><div class="card extra">\${1 + 1}</div></ChildComp>\`)
+    })`
+    const r = parseNvFile(src, 'test.nv', new JSDOM('').window.document)[0]!
+    const scopeHash = r.ir.styleArtifact?.scopeHash
+    expect(scopeHash).toBeDefined()
+    const compBinding = r.ir.bindings.find((b) => b.kind === 'component') as ComponentBinding
+    expect(compBinding).toBeDefined()
+    const slotIR = compBinding.slots[0]?.content({})
+    expect(slotIR).toBeDefined()
+    // The static class token "card" must be rewritten; "extra" (not a $style key) unchanged
+    expect(slotIR!.shape.html).toContain(`card_${scopeHash}`)
+    expect(slotIR!.shape.html).toContain('extra')
+    expect(slotIR!.shape.html).not.toContain('"card ')
+    expect(slotIR!.shape.html).not.toContain(' card"')
+  })
+})
+
 // ── G5 — <each>-in-slot class token (deferred) ───────────────────────────────
 
 describe('G5: <each>-in-slot class token (deferred)', () => {
