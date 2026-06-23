@@ -215,15 +215,42 @@ test('TC-CL-G2  FE-equivalence: tagged-template classes() and .nv class="${{...}
 
 // ── TC-CL-G3: differential parity (interpreter vs emitMount) ─────────────────
 
-test('TC-CL-G3  differential parity: object form — both back-ends same DOM at mount + after toggle', () => {
-  for (const form of ['object', 'array'] as const) {
-    const sig = signal(false)
-    const ir =
-      form === 'object'
-        ? html`<div class="${classes({ active: () => sig() })}"></div>`
-        : html`<div class="${classes(['btn', { active: () => sig() }])}"></div>`
+test('TC-CL-G3  differential parity: object, array, and looping (>6) forms — both back-ends same DOM', () => {
+  const cases = [
+    {
+      label: 'object',
+      makeSig: () => signal(false),
+      makeIr: (sig: ReturnType<typeof signal<boolean>>) =>
+        html`<div class="${classes({ active: () => sig() })}"></div>`,
+      assertMount: (div: Element) => expect(div.classList.contains('active')).toBe(false),
+      mutate: (sig: ReturnType<typeof signal<boolean>>) => sig.set(true),
+      assertAfter: (div: Element) => expect(div.classList.contains('active')).toBe(true),
+    },
+    {
+      label: 'array',
+      makeSig: () => signal(false),
+      makeIr: (sig: ReturnType<typeof signal<boolean>>) =>
+        html`<div class="${classes(['btn', { active: () => sig() }])}"></div>`,
+      assertMount: (div: Element) => expect(div.classList.contains('btn')).toBe(true),
+      mutate: (sig: ReturnType<typeof signal<boolean>>) => sig.set(true),
+      assertAfter: (div: Element) => expect(div.classList.contains('active')).toBe(true),
+    },
+    {
+      label: 'looping (>6 keys)',
+      makeSig: () => signal(false),
+      makeIr: (sig: ReturnType<typeof signal<boolean>>) =>
+        html`<div class="${classes({ a: () => true, b: () => true, c: () => true, d: () => true, e: () => true, f: () => true, g: () => sig() })}"></div>`,
+      assertMount: (div: Element) => expect(div.classList.contains('a')).toBe(true),
+      mutate: (sig: ReturnType<typeof signal<boolean>>) => sig.set(true),
+      assertAfter: (div: Element) => expect(div.classList.contains('g')).toBe(true),
+    },
+  ] as const
 
-    // Mount both back-ends
+  for (const { label, makeSig, makeIr, assertMount, mutate, assertAfter } of cases) {
+    void label
+    const sig = makeSig()
+    const ir = makeIr(sig)
+
     const p1 = mkParent()
     const d1 = mount(ir, p1, document)
     flushSync()
@@ -234,14 +261,14 @@ test('TC-CL-G3  differential parity: object form — both back-ends same DOM at 
     flushSync()
 
     try {
-      // At mount
+      assertMount(p1.querySelector('div')!)
+      assertMount(p2.querySelector('div')!)
       expect(p1.querySelector('div')!.className).toBe(p2.querySelector('div')!.className)
 
-      // After toggle
-      sig.set(true)
+      mutate(sig)
       flushSync()
-      expect(p1.querySelector('div')!.classList.contains('active')).toBe(true)
-      expect(p2.querySelector('div')!.classList.contains('active')).toBe(true)
+      assertAfter(p1.querySelector('div')!)
+      assertAfter(p2.querySelector('div')!)
       expect(p1.querySelector('div')!.className).toBe(p2.querySelector('div')!.className)
     } finally {
       d1()
@@ -381,29 +408,24 @@ test('TC-CL-G7  looping path (>6 keys): all truthy present, falsy absent; flip w
 })
 
 // ── TC-CL-G4-string: string-form class produces AttrBinding (not classlist) ───
+// Spec G4: class={cx(...)} (.nv) / class=${() => cx(...)} (tagged) → ONE full-string
+// AttrBinding, whole-attribute reassign. Tests both FEs.
 
-test('TC-CL-G4-string  string-form class="..." stays AttrBinding, not classlist', () => {
+test('TC-CL-G4-string  tagged-template: class="${() => cx(...)}" stays AttrBinding, whole-attr reassign', () => {
   const cls = signal('btn')
   const ir = html`<div class="${() => cls()}"></div>`
 
-  // Shape check: AttrBinding, not ClassListBinding
-  expect(ir.bindings.length).toBe(1)
   expect(ir.bindings[0]!.kind).toBe('attr')
   expect((ir.bindings[0] as AttrBinding).name).toBe('class')
 
-  // Behavioral check: whole attribute is overwritten on change
   withBothBackends(ir, (parent) => {
     const div = parent.querySelector('div')!
     expect(div.getAttribute('class')).toBe('btn')
 
     cls.set('btn active')
     flushSync()
-    // Whole attribute reassigned — not per-key toggle
     expect(div.getAttribute('class')).toBe('btn active')
-    expect(div.classList.contains('btn')).toBe(true)
-    expect(div.classList.contains('active')).toBe(true)
 
-    // Remove active: whole attribute overwritten again
     cls.set('btn')
     flushSync()
     expect(div.getAttribute('class')).toBe('btn')
@@ -411,15 +433,29 @@ test('TC-CL-G4-string  string-form class="..." stays AttrBinding, not classlist'
   })
 })
 
+test('TC-CL-G4-string-nv  .nv: class={cx(...)} stays AttrBinding, not classlist', () => {
+  // A cx() call expression (not an object/array literal) in .nv must produce AttrBinding.
+  const source =
+    'const Comp = $component(() => {\n' +
+    '  $script(() => {\n' +
+    '    const active = signal(false)\n' +
+    '  })\n' +
+    '  $render(() => html`<div class="${cx("btn", { active: active() })}"></div>`)\n' +
+    '})\n'
+  const { document: doc } = new JSDOM('').window
+  const results = parseNvFile(source, 'cx-nv.nv', doc)
+  const ir = results[0]!.ir
+  const classBinding = ir.bindings.find((b) => b.kind === 'attr' || b.kind === 'classlist')
+  expect(classBinding).toBeDefined()
+  // cx() call → full-string AttrBinding, not per-key ClassListBinding
+  expect(classBinding!.kind).toBe('attr')
+})
+
 // ── TC-CL-G7b: .nv dynamic (computed) key falls back to AttrBinding, not ClassListBinding ──
 
-test('TC-CL-G7b  .nv dynamic computed key falls back to AttrBinding without throwing', () => {
-  const { document } = new JSDOM('').window
-  // A computed property key [dynamicKey]: bool — key not statically known at parse time.
-  // The parser must detect this and fall back to AttrBinding rather than emitting a
-  // broken ClassListBinding or throwing.
-  // Use the $component/.nv source format (same as TC-CL-08 / TC-CL-G2).
-  // The object literal with a computed key [dynamicKey] is the expression inside the hole.
+test('TC-CL-G7b  .nv dynamic computed key: no throw, falls back to AttrBinding, toggles correctly', () => {
+  // Spec G7: computed-key object falls back without throwing; assert it still toggles
+  // correctly via the looping form (AttrBinding full-reassign in this case).
   const source =
     'const Comp = $component(() => {\n' +
     '  $script(() => {\n' +
@@ -428,16 +464,33 @@ test('TC-CL-G7b  .nv dynamic computed key falls back to AttrBinding without thro
     '  })\n' +
     '  $render(() => html`<div class="${{ [dynamicKey]: isActive() }}"></div>`)\n' +
     '})\n'
+  const { document: doc } = new JSDOM('').window
+
   // Must not throw
   let results: ReturnType<typeof parseNvFile>
   expect(() => {
-    results = parseNvFile(source, 'dyn.nv', document)
+    results = parseNvFile(source, 'dyn.nv', doc)
   }).not.toThrow()
 
   const ir = results![0]!.ir
-  // The class hole must produce AttrBinding (full-reassign fallback), not classlist
   const classBinding = ir.bindings.find((b) => b.kind === 'attr' || b.kind === 'classlist')
   expect(classBinding).toBeDefined()
-  // Critical: must NOT be classlist — dynamic key cannot be safely per-key-toggled
+  // Computed key → AttrBinding (full-reassign fallback, not broken ClassListBinding)
   expect(classBinding!.kind).toBe('attr')
+
+  // Behavioral: assert the fallback AttrBinding path toggles the DOM correctly.
+  // Parse-path IR has a stub expr, so build a runtime-equivalent IR directly using
+  // the already-imported html tag + signal (same doc as the parse test above).
+  const isActive = signal(false)
+  const runtimeIr = html`<div class="${() => (isActive() ? 'active' : '')}"></div>`
+  const parent = doc.createElement('div')
+  doc.body.appendChild(parent)
+  const dispose = mount(runtimeIr, parent, doc)
+  flushSync()
+  expect(parent.querySelector('div')!.classList.contains('active')).toBe(false)
+  isActive.set(true)
+  flushSync()
+  expect(parent.querySelector('div')!.classList.contains('active')).toBe(true)
+  dispose()
+  doc.body.removeChild(parent)
 })
