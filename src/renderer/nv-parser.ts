@@ -154,6 +154,8 @@ export interface NvStyleInfo {
   form: 'object' | 'factory'
   keys: readonly string[]
   source: string
+  objExpr: ts.ObjectLiteralExpression
+  factory?: ts.ArrowFunction | ts.FunctionExpression
 }
 
 // ── Internal types ────────────────────────────────────────────────────────────
@@ -1239,7 +1241,10 @@ function propertyKeyText(name: ts.PropertyName): string | null {
   )
 }
 
-function extractStyleInfo(componentFn: ts.ArrowFunction): NvStyleInfo | null {
+function extractStyleInfo(
+  componentFn: ts.ArrowFunction,
+  symbols: ScriptSymbols,
+): NvStyleInfo | null {
   if (!ts.isBlock(componentFn.body)) return null
   for (const stmt of componentFn.body.statements) {
     if (!ts.isExpressionStatement(stmt)) continue
@@ -1255,27 +1260,37 @@ function extractStyleInfo(componentFn: ts.ArrowFunction): NvStyleInfo | null {
           ts.isIdentifier(p.name) ? p.name.text : ts.isStringLiteral(p.name) ? p.name.text : '',
         )
         .filter(Boolean)
-      return { form: 'object', keys, source: src }
+      return { form: 'object', keys, source: src, objExpr: arg }
     }
     if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) {
-      const fnBody = ts.isArrowFunction(arg) ? arg.body : arg.body
+      const fnBody = arg.body
       const objExpr = ts.isObjectLiteralExpression(fnBody)
         ? fnBody
         : ts.isParenthesizedExpression(fnBody) && ts.isObjectLiteralExpression(fnBody.expression)
           ? fnBody.expression
           : null
+      if (objExpr === null) return null
       const keys: string[] = []
-      if (objExpr !== null)
-        for (const p of objExpr.properties)
-          if (ts.isPropertyAssignment(p)) {
-            const k = ts.isIdentifier(p.name)
+      for (const p of objExpr.properties) {
+        if (ts.isPropertyAssignment(p)) {
+          const k = ts.isIdentifier(p.name)
+            ? p.name.text
+            : ts.isStringLiteral(p.name)
               ? p.name.text
-              : ts.isStringLiteral(p.name)
-                ? p.name.text
-                : ''
-            if (k) keys.push(k)
+              : ''
+          if (k) keys.push(k)
+        }
+      }
+      // Erase signal reads in factory property initializers
+      // (object form is static — no erasure needed)
+      if (symbols.all.size > 0) {
+        for (const p of objExpr.properties) {
+          if (ts.isPropertyAssignment(p)) {
+            eraseSignalReadsInNode(p.initializer, symbols.all)
           }
-      return { form: 'factory', keys, source: src }
+        }
+      }
+      return { form: 'factory', keys, source: src, objExpr, factory: arg }
     }
     return null
   }
@@ -1784,7 +1799,7 @@ export function parseNvFile(source: string, fileName: string, doc: Document): Nv
         name,
         ir: renderResult.ir,
         scriptSignals: [...symbols.writable, ...symbols.readonly],
-        style: extractStyleInfo(componentFn),
+        style: extractStyleInfo(componentFn, symbols),
         verdicts: renderResult.verdicts,
         diagnostics: [...diagnostics, ...renderResult.diagnostics],
       })
@@ -2684,7 +2699,7 @@ export function parseNvFileForEmit(
         name,
         ir: renderResult.ir,
         scriptSignals: [...symbols.writable, ...symbols.readonly],
-        style: extractStyleInfo(componentFn),
+        style: extractStyleInfo(componentFn, symbols),
         verdicts: renderResult.verdicts,
         diagnostics: allDiagnostics,
         emit: {
