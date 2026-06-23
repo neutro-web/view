@@ -145,6 +145,11 @@ _Last updated: 2026-06-23. Contract **v0.4.2** · Template-IR **v0.4.2**._
   case in existing `patchClasslistTokens` (post-walk; NOT a separate fn — collapse principle).
   Includes interpreter.ts L711 injection-key fix (ir.id → scopeHash). Gate P approved 2026-06-23
   (plan f96894e + merge redirect). CC implementing; HALT-then-land per per-phase gates.
+  G5 (`<each>`-in-slot) DEFERRED 2026-06-23 — out of scope; `<each>`-in-slot capability unwired
+  (L772 discard). Styling handles it for free once the capability lands. G5 test skipped w/ reason.
+- `<each>` in slot content — wire `lists` from `walkNvNodeList` into `buildNvSlotContentIR`
+  (collapse toward primary builder, not extend the second path). Re-enables skipped G5. Filed
+  2026-06-23, not scheduled.
 - SyncBinding (throws at both back-ends today).
 - LIS list move-minimization — CLOSED [2026-06-22], not commissioned (O(N) reconcile
   acceptable: N=1k sub-2ms, N=10k 17ms real-Chromium).
@@ -1622,3 +1627,46 @@ Tasks: (1) thread `shapeHtml` to L1988/L2899; (2) `component` case in `patchClas
 interpreter.ts L711 key fix. OPEN-S2 subsumed by the merged case; OPEN-S3 (reuse ir-equivalence)
 confirmed. reactive-core v0.4.2 untouched. Template-IR v0.4.2 (no bump). CC to re-commit the plan
 with the merge, then proceed to `src/` (no second approval round — strict simplification).
+
+### 2026-06-23 — `$style × slots` G5 DEFERRED; spec error corrected; `<each>`-in-slot increment filed
+
+CC flagged G5 (`$style × <each>-in-slot`) as ungateable. Verified on `main`: correct, and the
+spec was wrong to list it.
+
+**Seam fact (verified, nv-parser.ts L758–772).** `buildNvSlotContentIR` destructures
+`walkNvNodeList`'s return as `{ holeInfos, holePaths, components, consumed }` and **explicitly
+discards `lists`** (L772 comment: "lists is intentionally ignored in slot content builder").
+`<each>` inside slot content produces NO list binding in the slot IR. Therefore
+`patchClasslistTokens`' `list` case has nothing to descend into — G5 cannot pass, because the
+capability it gates (`<each>` in slot content) **is not wired on either path** and never was.
+
+**This is a pre-existing limitation, not a regression.** Already known and logged: the OPEN-7
+ruling justified the parent-IR `list` recursion precisely by citing "buildNvSlotContentIR
+discards nested lists (L772) — depth-1-only patch would silently miss `<each>`-in-`<each>`."
+G5 was unrunnable from the start.
+
+**Spec error corrected.** spec-style-slots-scope-carry.md §7 G5 and the Gate-P plan gate table
+listed G5 with no "deferred" annotation, implying `<each>`-in-slot was in scope for this
+increment. It never was — it's an unrelated core slot-rendering capability, not a styling feature.
+Listing it was the defect. Fix the annotation, not the scope.
+
+**RULING: defer G5; do NOT wire `<each>`-in-slot in this increment.** Wiring it here would
+(a) import an unrelated core capability into a styling increment (boundary violation),
+(b) re-derive list-binding construction inside `buildNvSlotContentIR` — the parallel second
+builder the slot subsystem was bitten by 4× (collapse, don't extend the second path), under
+increment time pressure, and (c) require its own both-back-end differential + emit-path nested-
+`ThunkSource` handling. Rejected wiring-now (scope creep) and wire-now-as-separate-commit
+(same second-path risk, just relabeled).
+
+**`$style` styling work is complete and correct.** When the `<each>`-in-slot capability is built,
+`patchClasslistTokens`' existing `list` case rewrites `$style × <each>-in-slot` tokens for free —
+no additional styling work. The styling waits on the capability; it does not block it.
+
+**Filed: new backlog increment "`<each>` in slot content".** Wire `lists` from `walkNvNodeList`
+into `buildNvSlotContentIR` by collapsing toward the primary builder (NOT extending the second
+path). Owns: both-back-end differential, emit-path nested-list `ThunkSource`, and re-enabling the
+skipped G5 test as its acceptance gate. Not scheduled.
+
+Task 2 (`$style × slots`) is otherwise complete pending the remaining gates (G1–G4, G3', G6, G7).
+G5 test stays written-and-skipped with the deferral reason in the skip message, pointing at the
+`<each>`-in-slot increment. reactive-core v0.4.2 untouched. Template-IR v0.4.2 (no bump).
