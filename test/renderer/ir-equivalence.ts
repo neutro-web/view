@@ -155,6 +155,8 @@ function bindingEqual(a: Binding, b: Binding, i: number, aIr: TemplateIR, bIr: T
       break
     }
     case 'style-var': {
+      if (b.kind !== 'style-var')
+        return { equal: false, reason: `${p}.kind: ${a.kind} vs ${b.kind}` }
       const bsv = b as StyleVarBinding
       if (a.varName !== bsv.varName)
         return { equal: false, reason: `${p}.varName: ${a.varName} vs ${bsv.varName}` }

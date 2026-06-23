@@ -704,6 +704,9 @@ export function mount(ir: TemplateIR, parent: Element, doc: Document): () => voi
   return createRoot((dispose) => {
     const { roots } = mountFragment(ir, parent, doc)
     if (ir.styleArtifact) {
+      if (roots.length > 1) {
+        throw new Error('[nv/interpreter] $style on multi-root template is not supported')
+      }
       injectComponentStyle(doc, ir.id, ir.styleArtifact.staticCss)
       const scopeAttr = `data-nv-s-${ir.styleArtifact.scopeHash}`
       const root = roots[0]

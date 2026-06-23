@@ -623,6 +623,8 @@ function emitSetup(
         wireSpecs.push({
           accessor,
           wire(targetNode) {
+            if (!(targetNode instanceof Element))
+              throw new Error('[nv/emitted-mount] style-var binding requires an Element node')
             const el = targetNode as HTMLElement
             effect(() => {
               const v = expr()
@@ -697,6 +699,9 @@ export function emitMount(
     return createRoot((dispose) => {
       const { roots } = setup(parent, doc, null)
       if (ir.styleArtifact) {
+        if (roots.length > 1) {
+          throw new Error('[nv/emitted-mount] $style on multi-root template is not supported')
+        }
         injectComponentStyle(doc, ir.id, ir.styleArtifact.staticCss)
         const scopeAttr = `data-nv-s-${ir.styleArtifact.scopeHash}`
         const root = roots[0]

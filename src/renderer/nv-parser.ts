@@ -1777,10 +1777,7 @@ function buildStyleArtifact(
         }
       }
       if (declPairs.length === 0) continue
-      const declarationBlock =
-        declPairs.length === 1 && declPairs[0]?.[0] === ''
-          ? (declPairs[0]?.[1] ?? '')
-          : declPairs.map(([prop, val]) => `${prop}: ${val}`).join('; ')
+      const declarationBlock = declPairs.map(([prop, val]) => `${prop}: ${val}`).join('; ')
       if (classify.form === 'class') {
         for (const token of classify.tokens) {
           classRewrites.set(token, `${token}_${scopeHash}`)
@@ -1806,6 +1803,37 @@ function buildStyleArtifact(
   return { staticCss: rules.join('\n'), varBindingDescs, classRewrites }
 }
 
+/** Count top-level element children in a raw HTML string (no wrapping element). */
+function countTopLevelElements(html: string): number {
+  let depth = 0
+  let count = 0
+  let i = 0
+  while (i < html.length) {
+    if (html[i] === '<') {
+      if (html[i + 1] === '/') {
+        // closing tag
+        const end = html.indexOf('>', i)
+        depth--
+        i = end + 1
+      } else if (html[i + 1] === '!') {
+        // comment or doctype — skip
+        const end = html.indexOf('>', i)
+        i = end + 1
+      } else {
+        // opening tag
+        const end = html.indexOf('>', i)
+        const tagText = html.slice(i, end + 1)
+        if (depth === 0) count++
+        if (!tagText.endsWith('/>')) depth++
+        i = end + 1
+      }
+    } else {
+      i++
+    }
+  }
+  return count
+}
+
 // Inject StyleVarBinding entries into a mutable TemplateIR for each VarBindingDesc.
 // pathIndex for ALL style-var bindings points to the first root element ([0]).
 // bindingThunks: if provided (emit path), push a 'style-var' ThunkSource per desc.
@@ -1814,6 +1842,11 @@ function applyVarBindingsToIr(
   descs: VarBindingDesc[],
   bindingThunks?: ThunkSource[],
 ): void {
+  if (descs.length > 0 && countTopLevelElements(ir.shape.html) > 1) {
+    throw new Error(
+      '[nv/parser] $style with dynamic values on a multi-root template is not supported',
+    )
+  }
   const mutablePaths = ir.shape.bindingPaths as NodePath[]
   const mutableBindings = ir.bindings as StyleVarBinding[]
 
