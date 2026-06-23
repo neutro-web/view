@@ -141,8 +141,10 @@ _Last updated: 2026-06-23. Contract **v0.4.2** · Template-IR **v0.4.2**._
   `component` case → class-form tokens in slot content are un-rewritten on both paths
   (parse captures slot IR before patch; emit emits source strings, no IR to patch).
   Semantic = scope-by-lexical-author (parent-wins). See spec-style-slots-scope-carry.md.
-  Mechanism: B3 (scopeHash = simpleHash(shapeHtml), ir.id untouched) — OPEN-S1 resolved
-  2026-06-23. OPEN-S2/S3 confirmed. CC completing Gate-P plan.
+  Mechanism: B3 (scopeHash = simpleHash(shapeHtml); ir.id untouched). Rewrite via NEW `component`
+  case in existing `patchClasslistTokens` (post-walk; NOT a separate fn — collapse principle).
+  Includes interpreter.ts L711 injection-key fix (ir.id → scopeHash). Gate P approved 2026-06-23
+  (plan f96894e + merge redirect). CC implementing; HALT-then-land per per-phase gates.
 - SyncBinding (throws at both back-ends today).
 - LIS list move-minimization — CLOSED [2026-06-22], not commissioned (O(N) reconcile
   acceptable: N=1k sub-2ms, N=10k 17ms real-Chromium).
@@ -1583,3 +1585,40 @@ is intended to merge identical styles).**
 OPEN-S2 (single insertion in `buildNvSlotContentIR`) and OPEN-S3 (reuse `ir-equivalence` harness)
 CONFIRMED as proposed. reactive-core v0.4.2 untouched. Template-IR v0.4.2 (no bump). CC unblocked
 to complete the Gate-P plan with B3 as the mechanism and resume per the plan-first gate.
+
+### 2026-06-23 — `$style × slots` Gate P APPROVED; B3 shape corrected; injection-key bug found
+
+Plan committed `f96894e`, reviewed against seams on `main`. Approved with one required change.
+Cites the OPEN-S1/B3 ruling (same date) and the scope-carry rulings (same date).
+
+**CC correction accepted (my spec §4 was wrong).** B3 fixed the *scopeHash* circularity via
+pre-walk `shapeHtml`, but `styleInfo` (→ `classRewrites`) is extracted POST-walk at nv-parser.ts
+L1987, AFTER `buildNvSlotContentIR` (L558/649/669) has already run. So `classRewrites` cannot be
+threaded INTO the slot builder during the walk — my spec §4 instruction to do so was impossible.
+The rewrite must be a POST-walk IR patch. Confirmed on `main`.
+
+**Required architectural change (collapse, don't patch).** CC proposed a NEW
+`patchSlotContentTokens` function. REDIRECTED: add a `component` case to the EXISTING
+`patchClasslistTokens` (L1870) instead. That function is already the recursive post-walk
+token-rewrite walk with `conditional` (L1884) and `list` (L1890–1894) cases; the `list` case
+already does factory-stub-call-then-recurse. Slot content is the structurally identical missing
+case (the OPEN-7 gap). A separate function re-derives that descent logic = degraded second path
+(slot subsystem bitten 4×). Merging satisfies G7 (one walk) by construction.
+
+**Injection-key bug found (interpreter.ts L711).** `injectComponentStyle(doc, ir.id, css)` keys
+dedup on `ir.id`, but the scope attribute (L713) and all CSS rules use `scopeHash`. Pre-B3 this
+was masked (scopeHash derived from ir.id → same id implied same scopeHash). B3 decouples them
+(`scopeHash=simpleHash(shapeHtml)` ≠ `ir.id=simpleHash(reserializedShape)`), unmasking
+over-injection of identical stylesheets for distinct-shape/same-style components. FIX: key on
+`ir.styleArtifact.scopeHash`. Scoped to this increment (B3 unmasks it); gated by G3'.
+
+**G2 reframe accepted:** code-comment constraint gate on the by-ref factory assumption
+(`(_props)=>namedIR`). The scoped-slot shape `(props)=>TemplateIR` permits a fresh-IR factory that
+would break stub-patch silently — assert the invariant. NOTE: the landed `list` case has the
+identical latent fragility; add a flag comment there (no behavior change, not this increment's
+fix).
+
+Tasks: (1) thread `shapeHtml` to L1988/L2899; (2) `component` case in `patchClasslistTokens` +
+interpreter.ts L711 key fix. OPEN-S2 subsumed by the merged case; OPEN-S3 (reuse ir-equivalence)
+confirmed. reactive-core v0.4.2 untouched. Template-IR v0.4.2 (no bump). CC to re-commit the plan
+with the merge, then proceed to `src/` (no second approval round — strict simplification).
