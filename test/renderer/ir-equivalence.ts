@@ -17,6 +17,7 @@ import type {
   ListBinding,
   PropBinding,
   SlotOutletBinding,
+  StyleVarBinding,
   TemplateIR,
 } from '../../src/renderer/ir.js'
 
@@ -151,6 +152,12 @@ function bindingEqual(a: Binding, b: Binding, i: number, aIr: TemplateIR, bIr: T
         const aRes = irStructurallyEqual(undefined, a.alternate, bc.alternate)
         if (!aRes.equal) return { equal: false, reason: `${p}.alternate → ${aRes.reason}` }
       }
+      break
+    }
+    case 'style-var': {
+      const bsv = b as StyleVarBinding
+      if (a.varName !== bsv.varName)
+        return { equal: false, reason: `${p}.varName: ${a.varName} vs ${bsv.varName}` }
       break
     }
   }

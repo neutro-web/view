@@ -80,7 +80,11 @@ export type TemplateIR = {
   /** Reactive/imperative holes. bindings[i] targets shape.bindingPaths[i]. */
   bindings: readonly Binding[]
   meta?: TemplateMeta
-  styleArtifact?: { staticCss: string; scopeHash: string }
+  styleArtifact?: {
+    staticCss: string
+    scopeHash: string
+    varBindingDescs?: ReadonlyArray<{ varName: string; exprSrc: string; propertyName: string }>
+  }
 }
 
 // ── Bindings ──────────────────────────────────────────────────────────────────

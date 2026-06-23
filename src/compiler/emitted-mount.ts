@@ -42,6 +42,7 @@ import type {
   ReactiveExpr,
   SlotContent,
   SlotOutletBinding,
+  StyleVarBinding,
   TemplateIR,
 } from '../renderer/ir.js'
 import { injectComponentStyle } from '../renderer/style-inject.js'
@@ -617,7 +618,23 @@ function emitSetup(
       }
 
       case 'style-var': {
-        throw new Error('[nv/emitted-mount] style-var: not yet implemented (Phase 3)')
+        const varName = (binding as StyleVarBinding).varName
+        const expr = (binding as StyleVarBinding).expr
+        wireSpecs.push({
+          accessor,
+          wire(targetNode) {
+            const el = targetNode as HTMLElement
+            effect(() => {
+              const v = expr()
+              if (v == null) {
+                el.style.removeProperty(varName)
+              } else {
+                el.style.setProperty(varName, String(v))
+              }
+            })
+          },
+        })
+        break
       }
 
       default: {

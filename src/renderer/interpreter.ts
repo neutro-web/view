@@ -56,6 +56,7 @@ import type {
   ReactiveExpr,
   SlotContent,
   SlotOutletBinding,
+  StyleVarBinding,
   SyncBinding,
   TemplateIR,
   TextBinding,
@@ -151,7 +152,8 @@ function wireBinding(
       break
     }
     case 'style-var': {
-      throw new Error('[nv/interpreter] style-var: not yet implemented (Phase 3)')
+      wireStyleVar(binding, targetNode)
+      break
     }
     case 'sync': {
       throw new Error(
@@ -249,6 +251,27 @@ function wireClassList(binding: ClassListBinding, el: Node): void {
       }
     })
   }
+}
+
+// ── StyleVarBinding ───────────────────────────────────────────────────────────
+
+function wireStyleVar(binding: StyleVarBinding, el: Node): void {
+  if (el.nodeType !== 1 /* ELEMENT_NODE */) {
+    throw new Error(
+      `[nv/interpreter] StyleVarBinding expects an Element node; got nodeType ${el.nodeType}`,
+    )
+  }
+  const element = el as HTMLElement
+  const varName = binding.varName
+
+  effect(() => {
+    const v = binding.expr()
+    if (v == null) {
+      element.style.removeProperty(varName)
+    } else {
+      element.style.setProperty(varName, String(v))
+    }
+  })
 }
 
 // ── PropBinding ───────────────────────────────────────────────────────────────

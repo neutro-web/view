@@ -66,6 +66,7 @@ import type {
   SlotContent,
   SlotEntry,
   SlotOutletBinding,
+  StyleVarBinding,
   TemplateIR,
   TemplateShape,
   TextBinding,
@@ -128,6 +129,7 @@ export type ThunkSource =
         { kind: 'static'; token: string } | { kind: 'toggle'; key: string; boolSrc: string }
       >
     }
+  | { kind: 'style-var'; exprSrc: string }
 
 /** Emit payload attached to NvComponentResult when using parseNvFileForEmit. */
 export interface NvEmitPayload {
@@ -1727,68 +1729,102 @@ function getValueText(node: ts.Expression): string {
   return node.getText()
 }
 
-// Build static CSS artifact for $style block — Phase 2 only (static CSS, no var bindings)
+// Returns true if the expression node references any reactive signal name
+function isReactiveExpr(node: ts.Expression, symbols: ScriptSymbols): boolean {
+  if (symbols.all.size === 0) return false
+  const original = node.getText()
+  const erased = eraseSignalReadsInNode(node, symbols.all)
+  return erased !== original
+}
+
+// Build CSS artifact for $style block — static CSS + varBindingDescs for reactive values
 function buildStyleArtifact(
   info: NvStyleInfo,
   scopeHash: string,
+  symbols: ScriptSymbols,
 ): {
   staticCss: string
   varBindingDescs: VarBindingDesc[]
 } {
   const rules: string[] = []
+  const varBindingDescs: VarBindingDesc[] = []
 
   for (const p of info.objExpr.properties) {
     if (!ts.isPropertyAssignment(p)) continue
     const key = propertyKeyText(p.name)
     if (key === null) continue
 
-    // Collect declarations for this property
-    const declPairs: Array<[string, string]> = []
     const initializer = p.initializer
+    const classify = classifyStyleKey(key)
 
     if (ts.isObjectLiteralExpression(initializer)) {
       // Nested object: { card: { color: 'red', fontWeight: 'bold' } }
+      const declPairs: Array<[string, string]> = []
       for (const decl of initializer.properties) {
         if (!ts.isPropertyAssignment(decl)) continue
         const propKey = propertyKeyText(decl.name)
         if (propKey === null) continue
-        // Convert camelCase to kebab-case for CSS property names
         const cssProp = propKey.replace(/([A-Z])/g, '-$1').toLowerCase()
-        declPairs.push([cssProp, getValueText(decl.initializer)])
+        if (isReactiveExpr(decl.initializer, symbols)) {
+          const varName = `--nv-${simpleHash(`${scopeHash}|${cssProp}`)}`
+          const exprSrc = eraseSignalReadsInNode(decl.initializer, symbols.all)
+          varBindingDescs.push({ varName, exprSrc, pathIndex: 0, propertyName: cssProp })
+          declPairs.push([cssProp, `var(${varName})`])
+        } else {
+          declPairs.push([cssProp, getValueText(decl.initializer)])
+        }
       }
-    } else {
-      // Flat value: { card: 'color: red; font-weight: bold' }
-      declPairs.push(['', getValueText(initializer)])
-    }
-
-    if (declPairs.length === 0) continue
-
-    const classify = classifyStyleKey(key)
-
-    if (classify.form === 'class') {
-      // Each token in the key → one rule per token
+      if (declPairs.length === 0) continue
       const declarationBlock =
         declPairs.length === 1 && declPairs[0]?.[0] === ''
           ? (declPairs[0]?.[1] ?? '')
           : declPairs.map(([prop, val]) => `${prop}: ${val}`).join('; ')
-
-      for (const token of classify.tokens) {
-        rules.push(`.${token}_${scopeHash} { ${declarationBlock} }`)
+      if (classify.form === 'class') {
+        for (const token of classify.tokens) {
+          rules.push(`.${token}_${scopeHash} { ${declarationBlock} }`)
+        }
+      } else {
+        rules.push(`:where([data-nv-s-${scopeHash}]) ${key} { ${declarationBlock} }`)
       }
     } else {
-      // Selector-form: wrap with :where([data-nv-s-<hash>])
-      const declarationBlock =
-        declPairs.length === 1 && declPairs[0]?.[0] === ''
-          ? (declPairs[0]?.[1] ?? '')
-          : declPairs.map(([prop, val]) => `${prop}: ${val}`).join('; ')
-
-      rules.push(`:where([data-nv-s-${scopeHash}]) ${key} { ${declarationBlock} }`)
+      // Flat value: { card: 'color: red; font-weight: bold' } — treat as static
+      const val = getValueText(initializer)
+      if (classify.form === 'class') {
+        for (const token of classify.tokens) {
+          rules.push(`.${token}_${scopeHash} { ${val} }`)
+        }
+      } else {
+        rules.push(`:where([data-nv-s-${scopeHash}]) ${key} { ${val} }`)
+      }
     }
   }
 
-  return {
-    staticCss: rules.join('\n'),
-    varBindingDescs: [], // Phase 3: populated when StyleVarBinding is implemented
+  return { staticCss: rules.join('\n'), varBindingDescs }
+}
+
+// Inject StyleVarBinding entries into a mutable TemplateIR for each VarBindingDesc.
+// pathIndex for ALL style-var bindings points to the first root element ([0]).
+// bindingThunks: if provided (emit path), push a 'style-var' ThunkSource per desc.
+function applyVarBindingsToIr(
+  ir: TemplateIR,
+  descs: VarBindingDesc[],
+  bindingThunks?: ThunkSource[],
+): void {
+  const mutablePaths = ir.shape.bindingPaths as NodePath[]
+  const mutableBindings = ir.bindings as StyleVarBinding[]
+
+  const rootPathIndex = mutablePaths.length
+  mutablePaths.push([0]) // first root element of the fragment
+
+  const stubExpr = (() => undefined) as unknown as () => string | number | null | undefined
+  for (const desc of descs) {
+    mutableBindings.push({
+      kind: 'style-var',
+      pathIndex: rootPathIndex,
+      varName: desc.varName,
+      expr: stubExpr,
+    })
+    bindingThunks?.push({ kind: 'style-var', exprSrc: desc.exprSrc })
   }
 }
 
@@ -1883,8 +1919,19 @@ export function parseNvFile(source: string, fileName: string, doc: Document): Nv
       const styleInfo = extractStyleInfo(componentFn, symbols)
       const scopeHash = simpleHash(renderResult.ir.id)
       if (styleInfo !== null) {
-        const artifact = buildStyleArtifact(styleInfo, scopeHash)
-        renderResult.ir.styleArtifact = { ...artifact, scopeHash }
+        const artifact = buildStyleArtifact(styleInfo, scopeHash, symbols)
+        renderResult.ir.styleArtifact = {
+          staticCss: artifact.staticCss,
+          scopeHash,
+          varBindingDescs: artifact.varBindingDescs.map(({ varName, exprSrc, propertyName }) => ({
+            varName,
+            exprSrc,
+            propertyName,
+          })),
+        }
+        if (artifact.varBindingDescs.length > 0) {
+          applyVarBindingsToIr(renderResult.ir, artifact.varBindingDescs)
+        }
       }
       results.push({
         name,
@@ -2781,8 +2828,19 @@ export function parseNvFileForEmit(
       const styleInfo = extractStyleInfo(componentFn, symbols)
       const scopeHash = simpleHash(renderResult.ir.id)
       if (styleInfo !== null) {
-        const artifact = buildStyleArtifact(styleInfo, scopeHash)
-        renderResult.ir.styleArtifact = { ...artifact, scopeHash }
+        const artifact = buildStyleArtifact(styleInfo, scopeHash, symbols)
+        renderResult.ir.styleArtifact = {
+          staticCss: artifact.staticCss,
+          scopeHash,
+          varBindingDescs: artifact.varBindingDescs.map(({ varName, exprSrc, propertyName }) => ({
+            varName,
+            exprSrc,
+            propertyName,
+          })),
+        }
+        if (artifact.varBindingDescs.length > 0) {
+          applyVarBindingsToIr(renderResult.ir, artifact.varBindingDescs, bindingThunks)
+        }
       }
       results.push({
         name,

@@ -28,6 +28,7 @@ import type {
   ListBinding,
   PropBinding,
   SlotOutletBinding,
+  StyleVarBinding,
   TemplateIR,
 } from './ir.js'
 import type { NvComponentResult, ThunkSource } from './nv-parser.js'
@@ -199,6 +200,12 @@ function emitBindingLiteral(
         })
         .join(', ')
       return `{ kind: 'classlist', ${pathEntry}, entries: [${entryLiterals}] }`
+    }
+    case 'style-var': {
+      if (thunk.kind !== 'style-var')
+        throw new Error('[nv/emitter] StyleVarBinding thunk kind mismatch')
+      const svb = binding as StyleVarBinding
+      return `{ kind: 'style-var', ${pathEntry}, varName: ${JSON.stringify(svb.varName)}, expr: () => (${thunk.exprSrc}) }`
     }
     default:
       throw new Error(
