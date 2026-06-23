@@ -1,8 +1,8 @@
-# nv Template IR — Design v0.4.1
+# nv Template IR — Design v0.4.2
  
 **Stream:** (3) Renderer/templating  
 **Contract reference:** nv Reactive Core Runtime Contract v0.4.2  
-**Status:** Approved — v0.4.1 (2026-06-22). Increment C (class-selection) landed.  
+**Status:** Approved — v0.4.2 (2026-06-23). `$style` scoping + dynamic lowering landed.  
 **Changelog:**  
 - v0.2 (2026-06-17): initial approved IR spec — six binding kinds (PoC scope) + two designed-deferred (List, Sync).  
 - v0.2.1 (2026-06-20): multi-root template shapes; list item single-root constraint noted.  
@@ -12,6 +12,7 @@
 - v0.3.3 (2026-06-22): additive `fallback?: TemplateIR` on `SlotOutletBinding`; walk-collapse (GATE-2) — slot content now processed by the same recursive walk as top-level content; component-as-slot-child falls out. reactive-core v0.4.2 unchanged. D-slot-1 retained.
 - v0.4 (2026-06-22): `SlotEntry.content` → factory `(props: SlotProps) => TemplateIR` (hard-cut, no union). `SlotOutletBinding.props?: readonly PropEntry[]` — child-exposed accessor thunks. `SlotFns` updated accordingly. `let={...}` authoring on both front-ends. D-slot-1 retained. reactive-core v0.4.2 unchanged.
 - v0.4.1 (2026-06-22): add `ClassListBinding` (kind `'classlist'`) — per-key `classList.toggle` lowering for object/array `class` expressions. Additive union member; `AttrBinding` byte-unchanged; reactive-core contract unchanged.
+- v0.4.2 (2026-06-23): add `StyleVarBinding` (kind `'style-var'`) — reactive CSS custom property writes for `$style` factory-form lowering. Add optional `styleArtifact` and `classRewrites` fields on `TemplateIR` root (`$style` scoping outputs; renderer-layer, `.nv`-FE-only). `ListBinding.itemTemplate` documented as the factory form `(valueSig, indexSig) => TemplateIR` (was mis-documented as a bare `TemplateIR` value; code has always used the factory). Additive; `AttrBinding`/`ClassListBinding` byte-unchanged; reactive-core contract unchanged.
  
 ---
  
@@ -70,6 +71,16 @@ type TemplateIR = {
   shape:    TemplateShape;    // static DOM structure (shared across instances)
   bindings: readonly Binding[];  // reactive/imperative holes, index-aligned with shape.bindingPaths
   meta?:    TemplateMeta;     // diagnostic metadata; does not affect semantics
+
+  // ── $style scoping outputs (v0.4.2; renderer-layer, .nv-FE-only) ───────────
+  // Present only when the source component declared `$style({...})`. Both are
+  // consumed by the back-ends' injection + class-rewrite paths, not by core.
+  styleArtifact?: {
+    staticCss:  string;       // scoped CSS text to inject once per component identity
+    scopeHash:  string;       // simpleHash(shapeHtml + NUL + $style source); dedup + token suffix
+    varBindingDescs?: ReadonlyArray<{ varName: string; exprSrc: string; propertyName: string }>;
+  };
+  classRewrites?: ReadonlyMap<string, string>;  // bare-token → scoped-token (e.g. card → card_<hash>)
 };
  
 type TemplateMeta = {
@@ -134,6 +145,8 @@ structural traversal.
 | `child`              | `Comment` (anchor)   | Sentinel IS the anchor; content inserted before it |
 | `conditional`, `list` | `Comment` (anchor)  | Same as `child` |
 | `component`          | `Comment` (anchor)   | Same as `child`; child DOM comes from the factory |
+| `classlist`          | `Element`            | Sibling comment sentinel; path targets the element (classList) |
+| `style-var`          | `Element`            | Sibling comment sentinel; path targets the element (style) |
  
 The path for `text` bindings points to the `Text` node (post-replacement).
 The path for `attr`/`prop`/`event` bindings points to the `Element` itself.
@@ -144,7 +157,7 @@ anchor `Comment` node; the back-end inserts/removes content before this anchor.
  
 ## 3. Binding Kinds
  
-Ten kinds total: six in PoC scope, two designed-and-deferred, one added in v0.3, one added in v0.3.1.
+Twelve kinds total: six in PoC scope, two designed-and-deferred, one added in v0.3, one in v0.3.1, one in v0.4.1, one in v0.4.2.
  
 ```typescript
 type Binding =
@@ -154,11 +167,12 @@ type Binding =
   | EventBinding       //  │
   | ChildBinding       //  │
   | ConditionalBinding // ─┘
-  | ListBinding        //  ── designed, deferred (§3.7)
+  | ListBinding        //  ── designed, now in scope (§3.7)
   | SyncBinding        //  ── designed, deferred (§3.8)
   | ComponentBinding   //  ── v0.3 (component API)
   | SlotOutletBinding  //  ── v0.3.1 (slot consumption); v0.3.3 adds optional `fallback?: TemplateIR`
-  | ClassListBinding;  //  ── v0.4.1 (class-selection; per-key classList.toggle)
+  | ClassListBinding   //  ── v0.4.1 (class-selection; per-key classList.toggle)
+  | StyleVarBinding;   //  ── v0.4.2 ($style factory-form; reactive CSS custom property)
  
 type BaseBinding = {
   pathIndex: number;   // index into shape.bindingPaths — which node this targets
@@ -357,22 +371,28 @@ lifetime boundary. The parent effect's `onCleanup` bridges the two lifetimes
 `effect`, not a `derived`. The branches are instantiated inside a new `createRoot`
 scope. No `derived` writes, no `sync` target violations. ✓
  
-### 3.7 ListBinding (designed, deferred)
+### 3.7 ListBinding (landed)
  
 Keyed list reconciliation. Each item gets its own `createRoot` scope (matching
 the §6 ownership model) so that item disposal severs only that item's edges and
 DOM without touching siblings.
  
 ```typescript
-// DESIGNED — NOT IN PoC SCOPE
-// Deferred: key-based DOM reconciliation algorithm bloats the first pass.
-// Intent recorded here so the back-end interface is designed alongside the rest.
 type ListBinding = BaseBinding & {
   kind:         'list';
   items:        ReactiveExpr<readonly unknown[]>;
   key:          (item: unknown, index: number) => string | number;
-  itemTemplate: TemplateIR;  // instantiated once per item; item value threaded in via scope
+  // itemTemplate is a FACTORY, not a bare TemplateIR. It is called once per item
+  // with a per-item writable value signal and index signal; it returns a
+  // TemplateIR whose expressions close over those signals. The renderer supplies
+  // the signals; the compiler emits references to them. (Variant-A adapter at
+  // construction in both front-ends.)
+  itemTemplate: (valueSig: WritableSignal<unknown>, indexSig: WritableSignal<number>) => TemplateIR;
 };
+
+// Minimal writable-signal interface (structurally compatible with core's
+// SignalAccessor<T>; defined IR-locally to keep the IR DOM-free and core-free):
+interface WritableSignal<T> { (): T; set(v: T): void; }
 ```
  
 Back-end sketch: one top-level `effect` that observes `items()` and reconciles:
@@ -407,6 +427,30 @@ Computed / shorthand property keys (non-literal key in `.nv` object literal) →
 fallback to `AttrBinding` (full-reassign). `classes(...)` tagged-template sentinel carries
 the pre-split entry list; bare object literal in tagged-template still throws (enforcing the
 `.nv`-literal / tagged-sentinel idiom split, matching `<each>` / `each(...)`).
+
+### 3.7.2 StyleVarBinding (v0.4.2)
+
+Reactive CSS custom-property write. Produced by `$style` factory-form lowering: a
+reactive value in a `$style` declaration becomes a CSS custom property (`--nv-<hash>`)
+referenced from the scoped static CSS, and a `StyleVarBinding` writes that property on
+the element reactively. The factory is NOT re-run; only the custom-property value updates.
+
+```typescript
+type StyleVarBinding = BaseBinding & {
+  kind:    'style-var';
+  varName: string;   // CSS custom property name, e.g. '--nv-1a2b3c4d'
+  expr:    ReactiveExpr<string | number | null | undefined>;
+};
+```
+
+Back-end: one `effect(() => { const v = expr(); v == null ? el.style.removeProperty(varName)
+: el.style.setProperty(varName, String(v)); })`. Wired in the interpreter (`wireStyleVar`)
+and the compiler back-end (`emitted-mount.ts`). `.nv`-FE-only (the tagged-template FE has no
+`$style`); the cross-back-end differential is interpreter-vs-emitted, not FE-vs-FE.
+
+**Scope discipline.** `$style` scoping, the `styleArtifact`/`classRewrites` IR-root fields,
+and `StyleVarBinding` are all renderer-layer outputs. They are NOT a reactive-core contract
+concern (the core never sees them; injection and class rewriting are back-end DOM concerns).
 
 ### 3.8 SyncBinding (designed, deferred)
  
@@ -547,7 +591,9 @@ the imperative setup.
 | `event`         | `effect` (handler only) + imperative | addEventListener once | Listener is not a graph node; effect tracks handler expression reactivity |
 | `child`         | `effect`               | text node replace | v0: primitive values only |
 | `conditional`   | `effect` + `createRoot` | fragment mount/unmount | 1 effect; branch scopes are explicit roots |
-| `list`          | `effect` + `createRoot` per item | keyed reconciliation | designed, deferred |
+| `list`          | `effect` + `createRoot` per item | keyed reconciliation | landed; one reconcile effect + per-item root |
+| `classlist`     | `effect` per toggle entry (≤6) or one looping `effect` (>6) | classList.add (static) / classList.toggle (reactive) | v0.4.1; statics added once at mount |
+| `style-var`     | `effect`               | style.setProperty / removeProperty | v0.4.2; CSS custom property write |
 | `sync`          | `effect` (signal→DOM) + `sync` with external pubsub (DOM→signal) | 1 each | designed, deferred; pubsub per binding |
  
 **No `sync` in non-SyncBinding bindings.** The `sync` primitive is intentionally
@@ -796,11 +842,11 @@ emitted code must do. Flag this seam; do not cross it prematurely.
 - The differential conformance suite (corpus TC-01 through TC-09)
 ### 9.2 Designed, deferred (do not build yet; design is here)
  
-- `ListBinding` (§3.7) — keyed list reconciliation
 - `SyncBinding` (§3.8) — two-way binding via `sync` + external pubsub
 - `ChildBinding` values that return DOM nodes or `TemplateIR` (component holes)
-- The `.nv` file front-end (parse `.nv` files to `TemplateIR`)
-- The compiler back-end (IR → emitted code) — pending interpreter proof + seam agreement
+
+**Landed since v0.2** (were deferred here): `ListBinding` (§3.7), the `.nv` file front-end,
+the compiler back-end, `ClassListBinding` (v0.4.1), `StyleVarBinding` (v0.4.2).
 ### 9.3 Out of scope for IR v0 (not designed here)
  
 - `ComponentBinding` — a template hole for child component invocations. Component
@@ -879,7 +925,16 @@ type TemplateIR = {
   shape:    TemplateShape;
   bindings: readonly Binding[];
   meta?:    TemplateMeta;
+  styleArtifact?: {                        // v0.4.2; .nv-FE-only, renderer-layer
+    staticCss:  string;
+    scopeHash:  string;
+    varBindingDescs?: ReadonlyArray<{ varName: string; exprSrc: string; propertyName: string }>;
+  };
+  classRewrites?: ReadonlyMap<string, string>;  // v0.4.2; bare-token → scoped-token
 };
+
+// ── WritableSignal (IR-local; structurally compatible with core SignalAccessor) ─
+interface WritableSignal<T> { (): T; set(v: T): void; }
  
 // ── Bindings ──────────────────────────────────────────────────────────────────
 type BaseBinding = {
@@ -925,11 +980,11 @@ type ConditionalBinding = BaseBinding & {
   alternate:  TemplateIR | null;
 };
  
-type ListBinding = BaseBinding & {  // DESIGNED, DEFERRED
+type ListBinding = BaseBinding & {  // LANDED
   kind:         'list';
   items:        ReactiveExpr<readonly unknown[]>;
   key:          (item: unknown, index: number) => string | number;
-  itemTemplate: TemplateIR;
+  itemTemplate: (valueSig: WritableSignal<unknown>, indexSig: WritableSignal<number>) => TemplateIR;
 };
  
 type SyncBinding = BaseBinding & {  // DESIGNED, DEFERRED
@@ -967,10 +1022,29 @@ type SlotOutletBinding = BaseBinding & {
   props?:    readonly PropEntry[];   // child-exposed accessor thunks
   fallback?: TemplateIR;
 };
- 
+
+// ── ClassListBinding (v0.4.1) ────────────────────────────────────────────────
+type ClassListEntry =
+  | { kind: 'static'; token: string }
+  | { kind: 'toggle'; key: string; expr: () => unknown };
+
+type ClassListBinding = BaseBinding & {
+  kind:    'classlist';
+  entries: readonly ClassListEntry[];
+};
+
+// ── StyleVarBinding (v0.4.2) ─────────────────────────────────────────────────
+type StyleVarBinding = BaseBinding & {
+  kind:    'style-var';
+  varName: string;
+  expr:    ReactiveExpr<string | number | null | undefined>;
+};
+
 type Binding =
   | TextBinding | AttrBinding | PropBinding | EventBinding
   | ChildBinding | ConditionalBinding | ListBinding | SyncBinding
   | ComponentBinding
-  | SlotOutletBinding;
+  | SlotOutletBinding
+  | ClassListBinding
+  | StyleVarBinding;
 ```

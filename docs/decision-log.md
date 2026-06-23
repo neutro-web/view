@@ -43,6 +43,9 @@ _Last updated: 2026-06-23. Contract **v0.4.2** · Template-IR **v0.4.2**._
   (no benefit path). Steps 1–2 (sync classify + cycle check) are the correctness layer.
 - **Renderer:** interpreter + compiler back-ends at parity for all binding kinds.
   Both front-ends (tagged-template + `.nv`) produce one IR, FE-equivalence-gated.
+  Template-IR doc reconciled to v0.4.2 (2026-06-23) — now matches `ir.ts`
+  (12-member union incl. `ClassListBinding`, `StyleVarBinding`; `ListBinding`
+  factory `itemTemplate`; root `styleArtifact`/`classRewrites`).
 - **Build pipeline `.nv → .js`:** Mode A, landed. Executable-module gate closed.
 - **Component API v1:** LANDED. Composition works end-to-end through the compiled
   path (A2 factory-shape convergence).
@@ -1719,3 +1722,36 @@ requiring a hole — not scheduled.
 
 reactive-core v0.4.2 untouched. Template-IR v0.4.2 (no bump). G5 deferral stands (separate
 `<each>`-in-slot increment).
+
+### 2026-06-23 — Template-IR doc reconciled to v0.4.2 (doc-only; code unchanged)
+
+**Decision.** Reconcile `template-ir.md` to match the landed `ir.ts` (which already
+declares v0.4.2). Doc-only — no `src/` change. The doc had drifted a full version
+behind code across three fast feature lands (classlist, $style, each-factory).
+
+**Drift corrected:**
+- Header v0.4.1 → **v0.4.2**; changelog line added.
+- Binding count "Ten" → "Twelve"; §3 union + appendix union now include
+  `ClassListBinding` (v0.4.1) and `StyleVarBinding` (v0.4.2). Appendix had omitted
+  BOTH.
+- `ListBinding.itemTemplate` documented as the **factory** `(valueSig, indexSig)
+  => TemplateIR` (was mis-documented as a bare `TemplateIR` value; code has always
+  used the factory). §3.7 + appendix both fixed; `WritableSignal` added.
+- `TemplateIR` root: documented optional `styleArtifact` + `classRewrites` fields
+  ($style scoping outputs; renderer-layer, `.nv`-FE-only) — previously undocumented.
+- Added §3.7.2 (`StyleVarBinding`); §5 primitive-mapping rows for `classlist` +
+  `style-var`; §2.2 target rows; §9.2 moved `ListBinding`/`.nv` FE/compiler BE/
+  classlist/style-var out of "deferred."
+
+**Scope discipline restated in-doc:** `$style` scoping, `styleArtifact`/
+`classRewrites`, and `StyleVarBinding` are renderer-layer; NOT a reactive-core
+contract concern. reactive-core v0.4.2 untouched.
+
+**Also fixed (consistency):** `ir.ts` header self-citation and
+`implementation-state.md` footer both said the doc was v0.4.1 — corrected to v0.4.2
+(the `ir.ts` fix is a one-line comment edit, can ride the next code commit; the
+implementation-state fix is in this paste set).
+
+**Verdict:** Doc now matches code. No contract bump (reactive-core stays v0.4.2);
+Template-IR doc version was already claimed v0.4.2 by `ir.ts` — this aligns the
+prose to it.
