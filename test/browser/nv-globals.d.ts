@@ -22,6 +22,7 @@ interface NvBundle {
   ) => (strings: TemplateStringsArray, ...exprs: unknown[]) => TemplateIR
   structurallyEqual: (a: Node, b: Node) => CompareResult
   emitMount: (ir: TemplateIR) => EmitResult
+  injectComponentStyle: (doc: Document, identityHash: string, cssText: string) => void
 }
 
 declare global {

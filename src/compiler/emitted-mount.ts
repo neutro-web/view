@@ -44,6 +44,7 @@ import type {
   SlotOutletBinding,
   TemplateIR,
 } from '../renderer/ir.js'
+import { injectComponentStyle } from '../renderer/style-inject.js'
 import type { BindingErasureVerdict } from './types.js'
 
 // ── Node accessor — path partially evaluated at emit time ─────────────────────
@@ -678,6 +679,12 @@ export function emitMount(
   const mountFn = (parent: Element, doc: Document): (() => void) => {
     return createRoot((dispose) => {
       const { roots } = setup(parent, doc, null)
+      if (ir.styleArtifact) {
+        injectComponentStyle(doc, ir.id, ir.styleArtifact.staticCss)
+        const scopeAttr = `data-nv-s-${ir.styleArtifact.scopeHash}`
+        const root = roots[0]
+        if (root instanceof Element) root.setAttribute(scopeAttr, '')
+      }
       onCleanup(() => {
         for (const n of roots) {
           if (n.parentNode !== null) n.parentNode.removeChild(n)

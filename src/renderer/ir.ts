@@ -80,6 +80,7 @@ export type TemplateIR = {
   /** Reactive/imperative holes. bindings[i] targets shape.bindingPaths[i]. */
   bindings: readonly Binding[]
   meta?: TemplateMeta
+  styleArtifact?: { staticCss: string; scopeHash: string }
 }
 
 // ── Bindings ──────────────────────────────────────────────────────────────────
@@ -255,12 +256,7 @@ export type ClassListBinding = BaseBinding & {
 
 // ── StyleVarBinding (v0.4.2 — Phase 3 stub) ──────────────────────────────────
 
-/**
- * Dynamic CSS custom property binding.
- * Phase 3: wires a reactive expression to a CSS custom property via setProperty.
- * Phase 2: this type exists in the IR so switch exhaustiveness is enforced;
- *           `case 'style-var'` throws "not yet implemented (Phase 3)" in both back-ends.
- */
+// Reactive CSS custom property binding. Phase 2: exhaustiveness stub. Phase 3: wires setProperty.
 export type StyleVarBinding = BaseBinding & {
   kind: 'style-var'
   /** CSS custom property name, e.g. '--nv-1a2b3c4d' */

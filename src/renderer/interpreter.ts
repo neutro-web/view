@@ -61,6 +61,7 @@ import type {
   TextBinding,
   WritableSignal,
 } from './ir.js'
+import { injectComponentStyle } from './style-inject.js'
 
 // ── DOM utilities ─────────────────────────────────────────────────────────────
 
@@ -679,6 +680,12 @@ function mountFragment(
 export function mount(ir: TemplateIR, parent: Element, doc: Document): () => void {
   return createRoot((dispose) => {
     const { roots } = mountFragment(ir, parent, doc)
+    if (ir.styleArtifact) {
+      injectComponentStyle(doc, ir.id, ir.styleArtifact.staticCss)
+      const scopeAttr = `data-nv-s-${ir.styleArtifact.scopeHash}`
+      const root = roots[0]
+      if (root instanceof Element) root.setAttribute(scopeAttr, '')
+    }
     onCleanup(() => {
       // Remove ALL mounted root nodes from parent (multi-root template support).
       for (const n of roots) {

@@ -8,7 +8,7 @@
  *
  * Injection strategy:
  *   - adoptedStyleSheets path (Chrome 73+, Safari 16.4+, Firefox 101+): zero-FOUC
- *   - <style> fallback: jsdom + older browsers
+ *   - <style> fallback: jsdom + older browsers, and cross-document sheets
  */
 
 type StyleEntry =
@@ -19,31 +19,29 @@ type StyleRegistry = Map<string, StyleEntry>
 
 const docStyleRegistries = new WeakMap<Document, StyleRegistry>()
 
-function getOrCreateRegistry(doc: Document): StyleRegistry {
+// Inject a component's scoped CSS into the given document. Idempotent per (doc, identityHash).
+// Prefers adoptedStyleSheets; falls back to <style> element on failure or unsupported env.
+export function injectComponentStyle(doc: Document, identityHash: string, cssText: string): void {
   let registry = docStyleRegistries.get(doc)
   if (registry === undefined) {
-    registry = new Map<string, StyleEntry>()
+    registry = new Map()
     docStyleRegistries.set(doc, registry)
   }
-  return registry
-}
-
-/**
- * Inject a component's scoped CSS into the given document.
- *
- * Idempotent: if `identityHash` is already registered for this document, no-op.
- * Prefers adoptedStyleSheets; falls back to <style> element injection.
- */
-export function injectComponentStyle(doc: Document, identityHash: string, cssText: string): void {
-  const registry = getOrCreateRegistry(doc)
   if (registry.has(identityHash)) return
 
+  let usedAdopted = false
   if (typeof doc.adoptedStyleSheets !== 'undefined') {
-    const sheet = new CSSStyleSheet()
-    sheet.replaceSync(cssText)
-    doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, sheet]
-    registry.set(identityHash, { kind: 'adopted', sheet })
-  } else {
+    try {
+      const sheet = new CSSStyleSheet()
+      sheet.replaceSync(cssText)
+      doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, sheet]
+      registry.set(identityHash, { kind: 'adopted', sheet })
+      usedAdopted = true
+    } catch {
+      // Cross-document or unsupported env — fall through to <style> element
+    }
+  }
+  if (!usedAdopted) {
     const styleEl = doc.createElement('style') as HTMLStyleElement
     styleEl.textContent = cssText
     const target = doc.head ?? doc.body
