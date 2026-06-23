@@ -110,7 +110,10 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
 - **Equality hook inert; step 4 shelved** — neither specialization saves work.
 - **SyncBinding** throws at both back-ends.
 - **Multi-root list items not supported** — single-root guard; wrap in a container element.
-- **`$style`** — parser extracts `{form, keys, source}`; scoping/injection unbuilt (own item).
+- **`$style` × slots** — LANDED 2026-06-23. `patchClasslistTokens` (nv-parser.ts) has a
+  `component` case that rewrites slot-content classlist tokens with the parent's scopeHash.
+  `scopeHash` is now `simpleHash(shapeHtml)` (not `ir.id`). Injection in interpreter.ts keys
+  on `scopeHash`. G5 (`<each>`-in-slot) deferred; G1–G4, G3', G6, G7 green.
 - **`extractModuleScope` edge:** non-`$component` top-level statements pass through verbatim.
 
 ---

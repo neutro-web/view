@@ -266,8 +266,8 @@ describe('G4: parse-path IR and emit-path agree on slot-content classlist tokens
 // ── G5 — <each>-in-slot class token (deferred) ───────────────────────────────
 
 describe('G5: <each>-in-slot class token (deferred)', () => {
-  it.skip('class-form token in <each>-inside-slot-content is rewritten with parent scopeHash', // DEFERRED: <each> in slot content is not wired. buildNvSlotContentIR discards the
+  // DEFERRED: <each> in slot content is not wired. buildNvSlotContentIR discards the
   // `lists` return from walkNvNodeList (L772). patchClasslistTokens list-case handles
   // this automatically once <each>-in-slot is wired in the dedicated increment.
-  () => {})
+  it.skip('class-form token in <each>-inside-slot-content is rewritten with parent scopeHash', () => {})
 })

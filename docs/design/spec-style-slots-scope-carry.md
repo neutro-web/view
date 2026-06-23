@@ -82,21 +82,24 @@ Two mechanisms were considered. The seam **eliminates A**:
   Works identically on both paths. **Sole viable mechanism.**
 
 **The one build-order fact B requires (F5 + F6).** The rewrite map is static and hoistable
-(F5), but `scopeHash` seeds from `renderResult.ir.id`, available only post-walk (F6). B does
-**not** need the full artifact before the walk — it needs the **scope seed** available before
-slot content is built, so the rewrite map (or the `_<scopeHash>` suffix) can be applied at build
-time. Surgical change, not a full inversion:
+(F5), but `scopeHash` originally seeded from `renderResult.ir.id`, available only post-walk (F6).
 
-- **Option B1 (preferred):** make the scope seed deterministic and computable from inputs already
-  present at slot-build time (e.g. seed from the component declaration name / a pre-walk id), so
-  `ir.id` derivation is unchanged but the seed is knowable earlier. Confirm `ir.id` and the seed
-  agree (gate G3 below).
-- **Option B2 (fallback):** two-pass — compute `ir.id`/scopeHash from a cheap pre-pass, then
-  build slot content with the map in hand. Heavier; only if B1's seed cannot be made to match
-  `ir.id`.
+**RESOLVED 2026-06-23 — B3 (supersedes B1/B2 framing).** CC halted at this exact circularity:
+`ir.id = simpleHash(reserializedShape)` is post-walk (nv-parser L1101); slot content is built
+during the walk. Architect ruling: derive `scopeHash` from **pre-walk `shapeHtml`** (nv-parser
+L883), not `ir.id`. Change the two scopeHash sites (L1988, L2899) to `simpleHash(shapeHtml)`;
+leave `ir.id` untouched.
 
-B1 vs B2 is **in-stream** (build-order/data-flow org). The spec recommends B1; CC proposes the
-concrete seed in the plan and HALTS if B1's seed cannot be proven equal to `ir.id`'s.
+- `shapeHtml` is available before `walkNvNodeList` → slot content built during the walk carries
+  the scope hash directly. No post-walk slot rebuild, no `walkNvNodeList` return restructure.
+- G3 seed-equality is now trivially true: both back-end sites use the identical pure input
+  `shapeHtml`.
+- `ir.id` (post-walk, mounted-shape identity) and `scopeHash` (pre-walk, style identity) cleanly
+  decoupled; injection dedups on `scopeHash`, mount/cache on `ir.id` — correct that these differ.
+- **B1a rejected** (redefining `ir.id` input = unbounded core-IR-identity blast radius).
+  **B2 retained as fallback only** (sound but unnecessary restructure).
+- **Behavioral change:** scopeHash values change for styled components containing child
+  components (`shapeHtml` ≠ `reserializedShape`). S1+S2 hash-pinned fixtures regenerate. See G3'.
 
 ## 5. RULED — slot content is opaque to child selector-form scope (NO, reading (b))
 
@@ -139,9 +142,10 @@ it) is not treated as a defect.
 |----|-------|------------------|----------|
 | G1 | Parent class-form token in slot content carries **parent** hash | mount, inspect class on projected node | class is raw `card` or `card_<childhash>` |
 | G2 | **Fresh-IR-factory** slot content (factory builds new IR per call) still rewritten — the case Mechanism A passes structurally while emitting wrong DOM | factory that returns `{...spread}` per call; mount; inspect | rewritten only when factory returns captured-by-ref IR |
-| G3 | B1 seed equals `ir.id`-derived scopeHash | assert seed === simpleHash(ir.id) at build | seeds diverge → static CSS uses one hash, rewrite uses another |
+| G3 | scopeHash = `simpleHash(shapeHtml)` at both sites (B3); identical input both back-ends | grep both sites; assert equal hash for same component | sites use `ir.id` or differing input |
+| G3' | Two styled components, identical `$style` + identical `shapeHtml`, different child-component composition → share scopeHash (correct: same authored style = same scope); injection dedup merges only style identity | mount both; inspect scope hash + injected sheet count | hashes differ, OR dedup wrongly merges non-style identity |
 | G4 | Differential: parse-path IR ↔ emit-path output agree on slot-content class tokens (shared oracle, not structural-only) | ir-equivalence + emit-exec on same corpus | parse and emit disagree on any token |
-| G5 | Nested: class-form token in `<each>`-inside-slot-content rewritten (OPEN-7 × slots) | depth-2 mount | nested token raw |
+| G5 | Nested: class-form token in `<each>`-inside-slot-content rewritten (OPEN-7 × slots) | depth-2 mount | nested token raw | **[DEFERRED 2026-06-23]** `<each>`-in-slot not yet wired: `buildNvSlotContentIR` discards `lists` from `walkNvNodeList` (L772). `patchClasslistTokens` list-case will handle it automatically once `<each>`-in-slot lands in its own increment. |
 | G6 | §5 guarantee: nv places NO `data-nv-s-<childhash>` on parent-projected nodes; incidental cascade match is not a defect (real-browser ×3) | Playwright Blink/Gecko/WebKit; inspect projected node attrs | a `data-nv-s-<childhash>` appears on a projected node, OR a test asserts non-match (wrong contract) |
 | G7 | No second walk introduced — single rewrite site per path | grep for any new component-descent in a separate walk | a parallel path re-derives rewrite logic |
 
@@ -158,6 +162,7 @@ through `doc`; nv-does-not-invent-CSS; misclassification falls safe; both back-e
 ## 9. Status of prior open items
 
 - §5 cross-boundary selector observation — **RULED 2026-06-23: NO, reading (b)** (see §5).
-- Mechanism — **CONFIRMED: B**, B1-preferred / B2-fallback, seed-equality gated (G3).
+- Mechanism — **RESOLVED 2026-06-23: B3** (scopeHash = `simpleHash(shapeHtml)`, `ir.id`
+  untouched). Supersedes B1/B2. G3 trivially satisfied; see §4 + G3'. B2 retained fallback only.
 - §5=NO forces no attribute carry → **no Template-IR version bump expected** (confirm at land).
 - B1-vs-B2 seed mechanism — in-stream; CC proposes B1 in the plan, proves G3 or halts to B2.

@@ -6,6 +6,8 @@
 >
 > **Gate P APPROVED 2026-06-23** (plan `f96894e` + merge redirect).
 > CC may proceed to `src/` — no second approval needed for the merge-vs-separate simplification.
+>
+> **LANDED 2026-06-23.** G1–G4, G3', G6, G7: green. G5: deferred (`<each>`-in-slot increment).
 
 **Goal:** Make class-form `$style` tokens authored in parent-supplied slot content carry
 the parent's scope hash, on both front-ends and both back-ends.
@@ -408,7 +410,7 @@ Reuse existing ir-equivalence + emit-exec harness. Add new test cases to `test/r
 | **G3** | Both scopeHash sites use `simpleHash(renderResult.shapeHtml)` identically | `grep 'simpleHash(renderResult' src/renderer/nv-parser.ts` shows `shapeHtml` at both L1988/L2899 | either site still uses `ir.id`, or sites use different inputs |
 | **G3'** | Two parents with identical `$style` + identical `shapeHtml` share `scopeHash`; injection dedup merges their style identity only (not mount identity) | unit test: assert both parents' `ir.styleArtifact.scopeHash` equal; mount both; assert only ONE style injection happened for that scopeHash | hashes differ, OR a second injection fires for an identical scopeHash |
 | **G4** | Parse-path IR ↔ emit-path output agree on slot-content class tokens (shared oracle) | ir-equivalence + emit-exec on new fixtures | any token disagrees between parse and emit |
-| **G5** | Class-form token in `<each>`-inside-slot-content rewritten | depth-2 fixture; mount; inspect | nested token raw |
+| **G5** | Class-form token in `<each>`-inside-slot-content rewritten | depth-2 fixture; mount; inspect | nested token raw | **[DEFERRED 2026-06-23]** — `<each>`-in-slot unwired; test skipped with reason; separate increment. |
 | **G6** | §5 guarantee: NO `data-nv-s-<childhash>` on parent-projected nodes; incidental cascade match not a defect (real-browser ×3) | Playwright Blink/Gecko/WebKit; inspect projected node attrs | `data-nv-s-<childhash>` appears on a projected node, OR a test asserts non-match |
 | **G7** | `patchClasslistTokens` has no new `component` case; `patchSlotContentTokens` is a separate thin wrapper | `grep -A5 "binding.kind === 'component'" src/renderer/nv-parser.ts` shows no descent inside `patchClasslistTokens` | a `component` case appears inside `patchClasslistTokens` |
 

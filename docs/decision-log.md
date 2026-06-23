@@ -144,7 +144,7 @@ _Last updated: 2026-06-23. Contract **v0.4.2** · Template-IR **v0.4.2**._
   Mechanism: B3 (scopeHash = simpleHash(shapeHtml); ir.id untouched). Rewrite via NEW `component`
   case in existing `patchClasslistTokens` (post-walk; NOT a separate fn — collapse principle).
   Includes interpreter.ts L711 injection-key fix (ir.id → scopeHash). Gate P approved 2026-06-23
-  (plan f96894e + merge redirect). CC implementing; HALT-then-land per per-phase gates.
+  (plan f96894e + merge redirect). LANDED 2026-06-23. G1–G4, G3', G6, G7: green. G5: deferred (<each>-in-slot increment).
   G5 (`<each>`-in-slot) DEFERRED 2026-06-23 — out of scope; `<each>`-in-slot capability unwired
   (L772 discard). Styling handles it for free once the capability lands. G5 test skipped w/ reason.
 - `<each>` in slot content — wire `lists` from `walkNvNodeList` into `buildNvSlotContentIR`
