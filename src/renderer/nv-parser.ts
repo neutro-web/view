@@ -936,6 +936,7 @@ interface ProcessResult {
   pendingEachItems: PendingNvEachInfo[]
   consumedByComponent: ReadonlySet<number>
   diagnostics: NvDiagnostic[]
+  shapeHtml: string // pre-walk authored shape; B3 scopeHash seed
 }
 
 function processHtmlTemplate(
@@ -957,6 +958,7 @@ function processHtmlTemplate(
       pendingEachItems: [],
       consumedByComponent: new Set<number>(),
       diagnostics: [],
+      shapeHtml: template.text,
     }
   }
 
@@ -1122,6 +1124,7 @@ function processHtmlTemplate(
     })),
     consumedByComponent,
     diagnostics: processdiagnostics,
+    shapeHtml,
   }
 }
 
@@ -1985,7 +1988,7 @@ export function parseNvFile(source: string, fileName: string, doc: Document): Nv
       const renderResult = extractRenderTemplate(componentFn, doc, symbols)
       if (renderResult === null) continue
       const styleInfo = extractStyleInfo(componentFn, symbols)
-      const scopeHash = simpleHash(renderResult.ir.id)
+      const scopeHash = simpleHash(renderResult.shapeHtml)
       if (styleInfo !== null) {
         const artifact = buildStyleArtifact(styleInfo, scopeHash, symbols)
         renderResult.ir.styleArtifact = {
@@ -2896,7 +2899,7 @@ export function parseNvFileForEmit(
       const allDiagnostics = [...diagnostics, ...emitDiagnostics, ...renderResult.diagnostics]
 
       const styleInfo = extractStyleInfo(componentFn, symbols)
-      const scopeHash = simpleHash(renderResult.ir.id)
+      const scopeHash = simpleHash(renderResult.shapeHtml)
       if (styleInfo !== null) {
         const artifact = buildStyleArtifact(styleInfo, scopeHash, symbols)
         renderResult.ir.styleArtifact = {
@@ -2935,7 +2938,7 @@ export function parseNvFileForEmit(
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
-function simpleHash(s: string): string {
+export function simpleHash(s: string): string {
   let h = 0x811c9dc5
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193)
   return (h >>> 0).toString(16).padStart(8, '0')

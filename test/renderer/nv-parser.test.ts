@@ -49,6 +49,7 @@ import {
   parseNvFile,
   parseNvFileForEmit,
   preprocessMutationWrites,
+  simpleHash,
 } from '../../src/renderer/nv-parser.js'
 import type { NvDiagnostic } from '../../src/renderer/nv-parser.js'
 
@@ -1321,5 +1322,26 @@ describe('TC-slot-warning: slot content in component element', () => {
     const ir = results[0]!.ir
     expect(ir.shape.html).not.toContain('Counter')
     expect(ir.shape.html).toContain('<!--nv-comp-')
+  })
+})
+
+describe('G3: scopeHash uses shapeHtml not ir.id', () => {
+  it('G3: both scopeHash sites use simpleHash(shapeHtml), not simpleHash(ir.id)', () => {
+    // A parent with a child component — shapeHtml ≠ reserializedShape here
+    const src = `
+      const Parent = $component((_props) => {
+        $style({ card: { color: 'red' } })
+        $render(() => html\`<ChildComp><div class="\${{card: true}}">x</div></ChildComp>\`)
+      })
+    `
+    const results = parseNvFile(src, 'test.nv', document)
+    const parent = results.find((r) => r.name === 'Parent')!
+    // The scopeHash embedded in classRewrites values must NOT equal simpleHash(ir.id)
+    // (because shapeHtml ≠ ir.id's input for a template with child components)
+    const rwHash = [...(parent.ir.classRewrites?.values() ?? [])][0]?.split('_').pop()
+    expect(rwHash).toBeDefined()
+    expect(rwHash).not.toBe(simpleHash(parent.ir.id))
+    // It should equal simpleHash of the pre-walk shape — verified by checking styleArtifact
+    expect(parent.ir.styleArtifact?.scopeHash).toBe(rwHash)
   })
 })
