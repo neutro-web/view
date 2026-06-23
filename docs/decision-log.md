@@ -166,14 +166,15 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4.1**._
   `ListBinding` (`buildNvSlotContentIR` ignores returned `lists`).
 - **D-each-5:** `signal()` imported in `nv-emitter.ts` for stub-IR extraction in
   the list emit case (plan-mandated, couples emitter to core at runtime).
-- **D-cl-3:** string-literal class-key quote-inclusion. Object/array `class` keys that are
-  string literals (e.g. `'is-active'`) are extracted via `prop.name.getText()` (quotes
-  included) at both classlist key-extraction sites (structural `nv-parser.ts` L368/L401; emit
-  ~L2206/L2238), wiring `classList.toggle("'is-active'", …)`. **Shipped defect, both
-  back-ends:** silent wrong DOM for every hyphenated class name. Identifier keys unaffected
-  (why EX-CL-01..04 pass). Fix: use `p.name.text` for StringLiteral/Identifier (mirror
-  `extractStyleInfo` L1240–1245). Renderer-layer, in-stream. Add a hyphenated-key EX-CL
-  regression case with the fix.
+- **D-cl-3 — COMMISSIONED 2026-06-22 (folded into S0, `feat/style-s0-parser-seam`, not yet
+  landed). `.nv`-FE-only** (tagged-template `classes()`/`cx()` immune — runtime
+  `Object.entries`, no `getText()`). `.nv` AST key-extraction bug: quote-inclusion +
+  whitespace mis-split + latent numeric-key bug, at four sites (`nv-parser.ts`
+  L367/L399/L2205/L2237; bare and interpolated `.nv` forms share these — not distinct sites).
+  Fix: `propertyKeyText` helper enumerating PropertyName kinds, unquote before split; `null`
+  = computed-only → `hasComputed`, unhandled static kind → halt. Verify on landing: emitted
+  JS for hyphenated-key EX-CL case (`key: "is-active"`) + numeric-key case (`key: "2"`,
+  classlist not AttrBinding) + mounted `classList.contains`.
 
 ### Naming
 - `neutro/view` / `nv` working name; package under `@neutro` (view engine is
@@ -1182,3 +1183,43 @@ characters. **Verified against `main`.**
   emitted path. This is the failable regression gate.
 
 **No contract touch. No Template-IR touch.** reactive-core v0.4.2, Template-IR v0.4.1 unchanged.
+
+---
+
+### 2026-06-22 — D-cl-3 scope CORRECTED to `.nv`-FE-only; bare-vs-interpolated `.nv` form resolved; helper spec hardened
+
+Corrects the severity scope in the earlier 2026-06-22 entry "D-cl-1 CLOSED … D-cl-3 logged",
+which stated D-cl-3 affects "both back-ends / both front-ends." That framing was too broad.
+**Verified against `main`:**
+
+- **D-cl-3 is `.nv`-front-end-only.** The bug is AST source-text extraction: the four `.nv`
+  classlist key sites use `prop.name.getText()` (quotes included). The tagged-template paths
+  `classes(...)` and `cx()` (`html-tag.ts` L172, L260) extract keys via `Object.entries(arg)` —
+  runtime JS object iteration where the key is already an unquoted JS string. **Immune by
+  construction.** Both back-ends *consume* the bad token, but the defect originates solely in
+  `.nv` key extraction. Corrected severity: `.nv`-FE-only, not "both front-ends."
+
+- **Open question resolved (the EX-CL-02 deviation):** the bare `class={{...}}` and interpolated
+  `class="${{...}}"` `.nv` surface forms are **NOT distinct extraction sites** — both reach
+  `buildNvHoleBinding`'s object-literal branch. So D-cl-3 is one `.nv` AST-extraction path with
+  exactly **four call sites** (object/array × structural/emit: `nv-parser.ts` L367/L399/L2205/L2237),
+  no fifth site. The "however many paths" risk flagged before commissioning is closed at four.
+
+- **Helper spec hardened (two latent-bug fixes folded into the S0 handoff):**
+  1. `propertyKeyText` must **enumerate** PropertyName kinds (Identifier/StringLiteral/
+     NoSubstitutionTemplate/Numeric → `.text`; Computed → `null`), NOT binary-split
+     StringLiteral-vs-else-`getText()`. A binary split leaves a numeric-key (`{ 2: cond }`)
+     latent bug identical in class to the one being fixed.
+  2. **`null` means computed-key ONLY** (→ existing `hasComputed` → AttrBinding degrade, which
+     is correct because a computed key's identity is genuinely runtime-only). An *unhandled
+     static kind* is a helper gap → **halt/throw and surface**, never silent-degrade. Routing a
+     statically-knowable key to fallback would trade loud wrong-DOM for a quiet
+     missing-optimization — the same masking `getText()` did. "Extract correctly" is the fix;
+     "extract-or-give-up" applies only to genuinely-computed keys.
+
+Revised handoff `cc-handoff-style-s0-plus-dcl3.md` updated in place (Part A scope + helper +
+null/halt distinction; G1.A4 numeric-key gate, G1.A5 computed-key regression gate; added
+unhandled-static-kind halt trigger). No change to S0 Part B (F1) or to commission status.
+
+**No contract touch, no IR touch.** Renderer-layer, in-stream. reactive-core v0.4.2,
+Template-IR v0.4.1 unchanged.
