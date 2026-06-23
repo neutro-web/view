@@ -2012,7 +2012,9 @@ export function parseNvFile(source: string, fileName: string, doc: Document): Nv
       const renderResult = extractRenderTemplate(componentFn, doc, symbols)
       if (renderResult === null) continue
       const styleInfo = extractStyleInfo(componentFn, symbols)
-      const scopeHash = simpleHash(renderResult.shapeHtml)
+      // Fold $style source into the seed so two components with identical templates but
+      // different $style rules get distinct scopeHashes — preventing CSS dedup collisions.
+      const scopeHash = simpleHash(`${renderResult.shapeHtml}\0${styleInfo?.source ?? ''}`)
       if (styleInfo !== null) {
         const artifact = buildStyleArtifact(styleInfo, scopeHash, symbols)
         renderResult.ir.styleArtifact = {
@@ -2923,7 +2925,7 @@ export function parseNvFileForEmit(
       const allDiagnostics = [...diagnostics, ...emitDiagnostics, ...renderResult.diagnostics]
 
       const styleInfo = extractStyleInfo(componentFn, symbols)
-      const scopeHash = simpleHash(renderResult.shapeHtml)
+      const scopeHash = simpleHash(`${renderResult.shapeHtml}\0${styleInfo?.source ?? ''}`)
       if (styleInfo !== null) {
         const artifact = buildStyleArtifact(styleInfo, scopeHash, symbols)
         renderResult.ir.styleArtifact = {

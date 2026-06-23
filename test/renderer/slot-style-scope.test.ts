@@ -135,6 +135,26 @@ describe("G3': same $style definition + same template shape shares scopeHash", (
     const hashEntries = [...(registry ?? [])].filter(([k]) => k === scopeHash)
     expect(hashEntries).toHaveLength(1)
   })
+
+  it("G3'-inverse: same template + different $style rules → distinct scopeHashes (C1 regression gate)", () => {
+    // C1 fix: scopeHash = simpleHash(shapeHtml + '\0' + styleInfo.source).
+    // Two components with byte-identical templates but different $style declarations
+    // must NOT share a scopeHash — otherwise the second component's CSS is silently
+    // dropped by injectComponentStyle dedup.
+    const srcA = `const A = $component((_props) => {
+      $style({ card: { color: 'red' } })
+      $render(() => html\`<div class="\${{card: true}}">x</div>\`)
+    })`
+    const srcB = `const B = $component((_props) => {
+      $style({ card: { color: 'blue' } })
+      $render(() => html\`<div class="\${{card: true}}">x</div>\`)
+    })`
+    const rA = parseNvFile(srcA, 'a.nv', doc)[0]!
+    const rB = parseNvFile(srcB, 'b.nv', doc)[0]!
+    expect(rA.ir.styleArtifact?.scopeHash).toBeDefined()
+    expect(rB.ir.styleArtifact?.scopeHash).toBeDefined()
+    expect(rA.ir.styleArtifact!.scopeHash).not.toBe(rB.ir.styleArtifact!.scopeHash)
+  })
 })
 
 // ── G4 — Parse↔emit differential: same slot class tokens ─────────────────────
