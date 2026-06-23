@@ -54,8 +54,8 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4.1**._
 - **Perf-validation phase:** COMPLETE. All three tripwires resolved (createSignals
   cleared structural-accepted; FALSE-heavy characterized watch-item; cross-engine
   closed). No redesign triggered.
-- **Tests:** 599 green (D-cl-1 close, EX-CL-01..04, commit `1b00492`, 2026-06-22).
-  `tsc --strict` + DOM lib, biome, build all clean.
+- **Tests:** 607 green (S0/F1 + D-cl-3, merge `6baa64e`, 2026-06-22). `tsc --strict` + DOM
+  lib, biome, build all clean.
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state graph-coloring, push-down
@@ -106,11 +106,19 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4.1**._
   **retains D-slot-1**; Template-IR → v0.4. **D-slot-2 invocation-scoped ownership flip
   re-phased (2026-06-22) to land WITH `each`** — its leak gate requires real per-row
   invocations to be failable; flipping it earlier is an unfalsifiable §6 gate.
-- **`$style` scoping — design APPROVED 2026-06-22, spec APPROVED (`spec-style-scoping-and-class-selection.md`),
-  NOT yet a CC handoff (approved ≠ commissioned).** Hybrid per-entry routing (key→class-rewrite, selector→attribute-hash);
+- **`$style` scoping — design APPROVED 2026-06-22, spec APPROVED (`spec-style-scoping-and-class-selection.md`).**
+  Hybrid per-entry routing (key→class-rewrite, selector→attribute-hash);
   `factory` form → CSS-custom-property lowering (values reactive, factory NOT re-run);
   injection = hoist-once-per-component-identity + dedup. Renderer/compiler-layer only —
   NOT a reactive-core contract concern (Template-IR §scope already fences this).
+  - **S0 (parser-only; F1 + D-cl-3): LANDED 2026-06-22 (merge `6baa64e`, architect-verified).**
+    `NvStyleInfo` carries `objExpr` + `factory` + `hasComputedKeys`; `extractStyleInfo` threads
+    `symbols` and erases factory initializers (proof-of-wire). D-cl-3 fixed. **S1 (scoping
+    emission) is now unblocked** — the retained node + erasure seam S1/S2 need is in place.
+  - **S1 (scoping emission): not yet commissioned** — next in the S sequence. Class-rewrite +
+    attribute-hash + static CSS hoist/dedup; real-browser gated.
+  - **S2 (dynamic value lowering): not yet commissioned.** IR decision (reuse `PropBinding` vs
+    new `StyleVarBinding` → Template-IR v0.4.2) made here, seam in front. Real-browser gated.
 - **Class-selection (`class={...}`) — LANDED, architect-verified 2026-06-22** (branch
   feat/class-selection, Increment C). `ClassListBinding` (kind `classlist`, entries
   static|toggle) added to IR union; Template-IR bumped v0.4 → v0.4.1; `AttrBinding`
@@ -166,15 +174,9 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4.1**._
   `ListBinding` (`buildNvSlotContentIR` ignores returned `lists`).
 - **D-each-5:** `signal()` imported in `nv-emitter.ts` for stub-IR extraction in
   the list emit case (plan-mandated, couples emitter to core at runtime).
-- **D-cl-3 — COMMISSIONED 2026-06-22 (folded into S0, `feat/style-s0-parser-seam`, not yet
-  landed). `.nv`-FE-only** (tagged-template `classes()`/`cx()` immune — runtime
-  `Object.entries`, no `getText()`). `.nv` AST key-extraction bug: quote-inclusion +
-  whitespace mis-split + latent numeric-key bug, at four sites (`nv-parser.ts`
-  L367/L399/L2205/L2237; bare and interpolated `.nv` forms share these — not distinct sites).
-  Fix: `propertyKeyText` helper enumerating PropertyName kinds, unquote before split; `null`
-  = computed-only → `hasComputed`, unhandled static kind → halt. Verify on landing: emitted
-  JS for hyphenated-key EX-CL case (`key: "is-active"`) + numeric-key case (`key: "2"`,
-  classlist not AttrBinding) + mounted `classList.contains`.
+- **D-cl-3 — CLOSED 2026-06-22 (merge `6baa64e`).** `.nv` classlist key unquoting fixed via
+  `propertyKeyText` helper at all four sites; quote-inclusion + whitespace mis-split + numeric
+  latent bug all resolved. `.nv`-FE-only (tagged-template paths were always immune).
 
 ### Naming
 - `neutro/view` / `nv` working name; package under `@neutro` (view engine is
@@ -1223,3 +1225,50 @@ unhandled-static-kind halt trigger). No change to S0 Part B (F1) or to commissio
 
 **No contract touch, no IR touch.** Renderer-layer, in-stream. reactive-core v0.4.2,
 Template-IR v0.4.1 unchanged.
+
+---
+
+### 2026-06-22 — Increment S0 (F1) + D-cl-3 LANDED (architect-verified, merge `6baa64e`)
+
+Branch `feat/style-s0-parser-seam` merged to `main` at **6baa64e**. Baseline 599 → **607**
+(+8). Touches `src/renderer/nv-parser.ts` + `test/renderer/` only (G0 held — no IR, emitter,
+interpreter, core, or emitted-mount changes). No contract touch, no Template-IR touch.
+
+**Architect-verified by reading placed files at the merge SHA** (the `main` raw URL served a
+stale CDN cache mid-verification; fetching by commit SHA resolved it — note for future verifies:
+prefer the SHA URL over the branch URL when confirming a fresh push):
+
+- **D-cl-3 CLOSED.** `propertyKeyText(name): string | null` added to `nv-parser.ts` (L1229).
+  Enumerates Identifier / StringLiteral / NoSubstitutionTemplate / Numeric → `.text`;
+  ComputedPropertyName → `null`; any other static kind → `throw` (surfaces helper gaps rather
+  than silent-degrading). Applied at all four classlist key sites (L369, L401, L2232, L2264);
+  `key === null` routes through existing `hasComputed` → AttrBinding. The `getText()`
+  quote-inclusion bug (`'is-active'` → `"'is-active'"`) and the whitespace mis-split are gone.
+  Both hardening points from the pre-commission review landed: enumerate-not-binary-split, and
+  null-means-computed-only (unhandled-static → halt).
+
+- **S0 / F1 LANDED.** `NvStyleInfo` extended (additive): `objExpr: ts.ObjectLiteralExpression`
+  (non-nullable), `factory?: ts.ArrowFunction | ts.FunctionExpression`, `hasComputedKeys: boolean`.
+  Option (a) node retention (no re-parse). `extractStyleInfo` now takes `symbols: ScriptSymbols`
+  (threaded at both call sites) and erases factory-form property initializers via
+  `eraseSignalReadsInNode` (proof-of-wire for S1/S2); returns `null` when the factory body is
+  not a bare/parenthesized object. Object form not erased (no reactivity). `source` retains a
+  JSDoc warning that it is NOT erased for factory form.
+
+- **Two scope additions beyond the handoff, both accepted as sound (not creep):**
+  - `hasComputedKeys` flag — `keys: []` was ambiguous between empty-style and computed-only
+    style; the flag disambiguates. Additive, justified.
+  - Empty-string-key fix in `extractStyleInfo` (`if (k !== null)` not `if (k)`) — `{ "": v }`
+    is a legal key that truthiness-checking drops. Real bug, correct fix.
+
+- **Review-cycle note (good-kind self-correction):** Round-1 Finding-1 over-claimed a `if (k)`
+  bug at "6 sites including classlist"; CC corrected it to 2 real sites in `extractStyleInfo`
+  (the classlist sites already used the `key === null` pattern). Verified accurate against the
+  placed file — the classlist sites route null correctly.
+
+**Gates:** `pnpm test` 607/607; `tsc --strict` clean; biome clean; build clean; two
+independent review rounds (15 findings total, all fixed). Verified independently by reading
+the helper body, all four classlist sites, and the `NvStyleInfo` shape at `6baa64e` — not the
+green count.
+
+reactive-core v0.4.2, Template-IR v0.4.1 unchanged.
