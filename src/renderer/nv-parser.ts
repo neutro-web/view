@@ -70,6 +70,7 @@ import type {
   TemplateShape,
   TextBinding,
 } from './ir.js'
+import { classifyStyleKey } from './style-classify.js'
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -1701,6 +1702,112 @@ function eraseScriptBlock(
     }
 
     ts.forEachChild(node, (child) => walk(child, shadowed))
+  }
+}
+
+// ── Style artifact builder ────────────────────────────────────────────────────
+
+/** Descriptor for a dynamic CSS custom property (Phase 3 population; empty in Phase 2). */
+export type VarBindingDesc = {
+  /** CSS custom property name, e.g. '--nv-1a2b3c4d' */
+  varName: string
+  /** Erased reactive expression source (thunk body) */
+  exprSrc: string
+  /** pathIndex of the DOM node to attach the CSS variable to */
+  pathIndex: number
+  /** CSS property name, e.g. 'color' */
+  propertyName: string
+}
+
+/**
+ * Strips surrounding string-literal quotes from a TS node's getText() result.
+ * `p.initializer.getText()` includes the quote characters for string literals.
+ * This helper produces the raw value suitable for use as a CSS declaration value.
+ *
+ * Examples:
+ *   `'"red"'` → `'red'`
+ *   `"'solid 1px blue'"` → `'solid 1px blue'`
+ *   `'0'` → `'0'`  (numeric: unchanged)
+ */
+function getValueText(node: ts.Expression): string {
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    return node.text
+  }
+  return node.getText()
+}
+
+/**
+ * Build the static CSS artifact for a component's $style block.
+ *
+ * Phase 2: populates `staticCss` only. `varBindingDescs` is always empty (Phase 3).
+ *
+ * - Class-form keys (`card`, `card active`): each token → `.token_<scopeHash> { declarations }`
+ * - Selector-form keys (`button`, `.x`, `&:hover`, etc.): → `:where([data-nv-s-<scopeHash>]) key { declarations }`
+ *
+ * @param info       NvStyleInfo from extractStyleInfo
+ * @param scopeHash  Stable identity hash for the component (e.g. simpleHash(ir.id))
+ */
+function buildStyleArtifact(
+  info: NvStyleInfo,
+  scopeHash: string,
+): {
+  staticCss: string
+  varBindingDescs: VarBindingDesc[]
+} {
+  const rules: string[] = []
+
+  for (const p of info.objExpr.properties) {
+    if (!ts.isPropertyAssignment(p)) continue
+    const key = propertyKeyText(p.name)
+    if (key === null) continue
+
+    // Collect declarations for this property
+    const declPairs: Array<[string, string]> = []
+    const initializer = p.initializer
+
+    if (ts.isObjectLiteralExpression(initializer)) {
+      // Nested object: { card: { color: 'red', fontWeight: 'bold' } }
+      for (const decl of initializer.properties) {
+        if (!ts.isPropertyAssignment(decl)) continue
+        const propKey = propertyKeyText(decl.name)
+        if (propKey === null) continue
+        // Convert camelCase to kebab-case for CSS property names
+        const cssProp = propKey.replace(/([A-Z])/g, '-$1').toLowerCase()
+        declPairs.push([cssProp, getValueText(decl.initializer)])
+      }
+    } else {
+      // Flat value: { card: 'color: red; font-weight: bold' }
+      declPairs.push(['', getValueText(initializer)])
+    }
+
+    if (declPairs.length === 0) continue
+
+    const classify = classifyStyleKey(key)
+
+    if (classify.form === 'class') {
+      // Each token in the key → one rule per token
+      const declarationBlock =
+        declPairs.length === 1 && declPairs[0]?.[0] === ''
+          ? (declPairs[0]?.[1] ?? '')
+          : declPairs.map(([prop, val]) => `${prop}: ${val}`).join('; ')
+
+      for (const token of classify.tokens) {
+        rules.push(`.${token}_${scopeHash} { ${declarationBlock} }`)
+      }
+    } else {
+      // Selector-form: wrap with :where([data-nv-s-<hash>])
+      const declarationBlock =
+        declPairs.length === 1 && declPairs[0]?.[0] === ''
+          ? (declPairs[0]?.[1] ?? '')
+          : declPairs.map(([prop, val]) => `${prop}: ${val}`).join('; ')
+
+      rules.push(`:where([data-nv-s-${scopeHash}]) ${key} { ${declarationBlock} }`)
+    }
+  }
+
+  return {
+    staticCss: rules.join('\n'),
+    varBindingDescs: [], // Phase 3: populated when StyleVarBinding is implemented
   }
 }
 

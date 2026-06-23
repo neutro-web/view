@@ -149,6 +149,9 @@ function wireBinding(
       wireClassList(binding, targetNode)
       break
     }
+    case 'style-var': {
+      throw new Error('[nv/interpreter] style-var: not yet implemented (Phase 3)')
+    }
     case 'sync': {
       throw new Error(
         `[nv/interpreter] v0: '${binding.kind}' binding is designed but not yet implemented in the interpreter. Deferred per IR §9.2.`,

@@ -615,6 +615,10 @@ function emitSetup(
         break
       }
 
+      case 'style-var': {
+        throw new Error('[nv/emitted-mount] style-var: not yet implemented (Phase 3)')
+      }
+
       default: {
         const kind = (binding as Binding).kind
         throw new Error(
