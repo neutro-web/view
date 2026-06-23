@@ -141,6 +141,8 @@ _Last updated: 2026-06-23. Contract **v0.4.2** · Template-IR **v0.4.2**._
   `component` case → class-form tokens in slot content are un-rewritten on both paths
   (parse captures slot IR before patch; emit emits source strings, no IR to patch).
   Semantic = scope-by-lexical-author (parent-wins). See spec-style-slots-scope-carry.md.
+  Mechanism: B3 (scopeHash = simpleHash(shapeHtml), ir.id untouched) — OPEN-S1 resolved
+  2026-06-23. OPEN-S2/S3 confirmed. CC completing Gate-P plan.
 - SyncBinding (throws at both back-ends today).
 - LIS list move-minimization — CLOSED [2026-06-22], not commissioned (O(N) reconcile
   acceptable: N=1k sub-2ms, N=10k 17ms real-Chromium).
@@ -1525,3 +1527,59 @@ site per path (no second walk — collapse-don't-patch).
 
 reactive-core v0.4.2 untouched. Template-IR v0.4.2 (no bump expected). Commissioned next under
 Gate P: `docs/design/plan-style-slots-scope-carry.md`, HALT before any `src/`.
+
+### 2026-06-23 — `$style × slots` OPEN-S1 RESOLVED: B3 (scope seed = pre-walk `shapeHtml`)
+
+CC halted at OPEN-S1 (the B1 seed-circularity the spec flagged at G3/F6): `ir.id =
+simpleHash(reserializedShape)` is POST-walk (nv-parser.ts L1101); `buildNvSlotContentIR` runs
+DURING the walk; so `scopeHash = simpleHash(ir.id)` is not in hand at slot-build time. CC offered
+B1a (redefine `ir.id` to hash pre-walk shape) and B2 (defer slot IR to post-walk, restructure
+`walkNvNodeList` return). **Architect surfaced and ruled a third option: B3.**
+
+**Seam verification before ruling (read on `main`):**
+- `ir.id = nv:${simpleHash(reserializedShape)}`, post-walk, components→anchors (nv-parser L1090,
+  L1101). CC's circularity claim confirmed.
+- `patchClasslistTokens` mutates `ir.bindings` only, NOT `ir.shape.html`; `ir.id` is hashed before
+  any rewrite (L1094→L2003). No feedback loop — the seed is stable regardless of rewrites.
+- `shapeHtml` (pre-walk, sentinel-stripped) exists at nv-parser L883 and is available BEFORE
+  `walkNvNodeList` (L993), i.e. before slot content is built.
+- `$style` is `.nv`-FE-only by design (S1+S2 spec L12; tagged-template FE has no `$style` — no
+  scopeHash/buildStyleArtifact in html-tag.ts). Differential conformance for `$style` = interpreter
+  vs. emitted back-end, both within the `.nv` FE. (An initial "FE-divergence" alarm was raised and
+  RETRACTED on this fact.)
+- Injection dedup (`style-inject.ts` L18/L24) keys on `identityHash`; `styleArtifact` carries
+  `{ css, scopeHash }` (ir.ts L83–85). Injection keys on `scopeHash`, not `ir.id`.
+
+**RULING — B3.** Change the two `scopeHash` sites (nv-parser L1988, L2899) from
+`simpleHash(renderResult.ir.id)` to `simpleHash(shapeHtml)`. Leave `ir.id` untouched.
+
+- `.nv`-FE-local, style-subsystem-local. No core IR identity change.
+- `shapeHtml` available pre-walk → slot content built during the walk carries the scope hash
+  directly; NO post-walk slot rebuild, NO `walkNvNodeList` return restructure.
+- G3 seed-equality becomes trivially true: both back-end sites use the identical pure input
+  `shapeHtml`. The equality the spec demanded holds by construction.
+- `ir.id` (post-walk, mounted-shape identity) and `scopeHash` (pre-walk, style identity) are
+  cleanly DECOUPLED. Injection dedups on `scopeHash`; mount/cache keys on `ir.id`. Correct that
+  these differ.
+
+**B1a REJECTED:** redefining `ir.id`'s input is a core IR identity-semantics change with
+unbounded blast radius (every `ir.id` consumer: dedup, caching, mount keying), to save local
+plumbing. Spec locked this increment as renderer-layer, no core IR semantics. "Simpler code path"
+is locally true, globally false.
+
+**B2 REJECTED as unnecessary:** sound, but B3 achieves the goal without deferring slot build or
+restructuring the walk return type. B2 retained as the fallback if B3's behavioral change (below)
+proves unacceptable — it is not expected to.
+
+**B3 behavioral change (gate, not blocker):** `scopeHash` moves from post-walk to pre-walk shape,
+so hash VALUES change for any styled component containing child components (`shapeHtml` ≠
+`reserializedShape` there). Existing S1+S2 gate fixtures pinning literal hashes must be
+regenerated. Opaque-hash fixture update; not a semantic risk. New gate **G3': two styled
+components with identical `$style` + identical authored `shapeHtml` but different child-component
+composition share a scopeHash — assert this is correct (same authored style → same scope) and
+that injection dedup does not wrongly merge their non-style identity (it keys on scopeHash, which
+is intended to merge identical styles).**
+
+OPEN-S2 (single insertion in `buildNvSlotContentIR`) and OPEN-S3 (reuse `ir-equivalence` harness)
+CONFIRMED as proposed. reactive-core v0.4.2 untouched. Template-IR v0.4.2 (no bump). CC unblocked
+to complete the Gate-P plan with B3 as the mechanism and resume per the plan-first gate.
