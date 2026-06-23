@@ -14,7 +14,7 @@ it disagrees with the source, the source wins and this file is stale → fix it.
 **Maintenance.** Update in the same pass that lands code, as a ready-to-commit edit (same
 discipline as log entries). Keep it to roughly this length; detail belongs in the code.
 
-Last verified against source: **2026-06-22.** Contract **v0.4.2**, Template IR **v0.4**.
+Last verified against source: **2026-06-22.** Contract **v0.4.2**, Template IR **v0.4.1**.
 
 ---
 
@@ -34,27 +34,33 @@ Legend: **REAL** = production-complete & verified · **PARTIAL** = works for a s
 | `sync` classifier + write-graph cycle checker | REAL | Steps 1–2. 41/41. SignalId seam test-locked. |
 | equality-policy inferencer (step 3) | REAL (inert) | Maps node value-type → `OBJECT_IS`/`false`/DECLINE. `_compilerEquals?` hook is an **inert stub** in core; not benchmarkable until wired. |
 | branch-variant analyzer (step 4) | REAL (shelved) | Union oracle. Measured **net-negative**; SHELVED behind a reconcile-cost consumer (E2). |
-| `emitted-mount.ts` | REAL | Compiler back-end. Consumes a **real-thunk** IR → specialized mount. Handles text/attr/prop/event/child/conditional/list/component/**slot-outlet**; sync throws. **Not on the v1 build-pipeline path** (build uses interpreter `mount`). Component case: `capturedParentOwner = getOwner()` before `createRoot`; passes `childSlotContext` to recursive `emitSetup`. Slot-outlet case calls factory (`content(slotProps)`) and uses `runWithOwner(capturedParentOwner, () => createRoot(...))` — parent-lexical ownership (D-slot-1). `?? getOwner()` / `?? null` dead-fallback carry item converged. Direct-capture (`componentFactory` + `propEntries`), never captures binding object. |
+| `emitted-mount.ts` | REAL | Compiler back-end. Consumes a **real-thunk** IR → specialized mount. Handles text/attr/prop/event/child/conditional/list/component/**slot-outlet**/**classlist**; sync throws. **Not on the v1 build-pipeline path** (build uses interpreter `mount`). `classlist` case: per-key `effect` for ≤6 toggle entries, one looping `effect` for >6 (T=6 placeholder; `TODO(threshold)` comment). Component case: `capturedParentOwner = getOwner()` before `createRoot`; passes `childSlotContext` to recursive `emitSetup`. Slot-outlet case calls factory (`content(slotProps)`) and uses `runWithOwner(capturedParentOwner, () => createRoot(...))` — parent-lexical ownership (D-slot-1). Direct-capture (`componentFactory` + `propEntries`), never captures binding object. |
 
 ### `src/renderer/` → `@neutro/view/renderer`
 | File | Status | Notes |
 |---|---|---|
-| `ir.ts` | REAL | IR types, matches Template-IR **v0.4**. 10 binding kinds (6 PoC + List + ComponentBinding + **SlotOutletBinding** landed; Sync deferred). `ComponentBinding` adds `component: ComponentRef`, `props: PropEntry[]`, `propNames`, `slots: SlotEntry[]`. `SlotEntry.content` is now a factory `(props: SlotProps) => TemplateIR` (hard-cut, v0.4). `SlotOutletBinding` = `{ kind:'slot-outlet', pathIndex, name, fallback?: TemplateIR, props?: readonly PropEntry[] }` — `props?` additive (v0.4). `SlotContent` exported. All types local-structural (no DOM/core imports). |
-| `interpreter.ts` | REAL | Back-end / **semantic ground truth**. Exports `mount(ir, parent, doc): () => void` and `walkPath`. `mount` **creates its own `createRoot`**; effects enqueued, run on first flush. `mountFragment(ir,parent,doc,before?,slotContext?)` is **internal (not exported)**. Handles all 6 PoC kinds + list + component + **slot-outlet** (`wireSlotOutlet`); sync throws. `wireSlotOutlet` calls `content(slotProps)` factory with exposed `slotProps` (v0.4); `wireComponent` builds `Record<string, SlotContent>`. Slot content rendered via `runWithOwner(capturedParentOwner, () => createRoot(...))` — parent-lexical ownership (D-slot-1). Nested roots (conditional/list/component) bridged via `onCleanup`. |
-| `html-tag.ts` | REAL | Tagged-template front-end (`createHtmlTag(doc)`). Handles `text`, `attr`, `prop` (`.name=`), `event` (`@name=`), `component`, and **`slot-outlet`** (`${slots('name')}` sentinel; B2 fix). Named slot capture: `<slot name="x">` wrappers → `SlotEntry{name, content: SlotContent}`; slot content goes through the unified `walkNodeList` (GATE-2 collapse; `buildSlotSubIR` RETIRED). `ComponentBinding` inside slot content falls out of the unified walk (component-as-slot-child). Fallback sentinel: `slots('name', { fallback: html\`...\` })`. `slot(name, factory)` fill sentinel detected by `walkNodeList` inside component element; factory stored directly as `SlotEntry.content`. `slots()` outlet gains `props` (accessor thunks) via `slots('row', { item: () => sig() })`. Exports `slots(name)` and `slot(name, factory)` from renderer barrel. |
-| `nv-parser.ts` | PARTIAL → **REAL for the build path** | Adds `parseNvFileForEmit` + `eraseHandlerExpr` + `computeThunksForTemplate`/`computeThunkSource` + `extractScriptBodySource`/`extractModuleScope`. `parseNvFile` (structural-only, stub thunks) unchanged. `parseNvFileForEmit` returns the real `emit` payload: erased `scriptBody`, index-aligned `bindingThunks` (recursive for conditional + component + **slot-outlet**), `moduleScope`. Named slot capture: `<slot name="x">` → `slotHoleGroups` (index-aligned with `slots[]`). `ThunkSource` includes `{ kind:'slot-outlet'; name; props? }` variant. `computeThunkSource` detects `slots.name` PropertyAccessExpression → slot-outlet ThunkSource; `slots.name({ item: item })` call form → `SlotOutletBinding.props`; `{slots.x ?? html\`...\`}` → fallback detection. `let={...}` on `<slot>` element → `SlotEntry.content` factory with destructured slot-props. Slot content goes through the unified `walkNvNodeList` (GATE-2 collapse; `buildNvSlotSubIR` RETIRED). |
-| `nv-emitter.ts` | **REAL** | `emitModule(results) → ES module text`. A2 shape: `(props, slots) => TemplateIR` ComponentRef + `Name.mount` sugar. **Slot thunks fully erased** — `slots:[]` hardcode replaced with `slotHoleGroups`-driven thunk computation under parent scope. `emitBindingLiteral` handles `slot-outlet` and emits `props` when present. Slot content emitted as `(slotProps) => ir` factory; `slotProps.name()` accessor calls replace `let={...}` variable references. `emitThunkSource` is now leaf-only (`LeafThunkSource`); structural kinds handled by `emitBindingLiteral`. Imports: only $script-referenced primitives + `mount`. No forced `createRoot`/`onCleanup`. Composition gap CLOSED. Spec §5. |
+| `ir.ts` | REAL | IR types, matches Template-IR **v0.4.1**. 11 binding kinds (6 PoC + List + ComponentBinding + SlotOutletBinding + **ClassListBinding** landed; Sync deferred). `ClassListBinding` = `{ kind:'classlist', pathIndex, entries: readonly ClassListEntry[] }` where entry is `{ kind:'static'; token } \| { kind:'toggle'; key; expr }` — additive union member (v0.4.1). `ComponentBinding` adds `component: ComponentRef`, `props: PropEntry[]`, `propNames`, `slots: SlotEntry[]`. `SlotEntry.content` is now a factory `(props: SlotProps) => TemplateIR` (hard-cut, v0.4). `SlotOutletBinding` = `{ kind:'slot-outlet', pathIndex, name, fallback?: TemplateIR, props?: readonly PropEntry[] }`. `SlotContent` exported. All types local-structural (no DOM/core imports). |
+| `interpreter.ts` | REAL | Back-end / **semantic ground truth**. Exports `mount(ir, parent, doc): () => void` and `walkPath`. `mount` **creates its own `createRoot`**; effects enqueued, run on first flush. `mountFragment` internal. Handles all 6 PoC kinds + list + component + slot-outlet + **classlist** (`wireClassList`); sync throws. `wireClassList`: statics added once at mount via `classList.add`; toggles wired as per-key `effect` for ≤6, one looping `effect` for >6 (T=6; `TODO(threshold)` comment). `wireSlotOutlet` calls `content(slotProps)` factory (v0.4). Slot content rendered via `runWithOwner(capturedParentOwner, () => createRoot(...))` — parent-lexical ownership (D-slot-1). Nested roots bridged via `onCleanup`. |
+| `html-tag.ts` | REAL | Tagged-template front-end (`createHtmlTag(doc)`). Handles `text`, `attr`, `prop` (`.name=`), `event` (`@name=`), `component`, **slot-outlet** (`${slots('name')}` sentinel), and **classlist** (`${classes(...)}` sentinel). `classes(...args)` returns a `ClassesSentinel` (`__nvClasses` brand); detected in `buildHtmlHoleBinding`'s attr branch when `name === 'class'`. **`cx(...args): string`** — pure string builder (no reactivity); handles string/object/array/falsy args recursively. A bare object literal at a `class` hole still throws (validator allowlist). Named slot capture, fallback sentinel, `slot(name, factory)` fill sentinel. Exports `slots`, `slot`, `cx`, `classes`, `ClassesSentinel` from renderer barrel. |
+| `nv-parser.ts` | PARTIAL → **REAL for the build path** | `parseNvFile` (structural-only, stub thunks) + `parseNvFileForEmit` (real emit payload). **`<each>` authoring LANDED (2026-06-22):** both `walkNvNodeList` and `parseNvFileForEmit`'s thunk builder handle `<each .of=... key=... let={...}>` → `ListBinding`. Variant-A adapter at construction in both FEs. **Classlist LANDED (Increment C, 2026-06-22):** `buildNvHoleBinding` attr branch routes `class` + object/array literal → `ClassListBinding`; computed/shorthand keys → `AttrBinding` fallback. Structural path emits `stubExpr` for toggle `expr` (structural-only — by design). `parseNvFileForEmit` classlist branch (~L2188–2257) extracts real `boolSrc: string` per toggle entry. **D-cl-3 (known defect):** key extraction uses `prop.name.getText()` at four sites (L367/L399/L2205/L2237); returns source text with surrounding quotes for string-literal keys (e.g. `'is-active'` → key `"'is-active'"`). Identifier keys unaffected. Fix deferred to S0 (`propertyKeyText` helper; `p.name.text` for Identifier/StringLiteral). `eraseSignalReadsInNode` PropertyAccess guard: always skip property-name position; skip object position only when `accessor === undefined`. JSDOM `let={item, index}` comma-split reassembly added. `ThunkSource` includes `slot-outlet`, `list`, and `classlist` variants. |
+| `nv-emitter.ts` | **REAL** | `emitModule(results) → ES module text`. A2 shape + `Name.mount` sugar. **`classlist` case LANDED:** `emitBindingLiteral` case `'classlist'` emits `{ kind: 'classlist', pathIndex, entries: [...] }` with per-toggle `expr: () => (${boolSrc})` — real reactive thunks, not stubs (D-cl-1 closed). Arrow-body paren fix: `((slotProps) => (${bodyLiteral}))` to prevent esbuild block-vs-object parse failure. `emitThunkSource` leaf-only (`LeafThunkSource`); structural kinds handled by `emitBindingLiteral`. Slot thunks fully erased. Imports: only $script-referenced primitives + `mount`. |
 | `nv-esbuild-plugin.ts` | **REAL** | `nvPlugin()`: `onLoad(/\.nv$/)` → jsdom doc → `parseNvFileForEmit` → `emitModule` → `{ contents, loader: 'js' }`. Thin I/O glue. |
-| build pipeline (overall) | **REAL** | Transform + erasure layer verified. Executable-module gate CLOSED (EX-01..03, dynamic import, esbuild alias). Multi-root dispose fixed. |
-| `comparator.ts` | REAL | Structural DOM comparison (`structurallyEqual`) for the differential suite. |
+| build pipeline (overall) | **REAL** | Transform + erasure layer verified. Executable-module gate CLOSED (EX-01..03). Multi-root dispose fixed. |
+| `comparator.ts` | REAL | Structural DOM comparison (`structurallyEqual`) for the differential suite. `irStructurallyEqual` comparator's `classlist` case compares entry length/kind/token/key (skips expr-thunk identity). |
 
-**Published surface note.** `@neutro/view/renderer` barrel now also exports `parseNvFileForEmit`
-and types `NvEmitPayload` / `ThunkSource` — intended, the build tool is an external consumer.
-`@neutro/view/core` (`src/core/index.ts`) unchanged.
+**Published surface note.** `@neutro/view/renderer` barrel exports `parseNvFileForEmit`, `NvEmitPayload`, `ThunkSource`, **`cx`**, **`classes`**, **`ClassesSentinel`**, **`ClassListBinding`**, **`ClassListEntry`** — all intended external surfaces. `@neutro/view/core` unchanged.
 
 ### `test/`, `integration/`
 Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Playwright gate
-(Chromium + cross-engine Blink/Gecko/WebKit), PoC integration. All green at last report.
+(Chromium + cross-engine Blink/Gecko/WebKit), PoC integration. **599/599 green (2026-06-22).**
+`nv-emitter-exec.test.ts` includes:
+- EX-01..03: Counter/Conditional/Multi-component emit-exec.
+- EX-EACH-01..05: `.nv` `<each>` behavioral e2e — initial render, item reactivity (Variant-A
+  proof), index reactivity, add/remove/clear, unmount teardown.
+- EX-CL-01..04: `.nv` class-selection emit-exec (closes D-cl-1) — initial render, per-key
+  toggle reactivity (load-bearing: real `boolSrc` in emitted JS), per-key isolation,
+  unmount. Uses identifier-only keys (`card`, `active`, `alpha`, `beta`) — D-cl-3 avoidance
+  (hyphenated keys pending the `propertyKeyText` fix in S0).
 
 ---
 
@@ -68,10 +74,11 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
   auto-attach to the parent owner.
 - **Erasure regions: `$script` (via `preprocessMutationWrites`) AND render holes (via
   `parseNvFileForEmit`).** Render-hole erasure: bare-read on every hole; **bare-read +
-  mutation-write on event handlers** (`eraseHandlerExpr`, handles arrow block-body *and*
-  arrow-expression-body assignments; reuses the `$script` shadow helpers — no duplicated
-  logic). `parseNvFile` (the non-emit path) still does not erase render holes; only
-  `parseNvFileForEmit` does.
+  mutation-write on event handlers** (`eraseHandlerExpr`). `parseNvFile` (the non-emit path)
+  still does not erase render holes; only `parseNvFileForEmit` does.
+- **classlist key extraction (D-cl-3 seam):** four sites in `nv-parser.ts` use
+  `prop.name.getText()` — safe for identifier keys only. Do not add new classlist key
+  extraction without the `propertyKeyText` helper fix.
 - **SignalId derivation** must use the same `signalSymbolId` across compiler steps 1–2/4 and
   any renderer write-back (SyncBinding `writeTargetId`).
 - **`core.ts` is never modified by the compiler** (standing constraint). Field order locked.
@@ -80,61 +87,37 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
 
 ## Known gaps / stubs / v0 limitations (named, not hidden)
 
-- **Build pipeline executable-module gate — CLOSED (2026-06-20).** EX-01..03 in
-  `nv-emitter-exec.test.ts` write the emitted `.js` to disk, bundle via esbuild (alias
-  `@neutro/view/*` → `src/`), `import()` the bundle, mount, and assert DOM. Conditional
-  literal and multi-component emission both verified end-to-end.
-- **Handler destructuring-write — DIAGNOSED (2026-06-21).** `eraseHandlerExpr` now detects
-  destructuring assignment targets (`[a,b] = …`, `({x} = …)`) where any bound name is a
-  reactive signal, and emits an error diagnostic pointing to explicit `.set()`. The gap is
-  closed for writes. Reads of props-destructured locals inside handler bodies are also erased
-  via `buildPropsAccessorMap` (now called from handler erasure as a second call site).
-- **`extractModuleScope` edge:** passes top-level imports + non-`$component` statements
-  through verbatim; verify non-`const` component forms and `$component` helper functions
-  behave as intended (low risk).
+- **Build pipeline executable-module gate — CLOSED (2026-06-20).** EX-01..03 verified.
+- **`<each>` authoring — LANDED (2026-06-22, feat/each-authoring).** Both FEs produce
+  `ListBinding` from `.nv <each>` elements. Behavioral e2e on the emit path: EX-EACH-01..05.
+  Bugs fixed in this increment: arrow-body paren (`((slotProps) => (...))`) and JSDOM
+  `let={item, index}` comma-split reassembly and `eraseSignalReadsInNode` PropertyAccess guard.
+- **Class-selection — LANDED + ARCHITECT-VERIFIED (2026-06-22, feat/class-selection,
+  feat/class-emit-exec).** `ClassListBinding` in IR (v0.4.1); `cx`, `classes()`,
+  `ClassesSentinel` in `html-tag.ts`; `wireClassList` in both back-ends; G1 per-key isolation
+  proven (TC-CL-04 call-count, both back-ends); D-cl-1 CLOSED (EX-CL-01..04, emitted JS
+  shows real `boolSrc`). **D-cl-3 open:** hyphenated keys silently broken — deferred to S0.
+- **Handler destructuring-write — DIAGNOSED (2026-06-21).** `eraseHandlerExpr` emits
+  diagnostic; reads of props-destructured locals erased via `buildPropsAccessorMap`.
 - **`parseNvFile` thunks are stubs** — structural form is real; thunks are `(() => undefined)`.
-  Use `parseNvFileForEmit` for the build path (returns real erased thunk sources).
-- **Child & List not `.nv`-reachable** — interpreter supports them via hand-authored IR only.
-- **`html-tag.ts`** now covers text/attr/prop/event/component. Conditional/list require manual
-  IR or the `.nv` path.
-- **Component API v1 — LANDED (2026-06-21).** `ComponentBinding` is real in `ir.ts` (v0.3).
-  Both front-ends (`html-tag.ts`, `nv-parser.ts`) detect capitalized component elements and
-  produce `ComponentBinding` with throwing stub factory (factory resolution deferred — cannot
-  resolve at parse time), real `props[]`/`propNames`/`slots[]`. Both back-ends
-  (`interpreter.ts` wireComponent, `emitted-mount.ts` case 'component') consume
-  `ComponentBinding` — create child reactive root, build propsObj/slotsObj, call factory,
-  mount returned IR, cleanup on owner dispose. Props-erasure: `buildPropsAccessorMap` shared
-  across `eraseScriptBlock`, `eraseHandlerExpr`, `computeThunkSource` (three callers). D3
-  (destructuring write in handler → diagnostic) closed. Static default-slot capture in both
-  front-ends; dynamic/nested-component slot content is warned and deferred.
-  Cross-file / nested composition via the emitter path **works (A2, 2026-06-21).** Emitted
-  factories are `ComponentRef`-shaped — `export function Name(props, slots) { <$script>; return
-  <IR literal> }` returning `TemplateIR` directly (no `createRoot`, no `__ir`), plus a
-  `Name.mount = (parent, doc, props = {}, slots = {}) => mount(Name(props, slots), parent, doc)`
-  root sugar. A parent emitting a `<Child/>` binding threads prop accessor thunks
-  (`expr: () => (n())`) into the child factory; the parent root owns the child's effects by
-  construction. Slot **consumption** LANDED (increment 1, 2026-06-22): walk-collapse, component-as-slot-child, fallback (`SlotOutletBinding.fallback?`). **Increment 1.5 LANDED (2026-06-22):**
-  `nv-parser.ts` emit path now has a single recursive thunk-builder (`computeBindingThunks`),
-  shared by the top-level path and conditional-branch path; component-in-conditional-branch
-  emit is fixed (was "ComponentBinding thunk kind mismatch"). `nv-emitter.ts` `emitThunkSource`
-  is now leaf-only (`LeafThunkSource`); structural kinds (`conditional`, `component`,
-  `slot-outlet`) handled directly by `emitBindingLiteral`. **Increment 2 LANDED (2026-06-22):**
-  scoped-slot IR shape (`SlotEntry.content` → factory; `SlotOutletBinding.props?`); `let={...}`
-  authoring both FEs; D-slot-1 RETAINED; Template-IR → v0.4. D-slot-2 ownership flip re-phased
-  to land with `each` (2026-06-22).
-- **Equality hook inert; step 4 shelved** — neither specialization is wired to save work.
+  Use `parseNvFileForEmit` for the build path.
+- **`html-tag.ts`** covers text/attr/prop/event/component/classlist. Conditional/list require
+  manual IR or the `.nv` path.
+- **Component API v1 — LANDED (2026-06-21).** `ComponentBinding` real in `ir.ts` (v0.3).
+  Both FEs detect capitalized elements → `ComponentBinding`. Both back-ends consume it.
+  Slot consumption increments 1 + 1.5 + 2 LANDED (2026-06-22). D-slot-1 RETAINED; D-slot-2
+  ownership flip re-phased to land with `each`.
+- **Equality hook inert; step 4 shelved** — neither specialization saves work.
 - **SyncBinding** throws at both back-ends.
-- **Multi-root mount/dispose — FIXED (v0.2.1).** Both back-ends now snapshot all fragment
-  children before insert and remove every root on cleanup. The single-root PoC constraint is gone.
-- **Multi-root list items not supported** — both back-ends throw loudly if an item template
-  produces more than one root node. Single-root guard is the v1 limitation; wrap in a container element.
+- **Multi-root list items not supported** — single-root guard; wrap in a container element.
 - **`$style`** — parser extracts `{form, keys, source}`; scoping/injection unbuilt (own item).
+- **`extractModuleScope` edge:** non-`$component` top-level statements pass through verbatim.
 
 ---
 
 ## Not built at all (forward queue)
-`$style` scoping, SyncBinding, LIS list move-minimization (parked), kind-split (parked behind
-real-app evidence), `roots[0] as Node` biome-laundering cleanup (replace with `biome-ignore`
-+ `!`; no runtime impact). **D-slot-2 ownership flip** queued behind `each` iteration construct
-(per 2026-06-22 re-phase): invocation-scoped ownership retires D-slot-1; requires real per-row
-invocations to make the leak gate failable.
+`$style` scoping (S0 handoff written; D-cl-3 fix folded in), SyncBinding, LIS list
+move-minimization (parked), kind-split (parked behind real-app evidence), `roots[0] as Node`
+biome-laundering cleanup. **D-slot-2 ownership flip** queued behind `each` — requires real
+per-row invocations to make the leak gate failable. **D-cl-3 fix** (`propertyKeyText` helper,
+four sites) queued as part of S0 (`feat/style-s0-parser-seam`).
