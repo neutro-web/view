@@ -115,13 +115,13 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4.1**._
   injection = hoist-once-per-component-identity + dedup. Renderer/compiler-layer only —
   NOT a reactive-core contract concern (Template-IR §scope already fences this).
   - **S0 (F1 + D-cl-3): LANDED 2026-06-22 (`6baa64e`).** Parser seam in place.
-  - **S1+S2 (MERGED 2026-06-22): scoping emission + dynamic value lowering.** Spec APPROVED 2026-06-22
-    (`spec-style-s1s2-scoping-and-lowering.md`); not yet a CC handoff. Key discriminant ruled (class-form iff all-bare-class-tokens & no tag name, else
-    selector-form; nv does not invent CSS semantics). Static/dynamic split = reactivity-based.
-    **New `StyleVarBinding` → Template-IR v0.4.2** (lands with dynamic sub-phase; not PropBinding
-    reuse). Injection built new, through `doc`, dedup'd per component identity. Seven OPEN points
-    deferred to build (selector qualification, registry, teardown, etc.). Real-browser gated.
-    Recommended build order: discriminant → static+injection → StyleVarBinding+dynamic → ×classlist.
+  - **S1+S2 — COMMISSIONED 2026-06-22 (`feat/style-s1s2`, plan-first hard gate; not yet landed).**
+    Spec authoritative at `docs/design/spec-style-s1s2-scoping-and-lowering.md`. Handoff
+    `cc-handoff-style-s1s2.md`. CC must produce `docs/design/plan-style-s1s2.md` and halt for
+    architect approval before any `src/` touch (Gate P). Four phases: (1) discriminant+tag-set
+    [sandbox, no IR]; (2) static scoping+injection [browser]; (3) StyleVarBinding+dynamic
+    [browser, **Template-IR v0.4.2**]; (4) ×classlist [browser, OPEN-7]. Seven OPEN points ruled
+    against the plan, not pre-decided. Locked constraints L.1–L.6 fenced as G0.
 - **Class-selection (`class={...}`) — LANDED, architect-verified 2026-06-22** (branch
   feat/class-selection, Increment C). `ClassListBinding` (kind `classlist`, entries
   static|toggle) added to IR union; Template-IR bumped v0.4 → v0.4.1; `AttrBinding`
@@ -1336,3 +1336,34 @@ rewrite consistency (OPEN-7). See spec §7.
 
 reactive-core v0.4.2 unchanged. Template-IR v0.4.1 now (bump to v0.4.2 lands with dynamic-lowering
 sub-phase).
+
+---
+
+### 2026-06-22 — Increment S1+S2 COMMISSIONED (full; plan-first hard gate)
+
+Handoff `cc-handoff-style-s1s2.md` written; branch `feat/style-s1s2`. Spec is authoritative at
+`docs/design/spec-style-s1s2-scoping-and-lowering.md` (APPROVED 2026-06-22). Commissioned as the
+full increment (all four sub-phases), NOT sliced — at architect's direction.
+
+**Plan-first hard gate (Gate P).** CC produces `docs/design/plan-style-s1s2.md` covering all four
+sub-phases (files+seams cited at HEAD, OPEN-point resolution PROPOSALS not resolutions, per-phase
+gate tables with evidence-command + failure-condition, differential corpus, locked-constraint
+confirmations) and **HALTS for architect approval before any `src/` touch.** Proceeding to code
+pre-approval is a G0 disqualifier. Rationale: the seven OPEN spec points include browser-gated
+design decisions (OPEN-1 selector qualification, OPEN-5 `<style>` vs `adoptedStyleSheets`) that
+must be ruled before the expensive browser-gated phases, or a multi-revision loop results.
+
+**Gate structure:** per-phase G0/G1 tables, each item failable (evidence command + failure
+condition). Phase 1 (discriminant+tag-set) sandbox, no IR. Phases 2–4 real-browser REQUIRED
+(jsdom not authoritative for cascade/custom-property/dedup). Template-IR **v0.4.2** bump lands
+with Phase 3 (`StyleVarBinding`), flagged as the contract-adjacent surface point — Template-IR
+doc version + cross-ref consistency pass on landing. reactive-core untouched.
+
+**Locked constraints fenced as increment-level G0** (L.1–L.6): no `src/core/` touch; injection
+through `doc` not global `document`; factory analyzed compile-time never re-run; nv does not
+invent CSS semantics; misclassification falls to dynamic (safe — static-baked-dynamic is the
+only WRONG outcome, per "skip only provable work"); both back-ends differential-tested
+(shared oracle).
+
+No decisions resolved here beyond commissioning — the OPEN points remain open, to be ruled
+against CC's plan (Gate P). reactive-core v0.4.2, Template-IR v0.4.1 unchanged until Phase 3.
