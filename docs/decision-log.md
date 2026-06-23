@@ -86,6 +86,9 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4.1**._
 - Compile-time DOM encapsulation — still open (Shadow-DOM opt-in path unspecced).
   STYLE encapsulation APPROVED 2026-06-22 (see Log) — Light-DOM scoping via hybrid
   routing; not a contract concern.
+- **`$style` key discriminant + StyleVarBinding APPROVED-PENDING (spec drafted 2026-06-22).**
+  Two-way class/selector routing; new `StyleVarBinding` IR member (Template-IR v0.4.2 on land).
+  nv-does-not-invent-CSS principle. Renderer-layer; not a contract concern.
 
 ### Genuine research / deferred-on-evidence
 - Beating the alien-signals-class baseline: nv wins/ties 5 of 7 cases; two wide-graph
@@ -111,14 +114,15 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4.1**._
   `factory` form → CSS-custom-property lowering (values reactive, factory NOT re-run);
   injection = hoist-once-per-component-identity + dedup. Renderer/compiler-layer only —
   NOT a reactive-core contract concern (Template-IR §scope already fences this).
-  - **S0 (parser-only; F1 + D-cl-3): LANDED 2026-06-22 (merge `6baa64e`, architect-verified).**
-    `NvStyleInfo` carries `objExpr` + `factory` + `hasComputedKeys`; `extractStyleInfo` threads
-    `symbols` and erases factory initializers (proof-of-wire). D-cl-3 fixed. **S1 (scoping
-    emission) is now unblocked** — the retained node + erasure seam S1/S2 need is in place.
-  - **S1 (scoping emission): not yet commissioned** — next in the S sequence. Class-rewrite +
-    attribute-hash + static CSS hoist/dedup; real-browser gated.
-  - **S2 (dynamic value lowering): not yet commissioned.** IR decision (reuse `PropBinding` vs
-    new `StyleVarBinding` → Template-IR v0.4.2) made here, seam in front. Real-browser gated.
+  - **S0 (F1 + D-cl-3): LANDED 2026-06-22 (`6baa64e`).** Parser seam in place.
+  - **S1+S2 (MERGED 2026-06-22): scoping emission + dynamic value lowering.** Spec DRAFTED
+    (`spec-style-s1s2-scoping-and-lowering.md`), awaiting architect approval; not yet a CC
+    handoff. Key discriminant ruled (class-form iff all-bare-class-tokens & no tag name, else
+    selector-form; nv does not invent CSS semantics). Static/dynamic split = reactivity-based.
+    **New `StyleVarBinding` → Template-IR v0.4.2** (lands with dynamic sub-phase; not PropBinding
+    reuse). Injection built new, through `doc`, dedup'd per component identity. Seven OPEN points
+    deferred to build (selector qualification, registry, teardown, etc.). Real-browser gated.
+    Recommended build order: discriminant → static+injection → StyleVarBinding+dynamic → ×classlist.
 - **Class-selection (`class={...}`) — LANDED, architect-verified 2026-06-22** (branch
   feat/class-selection, Increment C). `ClassListBinding` (kind `classlist`, entries
   static|toggle) added to IR union; Template-IR bumped v0.4 → v0.4.1; `AttrBinding`
@@ -135,7 +139,9 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4.1**._
   the **interpolated** object-literal form (`class="${{...}}"`); bare-attribute `class={{...}}`
   form distinctness is a minor open question, not blocking.
 - `$style × slots` — STILL parked behind `$style` scoping *implementation* (design tractable
-  now that axis-a is chosen, but specced after `$style` lands).
+  now that axis-a is chosen, but specced after `$style` lands). The slot-boundary scope-carry
+  question is now determined by the S1+S2 discriminant (class-rewrite vs attribute-hash):
+  tractable to spec once S1+S2 lands. `$style × classlist` is OPEN-7 inside S1+S2 (sub-phase 4).
 - SyncBinding (throws at both back-ends today).
 - LIS list move-minimization — CLOSED [2026-06-22], not commissioned (O(N) reconcile
   acceptable: N=1k sub-2ms, N=10k 17ms real-Chromium).
@@ -1272,3 +1278,63 @@ the helper body, all four classlist sites, and the `NvStyleInfo` shape at `6baa6
 green count.
 
 reactive-core v0.4.2, Template-IR v0.4.1 unchanged.
+
+---
+
+### 2026-06-22 — Increment S1+S2 MERGED; `StyleVarBinding` IR decision; key discriminant ruled; spec DRAFTED
+
+Supersedes the S1/S2 split in the 2026-06-22 phasing entry ("Increment S PHASED into S0/S1/S2").
+S0/F1 landed (`6baa64e`); S1 (static scoping) and S2 (dynamic lowering) are now **one
+increment, S1+S2**, because the seam S2 needs is in place and a static-only S1 was an
+artificial slice. Spec drafted: `spec-style-s1s2-scoping-and-lowering.md` (DRAFT, awaiting
+architect approval — not yet a CC handoff).
+
+**Decisions locked in this entry:**
+
+1. **Merge S1+S2.** One increment carrying scoping emission (class-rewrite + attribute-hash +
+   hoist/dedup) AND dynamic value lowering (static/dynamic split, `var(--nv-…)`, reactive
+   `setProperty`). Real-browser gated. `.nv`-FE-only.
+
+2. **IR decision: new `StyleVarBinding`, NOT `PropBinding` reuse.** Template-IR **v0.4.1 →
+   v0.4.2** (additive union member, ClassListBinding-v0.4.1 precedent). Decided against the real
+   `ir.ts` shape at `6baa64e`: `PropBinding` is `{kind:'prop', name, expr}` with sink `el[name]=v`
+   — no `setProperty` path, no removal semantics, different name namespace. Reuse would require a
+   shape change to `PropBinding` (a Template-IR touch regardless) and muddy its single
+   responsibility. New member is cleaner and additive. Shape:
+   `{ kind:'style-var', varName:string, expr:ReactiveExpr<string|number|null|undefined> }`;
+   `null`/`undefined` → `removeProperty`. Interpreter `wireStyleVar` mirrors `wireProp`
+   (one effect/binding, owner-tree cleanup). **Renderer-layer; no reactive-core touch** (no §1
+   invariant, no change to mid-propagation observation — a write sink on the effect's downstream
+   edge). The v0.4.2 bump LANDS with the dynamic-lowering sub-phase (build order step 3), not at
+   spec approval.
+
+3. **Key discriminant RULED (class-vs-selector, two-way).** A `$style` key is **class-form**
+   iff every whitespace-separated token matches `^-?[_a-zA-Z][_a-zA-Z0-9-]*$` AND no single
+   token is a known HTML/SVG tag name; **otherwise selector-form**. Class-form → per-token
+   class-rewrite (`card`→`card_<hash>`); selector-form → attribute-hash (`[data-nv-s-<hash>]`),
+   scoped as written. Space-separated class lists (`'card active'`) are supported (each token
+   rewritten). Single bare tag (`'button'`) → element selector. Tag-name set is one maintainable
+   `KNOWN_ELEMENT_TAGS` constant (HTML+SVG; MathML deferred), adjudicating only the single bare
+   token. **Principle: nv does not invent CSS semantics** — it routes and rewrites, never
+   validates/fixes/reinterprets. Mixed keys (`'button card'`) are scoped as the CSS they are
+   (descendant combinator); not rejected, not special-cased. Author owns CSS correctness.
+   - Resolves the routing gap surfaced when S1 needed per-entry routing: S0's flat
+     `NvStyleInfo.keys` is lossy on this distinction; routing reads `objExpr` property names
+     directly. (Not an S0 defect — the discriminant was never specified; surfaced now.)
+
+4. **Static/dynamic split RULED.** A value is *dynamic* if its erased initializer (S0 seam) reads
+   any `symbols.all` reactive; *static* otherwise. Factory analyzed at compile time, never re-run
+   (per phasing entry). Static → hoisted stylesheet; dynamic → `var()` + `StyleVarBinding`.
+
+5. **Injection built new.** Verified at `6baa64e`: interpreter has NO injection machinery. Built
+   in this increment, keyed by component identity, dedup'd, **through the passed `doc` (never
+   global `document`)** — required by the locked "renderer stays agnostic" decision (SSR/multi-doc).
+
+**Seven OPEN spec points deferred to build (seam-in-front, CC halts not guesses):** selector
+qualification form (OPEN-1, browser-gated), declHash property-name inclusion (OPEN-2), dynamic
+value coercion (OPEN-3), injection registry shape/lifetime (OPEN-4), `<style>` vs
+`adoptedStyleSheets` (OPEN-5, browser-gated), teardown policy (OPEN-6), `$style × ClassListBinding`
+rewrite consistency (OPEN-7). See spec §7.
+
+reactive-core v0.4.2 unchanged. Template-IR v0.4.1 now (bump to v0.4.2 lands with dynamic-lowering
+sub-phase).
