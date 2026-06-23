@@ -1,15 +1,4 @@
-/**
- * nv Style Injection Registry
- * Stream: (3) Renderer/templating
- *
- * Provides idempotent per-document style injection.
- * One style injection per (document, identityHash) pair.
- * WeakMap keyed on Document so GC removes entries when the document is collected.
- *
- * Injection strategy:
- *   - adoptedStyleSheets path (Chrome 73+, Safari 16.4+, Firefox 101+): zero-FOUC
- *   - <style> fallback: jsdom + older browsers, and cross-document sheets
- */
+// nv Style Injection Registry — Stream (3) Renderer/templating: idempotent per-document style injection.
 
 type StyleEntry =
   | { kind: 'adopted'; sheet: CSSStyleSheet }
@@ -18,6 +7,11 @@ type StyleEntry =
 type StyleRegistry = Map<string, StyleEntry>
 
 const docStyleRegistries = new WeakMap<Document, StyleRegistry>()
+
+// Get the style registry for a document (undefined if not yet initialized)
+export function getStyleRegistry(doc: Document): StyleRegistry | undefined {
+  return docStyleRegistries.get(doc)
+}
 
 // Inject a component's scoped CSS into the given document. Idempotent per (doc, identityHash).
 // Prefers adoptedStyleSheets; falls back to <style> element on failure or unsupported env.

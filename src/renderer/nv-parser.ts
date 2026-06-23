@@ -1719,16 +1719,7 @@ export type VarBindingDesc = {
   propertyName: string
 }
 
-/**
- * Strips surrounding string-literal quotes from a TS node's getText() result.
- * `p.initializer.getText()` includes the quote characters for string literals.
- * This helper produces the raw value suitable for use as a CSS declaration value.
- *
- * Examples:
- *   `'"red"'` → `'red'`
- *   `"'solid 1px blue'"` → `'solid 1px blue'`
- *   `'0'` → `'0'`  (numeric: unchanged)
- */
+// Strips surrounding string-literal quotes from a TS node — returns raw CSS value
 function getValueText(node: ts.Expression): string {
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
     return node.text
@@ -1736,17 +1727,7 @@ function getValueText(node: ts.Expression): string {
   return node.getText()
 }
 
-/**
- * Build the static CSS artifact for a component's $style block.
- *
- * Phase 2: populates `staticCss` only. `varBindingDescs` is always empty (Phase 3).
- *
- * - Class-form keys (`card`, `card active`): each token → `.token_<scopeHash> { declarations }`
- * - Selector-form keys (`button`, `.x`, `&:hover`, etc.): → `:where([data-nv-s-<scopeHash>]) key { declarations }`
- *
- * @param info       NvStyleInfo from extractStyleInfo
- * @param scopeHash  Stable identity hash for the component (e.g. simpleHash(ir.id))
- */
+// Build static CSS artifact for $style block — Phase 2 only (static CSS, no var bindings)
 function buildStyleArtifact(
   info: NvStyleInfo,
   scopeHash: string,
