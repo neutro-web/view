@@ -152,8 +152,14 @@ export interface NvComponentResult {
 
 export interface NvStyleInfo {
   form: 'object' | 'factory'
+  /** Static property keys only. Computed keys ([expr]: ...) are excluded — check hasComputedKeys. */
   keys: readonly string[]
+  /** True if any property key was computed ([expr]: ...) — those keys are absent from `keys`. */
+  hasComputedKeys: boolean
+  /** Raw source text of the $style argument. For factory form, signal reads are NOT erased — use objExpr + eraseSignalReadsInNode for erased output. */
   source: string
+  objExpr: ts.ObjectLiteralExpression
+  factory?: ts.ArrowFunction | ts.FunctionExpression
 }
 
 // ── Internal types ────────────────────────────────────────────────────────────
@@ -360,11 +366,11 @@ function buildNvHoleBinding(
             break
           }
           if (ts.isPropertyAssignment(prop)) {
-            if (ts.isComputedPropertyName(prop.name)) {
+            const key = propertyKeyText(prop.name)
+            if (key === null) {
               hasComputed = true
               break
             }
-            const key = prop.name.getText()
             for (const token of key.split(/\s+/).filter(Boolean)) {
               entries.push({ kind: 'toggle', key: token, expr: stubExpr as () => unknown })
             }
@@ -392,11 +398,11 @@ function buildNvHoleBinding(
                 break
               }
               if (ts.isPropertyAssignment(prop)) {
-                if (ts.isComputedPropertyName(prop.name)) {
+                const key = propertyKeyText(prop.name)
+                if (key === null) {
                   hasComputed = true
                   break
                 }
-                const key = prop.name.getText()
                 for (const token of key.split(/\s+/).filter(Boolean)) {
                   entries.push({ kind: 'toggle', key: token, expr: stubExpr as () => unknown })
                 }
@@ -1220,7 +1226,21 @@ function extractRenderTemplate(
   return null
 }
 
-function extractStyleInfo(componentFn: ts.ArrowFunction): NvStyleInfo | null {
+function propertyKeyText(name: ts.PropertyName): string | null {
+  if (ts.isIdentifier(name)) return name.text
+  if (ts.isStringLiteral(name)) return name.text
+  if (ts.isNoSubstitutionTemplateLiteral(name)) return name.text
+  if (ts.isNumericLiteral(name)) return name.text
+  if (ts.isComputedPropertyName(name)) return null
+  throw new Error(
+    `[nv/parser] propertyKeyText: unhandled static PropertyName kind ${ts.SyntaxKind[name.kind]}`,
+  )
+}
+
+function extractStyleInfo(
+  componentFn: ts.ArrowFunction,
+  symbols: ScriptSymbols,
+): NvStyleInfo | null {
   if (!ts.isBlock(componentFn.body)) return null
   for (const stmt of componentFn.body.statements) {
     if (!ts.isExpressionStatement(stmt)) continue
@@ -1230,33 +1250,44 @@ function extractStyleInfo(componentFn: ts.ArrowFunction): NvStyleInfo | null {
     if (!arg) return null
     const src = arg.getText()
     if (ts.isObjectLiteralExpression(arg)) {
-      const keys = arg.properties
-        .filter(ts.isPropertyAssignment)
-        .map((p) =>
-          ts.isIdentifier(p.name) ? p.name.text : ts.isStringLiteral(p.name) ? p.name.text : '',
-        )
-        .filter(Boolean)
-      return { form: 'object', keys, source: src }
+      const keys: string[] = []
+      let hasComputedKeys = false
+      for (const p of arg.properties) {
+        if (ts.isPropertyAssignment(p)) {
+          const k = propertyKeyText(p.name)
+          if (k === null) {
+            hasComputedKeys = true
+            continue
+          }
+          if (k !== null) keys.push(k)
+        }
+      }
+      return { form: 'object', keys, hasComputedKeys, source: src, objExpr: arg }
     }
     if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) {
-      const fnBody = ts.isArrowFunction(arg) ? arg.body : arg.body
+      const fnBody = arg.body
       const objExpr = ts.isObjectLiteralExpression(fnBody)
         ? fnBody
         : ts.isParenthesizedExpression(fnBody) && ts.isObjectLiteralExpression(fnBody.expression)
           ? fnBody.expression
           : null
+      if (objExpr === null) return null
       const keys: string[] = []
-      if (objExpr !== null)
-        for (const p of objExpr.properties)
-          if (ts.isPropertyAssignment(p)) {
-            const k = ts.isIdentifier(p.name)
-              ? p.name.text
-              : ts.isStringLiteral(p.name)
-                ? p.name.text
-                : ''
-            if (k) keys.push(k)
+      let hasComputedKeys = false
+      for (const p of objExpr.properties) {
+        if (ts.isPropertyAssignment(p)) {
+          const k = propertyKeyText(p.name)
+          if (k === null) {
+            hasComputedKeys = true
+            continue
           }
-      return { form: 'factory', keys, source: src }
+          if (k !== null) keys.push(k)
+          eraseSignalReadsInNode(p.initializer, symbols.all) // proof-of-wire; result unused in S0
+        } else if (ts.isSpreadAssignment(p)) {
+          eraseSignalReadsInNode(p.expression, symbols.all) // proof-of-wire; result unused in S0
+        }
+      }
+      return { form: 'factory', keys, hasComputedKeys, source: src, objExpr, factory: arg }
     }
     return null
   }
@@ -1765,7 +1796,7 @@ export function parseNvFile(source: string, fileName: string, doc: Document): Nv
         name,
         ir: renderResult.ir,
         scriptSignals: [...symbols.writable, ...symbols.readonly],
-        style: extractStyleInfo(componentFn),
+        style: extractStyleInfo(componentFn, symbols),
         verdicts: renderResult.verdicts,
         diagnostics: [...diagnostics, ...renderResult.diagnostics],
       })
@@ -2198,11 +2229,11 @@ function computeThunkSource(
             break
           }
           if (ts.isPropertyAssignment(prop)) {
-            if (ts.isComputedPropertyName(prop.name)) {
+            const key = propertyKeyText(prop.name)
+            if (key === null) {
               hasComputed = true
               break
             }
-            const key = prop.name.getText()
             const boolSrc = eraseSignalReadsInNode(prop.initializer, symbols.all, propsAccessors)
             for (const token of key.split(/\s+/).filter(Boolean)) {
               entries.push({ kind: 'toggle', key: token, boolSrc })
@@ -2230,11 +2261,11 @@ function computeThunkSource(
                 break
               }
               if (ts.isPropertyAssignment(prop)) {
-                if (ts.isComputedPropertyName(prop.name)) {
+                const key = propertyKeyText(prop.name)
+                if (key === null) {
                   hasComputed = true
                   break
                 }
-                const key = prop.name.getText()
                 const boolSrc = eraseSignalReadsInNode(
                   prop.initializer,
                   symbols.all,
@@ -2657,7 +2688,7 @@ export function parseNvFileForEmit(
         name,
         ir: renderResult.ir,
         scriptSignals: [...symbols.writable, ...symbols.readonly],
-        style: extractStyleInfo(componentFn),
+        style: extractStyleInfo(componentFn, symbols),
         verdicts: renderResult.verdicts,
         diagnostics: allDiagnostics,
         emit: {
