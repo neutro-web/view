@@ -1623,3 +1623,72 @@ const Box = $component((props) => {
     expect(parent.childElementCount).toBe(0)
   })
 })
+
+// ── EX-CL-05: D-cl-3 classlist key unquoting ─────────────────────────────────
+
+describe('EX-CL-05  D-cl-3: classlist string-literal key unquoting', () => {
+  // G1.A1: hyphenated string-literal key — 'is-active' must not become "'is-active'"
+  test('EX-CL-05a  hyphenated string key: classList.contains("is-active") is true', async () => {
+    const source = `
+const C = $component(() => {
+  $script(() => {
+    const active = signal(true)
+  })
+  $render(() => html\`<div class="\${{ 'is-active': active }}"></div>\`)
+})`
+    const results = parseNvFileForEmit(source, 'c.nv', sharedDoc)
+    const js = emitModule(results)
+    const bundlePath = await bundleEmittedJs(js)
+    const mod = (await import(bundlePath)) as BundleModule & { C: ComponentFactory }
+    const doc = makeDoc()
+    const parent = makeParent(doc)
+    const dispose = mod.C.mount(parent, doc)
+    mod.flushSync()
+    expect(parent.querySelector('div')?.classList.contains('is-active')).toBe(true)
+    dispose()
+  })
+
+  // G1.A2: whitespace string key — 'foo bar' splits into foo and bar, both applied
+  test('EX-CL-05b  whitespace string key: "foo" and "bar" both in classList', async () => {
+    const source = `
+const C = $component(() => {
+  $script(() => {
+    const on = signal(true)
+  })
+  $render(() => html\`<div class="\${{ 'foo bar': on }}"></div>\`)
+})`
+    const results = parseNvFileForEmit(source, 'c.nv', sharedDoc)
+    const js = emitModule(results)
+    const bundlePath = await bundleEmittedJs(js)
+    const mod = (await import(bundlePath)) as BundleModule & { C: ComponentFactory }
+    const doc = makeDoc()
+    const parent = makeParent(doc)
+    const dispose = mod.C.mount(parent, doc)
+    mod.flushSync()
+    const cl = parent.querySelector('div')?.classList
+    expect(cl?.contains('foo')).toBe(true)
+    expect(cl?.contains('bar')).toBe(true)
+    dispose()
+  })
+
+  // G1.A3: identifier key — regression guard, must still work
+  test('EX-CL-05c  identifier key: classList.contains("active") is true', async () => {
+    const source = `
+const C = $component(() => {
+  $script(() => {
+    const on = signal(true)
+  })
+  $render(() => html\`<div class="\${{ active: on }}"></div>\`)
+})`
+    const results = parseNvFileForEmit(source, 'c.nv', sharedDoc)
+    const js = emitModule(results)
+    const bundlePath = await bundleEmittedJs(js)
+    const mod = (await import(bundlePath)) as BundleModule & { C: ComponentFactory }
+    const doc = makeDoc()
+    const parent = makeParent(doc)
+    const dispose = mod.C.mount(parent, doc)
+    mod.flushSync()
+    expect(parent.querySelector('div')?.classList.contains('active')).toBe(true)
+    dispose()
+  })
+})
