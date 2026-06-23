@@ -1415,3 +1415,211 @@ const List = $component((props) => {
     expect(parent.querySelectorAll('li').length).toBe(0)
   })
 })
+
+// ── EX-CL-01..04: class-selection — .nv behavioral e2e (closes D-cl-1) ──────
+
+/**
+ * Shared builder for class-selection emit-exec tests.
+ * Parses .nv source through the emit path, bundles, and re-exports
+ * flushSync + signal so callers share one scheduler instance.
+ * Reuses buildListBundle's exact pattern (component-name-agnostic).
+ */
+async function buildClassBundle(source: string): Promise<string> {
+  const js = emitModule(parseNvFileForEmit(source, 'cls.nv', sharedDoc))
+  const withExports = `${js}\nexport { flushSync, signal } from '@neutro/view/core'\n`
+  const entryFile = tmpPath('.js')
+  const outFile = tmpPath('.bundle.mjs')
+  fs.writeFileSync(entryFile, withExports, 'utf8')
+  await esbuild.build({
+    entryPoints: [entryFile],
+    bundle: true,
+    format: 'esm',
+    outfile: outFile,
+    platform: 'node',
+    plugins: [
+      {
+        name: 'neutro-alias',
+        setup(build) {
+          build.onResolve({ filter: /^@neutro\/view\/core$/ }, () => ({ path: coreIndexPath }))
+          build.onResolve({ filter: /^@neutro\/view\/renderer$/ }, () => ({
+            path: rendererIndexPath,
+          }))
+        },
+      },
+    ],
+  })
+  return outFile
+}
+
+type ClassBundleModule = {
+  Box: ComponentFactory
+  flushSync(): void
+  signal<T>(v: T): { (): T; set(v: T): void }
+}
+
+// ── EX-CL-01: initial render, static + toggle mix ────────────────────────────
+
+describe('EX-CL-01  initial render: static "card" always present; "active" token when active=true', () => {
+  // Identifier-only keys: prop.name.getText() returns the name without quotes for identifiers.
+  // Quoted string keys (e.g. 'is-active') include surrounding quotes in getText() — a src/ limitation
+  // that is out of scope for this test-only increment (G0 disqualifier prevents src/ touch).
+  const source = `
+const Box = $component((props) => {
+  $script(() => {
+    const { active } = props
+  })
+  $render(() => html\`<div class="\${{ card: true, active: active }}">x</div>\`)
+})`
+
+  test('EX-CL-01  both tokens present when active prop is true', async () => {
+    const outFile = await buildClassBundle(source)
+    const mod = (await import(outFile)) as ClassBundleModule
+    const extActive = mod.signal(true)
+    const doc = makeDoc()
+    const parent = makeParent(doc)
+    const dispose = mod.Box.mount(parent, doc, { active: () => extActive() })
+    mod.flushSync()
+
+    const div = parent.querySelector('div')!
+    expect(div.classList.contains('card')).toBe(true)
+    expect(div.classList.contains('active')).toBe(true)
+
+    dispose()
+  })
+})
+
+// ── EX-CL-02: per-key toggle reactivity (LOAD-BEARING — closes D-cl-1) ───────
+
+describe('EX-CL-02  per-key toggle reactivity: real emit boolSrc (not stubExpr) wired into wireClassList', () => {
+  /**
+   * Load-bearing gate. If the emitted module carried a stubbed expr (() => undefined),
+   * the extActive.set(false) → flushSync → is-active absent assertion would fail because
+   * classList.toggle('is-active', !!undefined) is always false — the *initial* set(true)
+   * case would also fail. A stub reaches neither direction correctly.
+   *
+   * The emitted .js for this component is captured in the test output via console.log
+   * for architect verification (see handoff A.3 requirement).
+   */
+  // Identifier-only keys; same note as EX-CL-01.
+  const source = `
+const Box = $component((props) => {
+  $script(() => {
+    const { active } = props
+  })
+  $render(() => html\`<div class="\${{ card: true, active: active }}">x</div>\`)
+})`
+
+  test('EX-CL-02  toggle reflects external signal; static token survives flip', async () => {
+    // Capture emitted JS for architect verification (G1.1 seam proof).
+    // Key artifact: entries must show real boolSrc (props.active()), not undefined.
+    const emittedJs = emitModule(parseNvFileForEmit(source, 'cls.nv', sharedDoc))
+    console.log('[EX-CL-02 emitted JS]\n', emittedJs)
+
+    const outFile = await buildClassBundle(source)
+    const mod = (await import(outFile)) as ClassBundleModule
+    const extActive = mod.signal(true)
+    const doc = makeDoc()
+    const parent = makeParent(doc)
+    const dispose = mod.Box.mount(parent, doc, { active: () => extActive() })
+    mod.flushSync()
+
+    const div = parent.querySelector('div')!
+
+    // Initial state: active=true → both tokens present
+    expect(div.classList.contains('card')).toBe(true)
+    expect(div.classList.contains('active')).toBe(true)
+
+    // Flip to false: active removed; card must remain (static token / always-true toggle)
+    extActive.set(false)
+    mod.flushSync()
+    expect(div.classList.contains('active')).toBe(false)
+    expect(div.classList.contains('card')).toBe(true)
+
+    // Flip back to true: active returns
+    extActive.set(true)
+    mod.flushSync()
+    expect(div.classList.contains('active')).toBe(true)
+
+    dispose()
+  })
+})
+
+// ── EX-CL-03: per-key isolation across two independent toggles ────────────────
+
+describe('EX-CL-03  per-key isolation: flipping one key does not disturb a sibling key', () => {
+  // Identifier-only keys; same note as EX-CL-01.
+  const source = `
+const Box = $component((props) => {
+  $script(() => {
+    const { a, b } = props
+  })
+  $render(() => html\`<div class="\${{ alpha: a, beta: b }}">x</div>\`)
+})`
+
+  test('EX-CL-03  flip alpha-only → beta unchanged', async () => {
+    const outFile = await buildClassBundle(source)
+    const mod = (await import(outFile)) as ClassBundleModule & {
+      Box: {
+        mount(p: Element, d: Document, props?: Record<string, () => unknown>): () => void
+      }
+    }
+    const extA = mod.signal(true)
+    const extB = mod.signal(false)
+    const doc = makeDoc()
+    const parent = makeParent(doc)
+    const dispose = mod.Box.mount(parent, doc, { a: () => extA(), b: () => extB() })
+    mod.flushSync()
+
+    const div = parent.querySelector('div')!
+    expect(div.classList.contains('alpha')).toBe(true)
+    expect(div.classList.contains('beta')).toBe(false)
+
+    // Flip only a → false
+    extA.set(false)
+    mod.flushSync()
+    expect(div.classList.contains('alpha')).toBe(false)
+    // beta must be unaffected (still false)
+    expect(div.classList.contains('beta')).toBe(false)
+
+    // Now set b → true, alpha stays false
+    extB.set(true)
+    mod.flushSync()
+    expect(div.classList.contains('beta')).toBe(true)
+    expect(div.classList.contains('alpha')).toBe(false)
+
+    dispose()
+  })
+})
+
+// ── EX-CL-04: unmount — no stale class mutation after dispose ─────────────────
+
+describe('EX-CL-04  unmount: DOM removed, no reactive class mutation after dispose', () => {
+  const source = `
+const Box = $component((props) => {
+  $script(() => {
+    const { active } = props
+  })
+  $render(() => html\`<div class="\${{ card: true, active: active }}">x</div>\`)
+})`
+
+  test('EX-CL-04  dispose → post-dispose signal flip is a no-op', async () => {
+    const outFile = await buildClassBundle(source)
+    const mod = (await import(outFile)) as ClassBundleModule
+    const extActive = mod.signal(true)
+    const doc = makeDoc()
+    const parent = makeParent(doc)
+    const dispose = mod.Box.mount(parent, doc, { active: () => extActive() })
+    mod.flushSync()
+
+    expect(parent.querySelector('div')).not.toBeNull()
+
+    // Dispose cleans up the DOM root
+    dispose()
+
+    // Post-dispose signal mutation must not throw and must not re-add elements
+    extActive.set(false)
+    mod.flushSync()
+    // The detached div is gone; parent has no children
+    expect(parent.childElementCount).toBe(0)
+  })
+})
