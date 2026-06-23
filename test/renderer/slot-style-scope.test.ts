@@ -61,6 +61,17 @@ describe("G3': same $style definition + same template shape shares scopeHash", (
     expect(b.ir.styleArtifact).toBeDefined()
     // Same $style + same template text → same shapeHtml → same scopeHash (B3 invariant)
     expect(a.ir.styleArtifact!.scopeHash).toBe(b.ir.styleArtifact!.scopeHash)
+
+    // Emit-path must agree: same scopeHash on both parse-path and emit-path (G3' constraint
+    // requires BOTH paths, not just parse-path).
+    const emitResults = parseNvFileForEmit(src, 'test.nv', doc)
+    const emitA = emitResults.find((r) => r.name === 'ParentA')!
+    const emitB = emitResults.find((r) => r.name === 'ParentB')!
+    expect(emitA.ir.styleArtifact).toBeDefined()
+    expect(emitB.ir.styleArtifact).toBeDefined()
+    // Emit-path scopeHash must match parse-path scopeHash (same input → same shapeHtml → same hash)
+    expect(emitA.ir.styleArtifact!.scopeHash).toBe(a.ir.styleArtifact!.scopeHash)
+    expect(emitB.ir.styleArtifact!.scopeHash).toBe(b.ir.styleArtifact!.scopeHash)
   })
 
   it("G3': different child component names → different shapeHtml → different scopeHash (by-design)", () => {
@@ -250,4 +261,13 @@ describe('G4: parse-path IR and emit-path agree on slot-content classlist tokens
     expect(projectedC).not.toBeNull()
     expect(projectedC.classList.contains(rewClass)).toBe(true)
   })
+})
+
+// ── G5 — <each>-in-slot class token (deferred) ───────────────────────────────
+
+describe('G5: <each>-in-slot class token (deferred)', () => {
+  it.skip('class-form token in <each>-inside-slot-content is rewritten with parent scopeHash', // DEFERRED: <each> in slot content is not wired. buildNvSlotContentIR discards the
+  // `lists` return from walkNvNodeList (L772). patchClasslistTokens list-case handles
+  // this automatically once <each>-in-slot is wired in the dedicated increment.
+  () => {})
 })
