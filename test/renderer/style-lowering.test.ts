@@ -2,8 +2,8 @@ import { JSDOM } from 'jsdom'
 import { describe, expect, test } from 'vitest'
 import { flushSync, signal } from '../../src/core/core.js'
 import { mount } from '../../src/renderer/interpreter.js'
-import type { StyleVarBinding, TemplateIR } from '../../src/renderer/ir.js'
-import { parseNvFile } from '../../src/renderer/nv-parser.js'
+import type { ClassListBinding, StyleVarBinding, TemplateIR } from '../../src/renderer/ir.js'
+import { parseNvFile, patchClasslistTokens } from '../../src/renderer/nv-parser.js'
 
 const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>')
 const sharedDoc = dom.window.document as unknown as Document
@@ -252,4 +252,75 @@ const C = $component(() => {
     const ir = results[0]?.ir
     expect(ir?.classRewrites?.size ?? 0).toBe(0)
   })
+})
+
+// ── O7.unit: patchClasslistTokens recurses into list bindings ─────────────────
+
+test('patchClasslistTokens rewrites classlist tokens inside list itemTemplate', () => {
+  const classRewrites = new Map([['card', 'card_abc']])
+  const itemIR: TemplateIR = {
+    id: 'item',
+    shape: { html: '<div>x</div>', bindingPaths: [] },
+    bindings: [{ kind: 'classlist', pathIndex: 0, entries: [{ kind: 'static', token: 'card' }] }],
+  }
+  const ir: TemplateIR = {
+    id: 'parent',
+    shape: { html: '<div></div>', bindingPaths: [] },
+    bindings: [
+      {
+        kind: 'list',
+        pathIndex: 0,
+        items: () => [],
+        key: (_v, i) => i,
+        itemTemplate: () => itemIR,
+      },
+    ],
+  }
+  patchClasslistTokens(ir, classRewrites)
+  const entry = (itemIR.bindings[0] as ClassListBinding).entries[0]!
+  expect((entry as { token: string }).token).toBe('card_abc')
+})
+
+test('patchClasslistTokens rewrites classlist tokens inside nested list (depth-2)', () => {
+  const classRewrites = new Map([['card', 'card_abc']])
+  const innerItemIR: TemplateIR = {
+    id: 'inner-item',
+    shape: { html: '<span>x</span>', bindingPaths: [] },
+    bindings: [
+      {
+        kind: 'classlist',
+        pathIndex: 0,
+        entries: [{ kind: 'toggle', key: 'card', expr: () => true }],
+      },
+    ],
+  }
+  const outerItemIR: TemplateIR = {
+    id: 'outer-item',
+    shape: { html: '<div></div>', bindingPaths: [] },
+    bindings: [
+      {
+        kind: 'list',
+        pathIndex: 0,
+        items: () => [],
+        key: (_v, i) => i,
+        itemTemplate: () => innerItemIR,
+      },
+    ],
+  }
+  const ir: TemplateIR = {
+    id: 'parent',
+    shape: { html: '<div></div>', bindingPaths: [] },
+    bindings: [
+      {
+        kind: 'list',
+        pathIndex: 0,
+        items: () => [],
+        key: (_v, i) => i,
+        itemTemplate: () => outerItemIR,
+      },
+    ],
+  }
+  patchClasslistTokens(ir, classRewrites)
+  const entry = (innerItemIR.bindings[0] as ClassListBinding).entries[0]!
+  expect((entry as { key: string }).key).toBe('card_abc')
 })

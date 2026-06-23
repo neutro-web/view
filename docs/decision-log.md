@@ -120,7 +120,7 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4.1**._
     `cc-handoff-style-s1s2.md`. CC must produce `docs/design/plan-style-s1s2.md` and halt for
     architect approval before any `src/` touch (Gate P). Four phases: (1) discriminant+tag-set
     [sandbox, no IR]; (2) static scoping+injection [browser]; (3) StyleVarBinding+dynamic
-    [browser, **Template-IR v0.4.2**]; (4) ×classlist [browser, OPEN-7]. Seven OPEN points ruled
+    [browser, **Template-IR v0.4.2**]; (4) ×classlist [browser, OPEN-7 → CLOSED 2026-06-22]. Seven OPEN points ruled
     against the plan, not pre-decided. Locked constraints L.1–L.6 fenced as G0.
 - **Class-selection (`class={...}`) — LANDED, architect-verified 2026-06-22** (branch
   feat/class-selection, Increment C). `ClassListBinding` (kind `classlist`, entries
@@ -140,7 +140,7 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4.1**._
 - `$style × slots` — STILL parked behind `$style` scoping *implementation* (design tractable
   now that axis-a is chosen, but specced after `$style` lands). The slot-boundary scope-carry
   question is now determined by the S1+S2 discriminant (class-rewrite vs attribute-hash):
-  tractable to spec once S1+S2 lands. `$style × classlist` is OPEN-7 inside S1+S2 (sub-phase 4).
+  tractable to spec once S1+S2 lands. `$style × classlist` is OPEN-7 → CLOSED 2026-06-22 inside S1+S2 (sub-phase 4).
 - SyncBinding (throws at both back-ends today).
 - LIS list move-minimization — CLOSED [2026-06-22], not commissioned (O(N) reconcile
   acceptable: N=1k sub-2ms, N=10k 17ms real-Chromium).
@@ -1375,3 +1375,11 @@ only WRONG outcome, per "skip only provable work"); both back-ends differential-
 
 No decisions resolved here beyond commissioning — the OPEN points remain open, to be ruled
 against CC's plan (Gate P). reactive-core v0.4.2, Template-IR v0.4.1 unchanged until Phase 3.
+
+### 2026-06-22 — OPEN-7 (`$style` × `<each>` classlist) RULED: total-recursion patch, not depth-1
+
+**Question:** `patchClasslistTokens` only iterates the top-level `bindings` array. Nested `<each>` items have their own `TemplateIR` returned by `itemTemplate()` — those are never visited. Should the patch depth-limit to 1 or recurse fully?
+
+**Ruling (Architect):** Total recursion. Call `itemTemplate` once with stub signals to get the item IR, then recurse into it. Stubs are pure (no side effects). Depth-1 bounding was rejected because `<each>` inside `<each>` is a valid and expected pattern.
+
+**Outcome:** `patchClasslistTokens` now recurses into every `list` binding's item IR. Unit tests O7.unit-1 and O7.unit-2 added. Browser test O7.1 added. OPEN-7 closed.

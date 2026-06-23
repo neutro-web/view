@@ -49,6 +49,7 @@
  */
 
 import * as ts from 'typescript'
+import { signal } from '../core/core.js'
 import type {
   AttrBinding,
   Binding,
@@ -1866,7 +1867,7 @@ function applyVarBindingsToIr(
   }
 }
 
-function patchClasslistTokens(ir: TemplateIR, classRewrites: Map<string, string>): void {
+export function patchClasslistTokens(ir: TemplateIR, classRewrites: Map<string, string>): void {
   if (classRewrites.size === 0) return
   for (const binding of ir.bindings as Binding[]) {
     if (binding.kind === 'classlist') {
@@ -1885,7 +1886,12 @@ function patchClasslistTokens(ir: TemplateIR, classRewrites: Map<string, string>
       if (binding.alternate) patchClasslistTokens(binding.alternate, classRewrites)
     }
     if (binding.kind === 'list') {
-      // itemTemplate is a factory — cannot recurse into it statically
+      // Call the factory once with stub signals to get the item bodyIR, then recurse.
+      // Stubs are inert: the interp stub is () => wl.bodyIR (pure); emit stub is equally pure.
+      const stubVs = signal<unknown>(null)
+      const stubIs = signal<number>(0)
+      const itemIR = binding.itemTemplate(stubVs, stubIs)
+      patchClasslistTokens(itemIR, classRewrites)
     }
   }
 }

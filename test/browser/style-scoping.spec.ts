@@ -608,3 +608,101 @@ test('G4.3: differential — both mount and emitMount produce rewritten class', 
   }, CL_HASH)
   expect(result.ok, result.findings.join('\n')).toBe(true)
 })
+
+// ── O7.1: $style × <each> classlist — list item classlist binding is rewritten ─
+
+// Hash for 'nv:o71test' = 09d0207e (computed via simpleHash)
+const O71_HASH = '09d0207e'
+
+test('O7.1: list item classlist static token — rewritten class applied and styled', async ({
+  page,
+}) => {
+  await loadNv(page)
+  const result = await page.evaluate((hash) => {
+    const { mount, flushSync } = window.__nv
+    // Simulate already-rewritten token (patchClasslistTokens has run at parse time)
+    const rewClass = `card_${hash}`
+    const cssText = `.${rewClass} { color: rgb(0, 128, 0) }`
+    // item IR has a static classlist entry with the already-rewritten token
+    const itemIR = {
+      id: `o71-item-${hash}`,
+      shape: { html: '<div></div>', bindingPaths: [[0]] },
+      bindings: [
+        {
+          kind: 'classlist' as const,
+          pathIndex: 0,
+          entries: [{ kind: 'static' as const, token: rewClass }],
+        },
+      ],
+    }
+    // parent IR: <!--nv-0--> is the list anchor inside the ul; path [0,0] = child 0 of element 0
+    const ir = {
+      id: `o71-parent-${hash}`,
+      shape: { html: '<ul><!--nv-0--></ul>', bindingPaths: [[0, 0]] },
+      bindings: [
+        {
+          kind: 'list' as const,
+          pathIndex: 0,
+          items: () => [1],
+          key: (_v: unknown, i: number) => i,
+          itemTemplate: () => itemIR,
+        },
+      ],
+      styleArtifact: { staticCss: cssText, scopeHash: hash },
+    }
+    const parent = document.createElement('div')
+    document.body.appendChild(parent)
+    mount(ir, parent, document)
+    flushSync()
+    const el = parent.querySelector('div') as HTMLElement
+    const findings: string[] = []
+    if (!el) {
+      findings.push('item element not found')
+    } else {
+      if (!el.classList.contains(rewClass)) findings.push(`missing class ${rewClass}`)
+      const color = getComputedStyle(el).color
+      if (color !== 'rgb(0, 128, 0)') findings.push(`color not applied: ${color}`)
+    }
+    parent.remove()
+    return { ok: findings.length === 0, findings }
+  }, O71_HASH)
+  expect(result.ok, result.findings.join('\n')).toBe(true)
+})
+
+// ── Fix 3: selector-form attribute-hash scoping via data-nv-s-<hash> ──────────
+
+test('Fix3: selector-form IR stamps data-nv-s-<hash> on root element', async ({ page }) => {
+  await loadNv(page)
+  const result = await page.evaluate((hash) => {
+    const { mount, flushSync } = window.__nv
+    const scopeAttr = `data-nv-s-${hash}`
+    const cssText = `:where([${scopeAttr}]) p { color: rgb(0, 0, 255) }`
+    const ir = {
+      id: `fix3-selector-${hash}`,
+      shape: { html: '<div><p>hello</p></div>', bindingPaths: [] },
+      bindings: [],
+      styleArtifact: { staticCss: cssText, scopeHash: hash },
+    }
+    const parent = document.createElement('div')
+    document.body.appendChild(parent)
+    mount(ir, parent, document)
+    flushSync()
+    const root = parent.querySelector('div') as HTMLElement
+    const findings: string[] = []
+    if (!root) {
+      findings.push('root element not found')
+    } else {
+      if (!root.hasAttribute(scopeAttr)) findings.push(`missing ${scopeAttr} on root`)
+      const p = root.querySelector('p') as HTMLElement
+      if (p) {
+        const color = getComputedStyle(p).color
+        if (color !== 'rgb(0, 0, 255)') findings.push(`scoped color not applied: ${color}`)
+      } else {
+        findings.push('p element not found')
+      }
+    }
+    parent.remove()
+    return { ok: findings.length === 0, findings }
+  }, HASH)
+  expect(result.ok, result.findings.join('\n')).toBe(true)
+})
