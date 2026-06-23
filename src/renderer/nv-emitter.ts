@@ -225,13 +225,25 @@ function emitIrLiteral(ir: TemplateIR, thunks: ThunkSource[], indent: string): s
     })
     .join(',\n')
   const bindingsBody = ir.bindings.length > 0 ? `\n${bindingsStr}\n${indent}  ` : ''
-  return [
+  const parts = [
     '{',
     `${indent}  id: ${JSON.stringify(ir.id)},`,
     `${indent}  shape: { html: ${JSON.stringify(ir.shape.html)}, bindingPaths: [${bindingPaths}] },`,
     `${indent}  bindings: [${bindingsBody}],`,
-    `${indent}}`,
-  ].join('\n')
+  ]
+  if (ir.styleArtifact) {
+    parts.push(
+      `${indent}  styleArtifact: { staticCss: ${JSON.stringify(ir.styleArtifact.staticCss)}, scopeHash: ${JSON.stringify(ir.styleArtifact.scopeHash)} },`,
+    )
+  }
+  if (ir.classRewrites && ir.classRewrites.size > 0) {
+    const entries = [...ir.classRewrites.entries()]
+      .map(([k, v]) => `[${JSON.stringify(k)}, ${JSON.stringify(v)}]`)
+      .join(', ')
+    parts.push(`${indent}  classRewrites: new Map([${entries}]),`)
+  }
+  parts.push(`${indent}}`)
+  return parts.join('\n')
 }
 
 // ── Primitive detection ───────────────────────────────────────────────────────

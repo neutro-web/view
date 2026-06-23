@@ -1,7 +1,7 @@
 /**
  * nv Runtime Interpreter Back-End
  * Stream: (3) Renderer/templating
- * IR contract: nv-template-ir.md v0.3.1
+ * IR contract: nv-template-ir.md v0.4.2
  *
  * This is the semantic ground truth implementation. The "compiler = interpreter
  * partially evaluated" framing means every observable behavior here is the spec
@@ -707,7 +707,9 @@ export function mount(ir: TemplateIR, parent: Element, doc: Document): () => voi
       if (roots.length > 1) {
         throw new Error('[nv/interpreter] $style on multi-root template is not supported')
       }
-      injectComponentStyle(doc, ir.id, ir.styleArtifact.staticCss)
+      if (ir.styleArtifact.staticCss) {
+        injectComponentStyle(doc, ir.id, ir.styleArtifact.staticCss)
+      }
       const scopeAttr = `data-nv-s-${ir.styleArtifact.scopeHash}`
       const root = roots[0]
       if (root instanceof Element) root.setAttribute(scopeAttr, '')

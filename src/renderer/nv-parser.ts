@@ -1847,6 +1847,7 @@ function applyVarBindingsToIr(
       '[nv/parser] $style with dynamic values on a multi-root template is not supported',
     )
   }
+  // Mutation bounded to the parse pass — no aliased references exist yet.
   const mutablePaths = ir.shape.bindingPaths as NodePath[]
   const mutableBindings = ir.bindings as StyleVarBinding[]
 
@@ -1862,6 +1863,30 @@ function applyVarBindingsToIr(
       expr: stubExpr,
     })
     bindingThunks?.push({ kind: 'style-var', exprSrc: desc.exprSrc })
+  }
+}
+
+function patchClasslistTokens(ir: TemplateIR, classRewrites: Map<string, string>): void {
+  if (classRewrites.size === 0) return
+  for (const binding of ir.bindings as Binding[]) {
+    if (binding.kind === 'classlist') {
+      for (const entry of binding.entries) {
+        if (entry.kind === 'static') {
+          const rw = classRewrites.get(entry.token)
+          if (rw) (entry as { token: string }).token = rw
+        } else {
+          const rw = classRewrites.get(entry.key)
+          if (rw) (entry as { key: string }).key = rw
+        }
+      }
+    }
+    if (binding.kind === 'conditional') {
+      patchClasslistTokens(binding.consequent, classRewrites)
+      if (binding.alternate) patchClasslistTokens(binding.alternate, classRewrites)
+    }
+    if (binding.kind === 'list') {
+      // itemTemplate is a factory — cannot recurse into it statically
+    }
   }
 }
 
@@ -1969,20 +1994,7 @@ export function parseNvFile(source: string, fileName: string, doc: Document): Nv
         if (artifact.varBindingDescs.length > 0) {
           applyVarBindingsToIr(renderResult.ir, artifact.varBindingDescs)
         }
-        if (artifact.classRewrites.size > 0) {
-          for (const b of renderResult.ir.bindings) {
-            if (b.kind !== 'classlist') continue
-            for (const entry of b.entries) {
-              if (entry.kind === 'static') {
-                const rw = artifact.classRewrites.get(entry.token)
-                if (rw) (entry as { token: string }).token = rw
-              } else {
-                const rw = artifact.classRewrites.get(entry.key)
-                if (rw) (entry as { key: string }).key = rw
-              }
-            }
-          }
-        }
+        patchClasslistTokens(renderResult.ir, artifact.classRewrites)
         renderResult.ir.classRewrites = artifact.classRewrites
       }
       results.push({
@@ -2893,20 +2905,7 @@ export function parseNvFileForEmit(
         if (artifact.varBindingDescs.length > 0) {
           applyVarBindingsToIr(renderResult.ir, artifact.varBindingDescs, bindingThunks)
         }
-        if (artifact.classRewrites.size > 0) {
-          for (const b of renderResult.ir.bindings) {
-            if (b.kind !== 'classlist') continue
-            for (const entry of b.entries) {
-              if (entry.kind === 'static') {
-                const rw = artifact.classRewrites.get(entry.token)
-                if (rw) (entry as { token: string }).token = rw
-              } else {
-                const rw = artifact.classRewrites.get(entry.key)
-                if (rw) (entry as { key: string }).key = rw
-              }
-            }
-          }
-        }
+        patchClasslistTokens(renderResult.ir, artifact.classRewrites)
         renderResult.ir.classRewrites = artifact.classRewrites
       }
       results.push({
