@@ -1469,3 +1469,59 @@ scope across the slot boundary. This is the `$style × slots` axis, now unparked
 spec. Logged as the seam fact that motivates the next increment, not fixed here.
 
 No contract touch. reactive-core v0.4.2, Template-IR v0.4.2.
+
+### 2026-06-23 — `$style × slots` scope-carry RULED (parent-wins; child-opaque; Mechanism B)
+
+Spec authoritative at `docs/design/spec-style-slots-scope-carry.md`. Unparked after S1+S2
+landed (the class-rewrite-vs-attribute-hash discriminant is what made scope-carry answerable).
+Seam read on `main` before ruling (no inferred internals).
+
+**Seam-verified gap (motivating fact).** `patchClasslistTokens` has no `component` case
+(nv-parser.ts L1870–1894); parse path captures slot-content IR by-reference into a `SlotContent`
+closure during the walk (L656/L677) BEFORE the patch runs (L2003/L2914); emit path emits slot
+content as `ThunkSource[]` source strings (L2581+), no IR object to patch. **Today, class-form
+`$style` tokens in slot content are rewritten by neither side — they render raw.** OPEN-7 family
+(patch walk re-skips a kind handled elsewhere), now for `component`.
+
+**Ruling 1 — semantic: scope-by-lexical-author (parent-wins).** Class-form `$style` tokens
+authored in parent-supplied slot content carry the PARENT's scope hash. A child reaches slot
+content styling only via its own outlet wrapper or selector-form keys (subject to Ruling 2),
+never by class-form rewrite of tokens it did not author. Child-wins rejected: it rewrites
+parent-authored tokens against the parent's stylesheet, turning every such token into a dead
+class (the child never saw the parent's class names). Consistent with D-slot-1 lexical ownership.
+
+**Ruling 2 — child selector-form reach: NO (reading (b)).** Slot content is opaque to the
+child's selector-form scope. nv guarantees it NEVER deliberately tags parent-projected nodes with
+`data-nv-s-<childhash>` and never rewrites tokens the child did not author. nv does NOT guarantee
+non-match: a child's plain descendant selector may incidentally match a projected node if DOM
+nesting causes it — CSS cascade, author's domain. Reading (a) (nv actively defeats cross-boundary
+match) rejected as inventing CSS semantics (locked principle). No `::slotted` analog this
+increment; if a concrete layout-shell case arises later it returns as a narrow-YES increment
+(top-level-projected tagging). **Consequence:** no attribute carry on slot nodes → no Template-IR
+shape change, no version bump expected from this axis.
+
+**Escalation note.** Ruling 2 is the cross-boundary observation call (what the child's scope
+observes across an ownership boundary) — escalation-level by project calibration, ruled by
+architect, not decided in-stream. Ruling 1 (class-form authorship) and the mechanism are
+in-stream/renderer-layer.
+
+**Mechanism — B (sole viable), confirmed.** Rewrite class-form tokens at slot-content BUILD time,
+before capture/emit, on both paths. Mechanism A (total-walk into slot factories, patch captured
+IR in place) ELIMINATED by the seam: (i) depends on factories returning captured IR by-reference,
+which the scoped-slot shape `(props)=>TemplateIR` permits breaking (fresh IR per call → patch a
+throwaway); (ii) emit path has no IR object at all (source strings) — A cannot run on the
+authoritative mount path; adopting it would create the parse/emit divergence differential
+conformance forbids. B requires the scope SEED before slot content is built (classRewrites is
+static/hoistable, L1758–1804, but scopeHash seeds from `simpleHash(ir.id)`, post-walk, L1988).
+**B1 (preferred):** deterministic pre-walk seed proven equal to `ir.id`-derived hash (gate G3) —
+CC proposes the seed in the Gate-P plan and HALTS if it cannot prove equality. **B2 (fallback):**
+two-pass. B1-vs-B2 is in-stream.
+
+**Gates** (spec §7): G1 parent-hash on projected node; **G2 fresh-IR-factory rewritten (the case
+A passes structurally while emitting wrong DOM — load-bearing)**; G3 seed equality; G4
+parse↔emit differential (shared oracle); G5 nested `<each>`-in-slot (OPEN-7 × slots); G6 §5
+guarantee real-browser ×3 (asserts no deliberate child-tag, NOT non-match); G7 single rewrite
+site per path (no second walk — collapse-don't-patch).
+
+reactive-core v0.4.2 untouched. Template-IR v0.4.2 (no bump expected). Commissioned next under
+Gate P: `docs/design/plan-style-slots-scope-carry.md`, HALT before any `src/`.
