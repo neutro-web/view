@@ -119,10 +119,12 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4.1**._
   evidence). `cx()` pure string builder, both FEs. Per-key isolation behaviorally proven
   on both back-ends (TC-CL-04 call-count). Computed/shorthand/non-literal-array keys →
   whole-binding fallback to AttrBinding.
-  **Named debt D-cl-1: `.nv` class-selection is behaviorally proven only via hand-built
-  runtime IR, not the parsed output** (parse-path uses stubExpr — same structural-only
-  limitation as `each` TC-EA-11). Behavioral `.nv` coverage rides the emit-exec path
-  (increment 3 / a future class emit-exec increment).
+  **Named debt D-cl-1 — COMMISSIONED 2026-06-22 (`feat/class-emit-exec`, not yet landed).**
+  Parse-path still uses `stubExpr` (structural-only, as `each` TC-EA-11); the *emit* path is
+  verified real (`parseNvFileForEmit` extracts real `boolSrc`; emitter emits per-key toggle
+  thunks). Test-only close via EX-CL-01..04 on the proven emit-exec harness; load-bearing
+  case EX-CL-02. Handoff `cc-handoff-dcl1-class-emit-exec.md`. **Verify on landing by reading
+  the emitted `.js` for EX-CL-02, not the green total.**
 - `$style × slots` — STILL parked behind `$style` scoping *implementation* (design tractable
   now that axis-a is chosen, but specced after `$style` lands).
 - SyncBinding (throws at both back-ends today).
@@ -1076,3 +1078,40 @@ watch-item). Not a final value.
 **Verdict:** PASS. Class-selection moves to "LANDED, architect-verified." Two named debts
 (D-cl-1, D-cl-2) are coverage-accuracy items, not shipped-code defects — the production
 lowering is correct on both back-ends.
+
+---
+
+### 2026-06-22 — Increment C-exec COMMISSIONED: close D-cl-1 (`.nv` class-selection behavioral e2e)
+
+**Decision.** Commission a test-only increment (`feat/class-emit-exec`) to close named debt
+**D-cl-1** by mounting emitted `.nv` class-selection on the real emit-exec path, reusing the
+Increment-3 (`feat/each-nv-behavioral`) harness. Handoff: `cc-handoff-dcl1-class-emit-exec.md`.
+Approved ≠ landed; this records the commission. **No `src/` change** is in scope (G0
+disqualifier).
+
+**Seam facts verified against `main` (raw host) before commissioning** — these are why the
+close is test-only:
+- The structural parse path (`buildNvHoleBinding`, `nv-parser.ts`) writes `stubExpr` into
+  every classlist toggle `expr` — this is the D-cl-1 limitation (same as `each` TC-EA-11).
+- The **emit** path is NOT stubbed: `parseNvFileForEmit` thunk extraction (`nv-parser.ts`
+  ~L2188–2257) pulls a real `boolSrc: string` per toggle from the AST, with `hasComputed`
+  falling the whole binding back to `AttrBinding` for non-literal forms.
+- `nv-emitter.ts` `case 'classlist':` (~L183–201) emits `expr: () => (${boolSrc})` — a real
+  per-key reactive thunk matching production lowering. `interpreter.ts wireClassList` is the
+  runtime it mounts against.
+
+**Load-bearing case:** EX-CL-02 (per-key toggle reactivity via external prop signal; class
+analogue of EX-EACH-02). Failable proof: a stubbed emit would yield `() => undefined`, so the
+`extActive.set(false)` → flush → `is-active` absent assertion would fail.
+
+**Gate teeth:** G1.1 (toggle reflects external signal — proves no stub reaches emit),
+G1.2 (static token survives a sibling flip — proves per-key `classList.toggle`, not
+whole-string rebuild), G1.3 (per-key isolation on the emitted path). Architect verifies by
+reading the appended test block AND the captured emitted `.js` for EX-CL-02 (must show a real
+`boolSrc`, not `undefined`), not by trusting the green total.
+
+**Reaffirmed open after this lands:** D-cl-2 remains a logged coverage-accuracy note (not a
+shipped-code defect); it is unaffected. T=6 per-key width threshold remains a placeholder
+gated on real-app `ReactiveNode`-width evidence.
+
+**No contract touch. No Template-IR touch.** reactive-core v0.4.2, Template-IR v0.4.1 unchanged.
