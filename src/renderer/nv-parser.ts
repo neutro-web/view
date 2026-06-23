@@ -1283,11 +1283,9 @@ function extractStyleInfo(
       }
       // Erase signal reads in factory property initializers
       // (object form is static — no erasure needed)
-      if (symbols.all.size > 0) {
-        for (const p of objExpr.properties) {
-          if (ts.isPropertyAssignment(p)) {
-            eraseSignalReadsInNode(p.initializer, symbols.all)
-          }
+      for (const p of objExpr.properties) {
+        if (ts.isPropertyAssignment(p)) {
+          eraseSignalReadsInNode(p.initializer, symbols.all)
         }
       }
       return { form: 'factory', keys, source: src, objExpr, factory: arg }
