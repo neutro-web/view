@@ -1,10 +1,3 @@
-/**
- * style-parser-seam.test.ts
- * F1 / S0 parser-seam: NvStyleInfo node retention + factory erasure gate.
- * Tests: G1.B1, G1.B2, G1.B3
- * Parse/structural only — no mount, no emission.
- */
-
 import { JSDOM } from 'jsdom'
 import ts from 'typescript'
 import { describe, expect, test } from 'vitest'
@@ -53,14 +46,10 @@ const C = $component(() => {
   })
 })
 
-// ── G1.B2: factory-form property reading a $script signal yields erased text ──
+// ── G1.B2: factory form parse wire intact ────────────────────────────────────
 
-describe('G1.B2  factory form: signal reads in property initializers are erased', () => {
-  test('initializer "x" (bare read of signal) — objExpr is wired, no throw', () => {
-    // The factory reads signal `x`; after extractStyleInfo, the objExpr property
-    // initializer is present. eraseSignalReadsInNode returns erased text without
-    // mutating the AST, so S0's proof-of-wire is that parseNvFile does NOT throw
-    // and yields a valid objExpr with the expected property.
+describe('G1.B2  factory form with signal: parse succeeds and objExpr is wired', () => {
+  test('factory reading a signal: no throw, objExpr has one property with key "opacity"', () => {
     const source = `
 const C = $component(() => {
   $script(() => {
@@ -74,12 +63,12 @@ const C = $component(() => {
     expect(style).not.toBeNull()
     expect(style?.form).toBe('factory')
     expect(style?.objExpr).toBeDefined()
-    // Confirm the property initializer is present in objExpr
+    expect(ts.isObjectLiteralExpression(style!.objExpr)).toBe(true)
     const props = style!.objExpr.properties.filter(ts.isPropertyAssignment)
     expect(props).toHaveLength(1)
-    expect(ts.isIdentifier(props[0]!.initializer)).toBe(true)
-    // source field is captured
-    expect(style?.source).toMatch(/opacity/)
+    expect(ts.isIdentifier(props[0]!.name) && props[0]!.name.text).toBe('opacity')
+    // eraseSignalReadsInNode is internal; S0 proof-of-wire is that parse completes
+    // without throw and objExpr is a real node S1/S2 can erase against.
   })
 })
 

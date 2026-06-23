@@ -153,6 +153,7 @@ export interface NvComponentResult {
 export interface NvStyleInfo {
   form: 'object' | 'factory'
   keys: readonly string[]
+  /** Raw source text of the $style argument. For factory form, signal reads are NOT erased — use objExpr + eraseSignalReadsInNode for erased output. */
   source: string
   objExpr: ts.ObjectLiteralExpression
   factory?: ts.ArrowFunction | ts.FunctionExpression
@@ -362,10 +363,6 @@ function buildNvHoleBinding(
             break
           }
           if (ts.isPropertyAssignment(prop)) {
-            if (ts.isComputedPropertyName(prop.name)) {
-              hasComputed = true
-              break
-            }
             const key = propertyKeyText(prop.name)
             if (key === null) {
               hasComputed = true
@@ -398,10 +395,6 @@ function buildNvHoleBinding(
                 break
               }
               if (ts.isPropertyAssignment(prop)) {
-                if (ts.isComputedPropertyName(prop.name)) {
-                  hasComputed = true
-                  break
-                }
                 const key = propertyKeyText(prop.name)
                 if (key === null) {
                   hasComputed = true
@@ -1254,12 +1247,14 @@ function extractStyleInfo(
     if (!arg) return null
     const src = arg.getText()
     if (ts.isObjectLiteralExpression(arg)) {
-      const keys = arg.properties
-        .filter(ts.isPropertyAssignment)
-        .map((p) =>
-          ts.isIdentifier(p.name) ? p.name.text : ts.isStringLiteral(p.name) ? p.name.text : '',
-        )
-        .filter(Boolean)
+      const keys: string[] = []
+      for (const p of arg.properties) {
+        if (ts.isPropertyAssignment(p)) {
+          const k = propertyKeyText(p.name)
+          if (k === null) continue
+          if (k) keys.push(k)
+        }
+      }
       return { form: 'object', keys, source: src, objExpr: arg }
     }
     if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) {
@@ -1273,19 +1268,14 @@ function extractStyleInfo(
       const keys: string[] = []
       for (const p of objExpr.properties) {
         if (ts.isPropertyAssignment(p)) {
-          const k = ts.isIdentifier(p.name)
-            ? p.name.text
-            : ts.isStringLiteral(p.name)
-              ? p.name.text
-              : ''
+          const k = propertyKeyText(p.name)
+          if (k === null) {
+            // computed key in factory: still return NvStyleInfo but mark key as absent
+            // (callers use objExpr directly for emission; keys is metadata only)
+            continue
+          }
           if (k) keys.push(k)
-        }
-      }
-      // Erase signal reads in factory property initializers
-      // (object form is static — no erasure needed)
-      for (const p of objExpr.properties) {
-        if (ts.isPropertyAssignment(p)) {
-          eraseSignalReadsInNode(p.initializer, symbols.all)
+          eraseSignalReadsInNode(p.initializer, symbols.all) // proof-of-wire; result unused in S0
         }
       }
       return { form: 'factory', keys, source: src, objExpr, factory: arg }
@@ -2230,10 +2220,6 @@ function computeThunkSource(
             break
           }
           if (ts.isPropertyAssignment(prop)) {
-            if (ts.isComputedPropertyName(prop.name)) {
-              hasComputed = true
-              break
-            }
             const key = propertyKeyText(prop.name)
             if (key === null) {
               hasComputed = true
@@ -2266,10 +2252,6 @@ function computeThunkSource(
                 break
               }
               if (ts.isPropertyAssignment(prop)) {
-                if (ts.isComputedPropertyName(prop.name)) {
-                  hasComputed = true
-                  break
-                }
                 const key = propertyKeyText(prop.name)
                 if (key === null) {
                   hasComputed = true
