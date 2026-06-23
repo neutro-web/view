@@ -54,7 +54,8 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4.1**._
 - **Perf-validation phase:** COMPLETE. All three tripwires resolved (createSignals
   cleared structural-accepted; FALSE-heavy characterized watch-item; cross-engine
   closed). No redesign triggered.
-- **Tests:** 595 green (class-selection increment C + self-review fixes, 2026-06-22). `tsc --strict` + DOM lib, biome, build all clean.
+- **Tests:** 599 green (D-cl-1 close, EX-CL-01..04, commit `1b00492`, 2026-06-22).
+  `tsc --strict` + DOM lib, biome, build all clean.
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state graph-coloring, push-down
@@ -119,12 +120,12 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4.1**._
   evidence). `cx()` pure string builder, both FEs. Per-key isolation behaviorally proven
   on both back-ends (TC-CL-04 call-count). Computed/shorthand/non-literal-array keys →
   whole-binding fallback to AttrBinding.
-  **Named debt D-cl-1 — COMMISSIONED 2026-06-22 (`feat/class-emit-exec`, not yet landed).**
-  Parse-path still uses `stubExpr` (structural-only, as `each` TC-EA-11); the *emit* path is
-  verified real (`parseNvFileForEmit` extracts real `boolSrc`; emitter emits per-key toggle
-  thunks). Test-only close via EX-CL-01..04 on the proven emit-exec harness; load-bearing
-  case EX-CL-02. Handoff `cc-handoff-dcl1-class-emit-exec.md`. **Verify on landing by reading
-  the emitted `.js` for EX-CL-02, not the green total.**
+  **D-cl-1 — CLOSED 2026-06-22 (architect-verified, commit `1b00492`).** `.nv` class-selection
+  behaviorally proven on the emit-exec path (EX-CL-01..04; 599 green; emitted JS shows real
+  `boolSrc`, not `stubExpr`). Parse-path structural IR still uses `stubExpr` (unchanged, by
+  design — structural-only), but behavioral coverage now exists via the emit path. Tests cover
+  the **interpolated** object-literal form (`class="${{...}}"`); bare-attribute `class={{...}}`
+  form distinctness is a minor open question, not blocking.
 - `$style × slots` — STILL parked behind `$style` scoping *implementation* (design tractable
   now that axis-a is chosen, but specced after `$style` lands).
 - SyncBinding (throws at both back-ends today).
@@ -165,6 +166,14 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4.1**._
   `ListBinding` (`buildNvSlotContentIR` ignores returned `lists`).
 - **D-each-5:** `signal()` imported in `nv-emitter.ts` for stub-IR extraction in
   the list emit case (plan-mandated, couples emitter to core at runtime).
+- **D-cl-3:** string-literal class-key quote-inclusion. Object/array `class` keys that are
+  string literals (e.g. `'is-active'`) are extracted via `prop.name.getText()` (quotes
+  included) at both classlist key-extraction sites (structural `nv-parser.ts` L368/L401; emit
+  ~L2206/L2238), wiring `classList.toggle("'is-active'", …)`. **Shipped defect, both
+  back-ends:** silent wrong DOM for every hyphenated class name. Identifier keys unaffected
+  (why EX-CL-01..04 pass). Fix: use `p.name.text` for StringLiteral/Identifier (mirror
+  `extractStyleInfo` L1240–1245). Renderer-layer, in-stream. Add a hyphenated-key EX-CL
+  regression case with the fix.
 
 ### Naming
 - `neutro/view` / `nv` working name; package under `@neutro` (view engine is
@@ -1113,5 +1122,63 @@ reading the appended test block AND the captured emitted `.js` for EX-CL-02 (mus
 **Reaffirmed open after this lands:** D-cl-2 remains a logged coverage-accuracy note (not a
 shipped-code defect); it is unaffected. T=6 per-key width threshold remains a placeholder
 gated on real-app `ReactiveNode`-width evidence.
+
+**No contract touch. No Template-IR touch.** reactive-core v0.4.2, Template-IR v0.4.1 unchanged.
+
+---
+
+### 2026-06-22 — D-cl-1 CLOSED (architect-verified); D-cl-3 logged (string-literal class-key quote defect)
+
+**D-cl-1 CLOSED.** `.nv` class-selection is now behaviorally proven on the real emit-exec
+path. Increment C-exec landed at commit **1b00492** (branch `feat/class-emit-exec`), test-only
+(zero `src/` diff — G0 held). Added EX-CL-01..04 to `test/renderer/nv-emitter-exec.test.ts`;
+**599/599 green** (595 baseline + 4), `tsc --strict` clean, biome clean, build clean.
+
+Architect-verified by reading placed files (raw host) + the captured emitted JS, not the CC
+summary:
+- EX-CL-02 (load-bearing) mounts the emitted `.nv` module, threads an external signal as a
+  prop (`active: () => extActive()`), and asserts the toggle reflects the signal in **both**
+  directions plus static-token survival across a flip. Failable: a stubbed `() => undefined`
+  fails both directions.
+- Captured emitted JS for EX-CL-02 shows the toggle entry as `expr: () => (props.active())` —
+  a **real `boolSrc`**, not `undefined`. This is the direct evidence the parse-path `stubExpr`
+  does not reach the emit path.
+
+**Deviation from handoff (not a defect):** the handoff specced the `.nv` bare-attribute form
+`class={{...}}`; the landed tests use the interpolated form `class="${{...}}"` (object literal
+at an interpolation hole). CC chose the form the emit path actually exercises — correct under
+the handoff's "confirm the form, do not guess" instruction. Consequence: EX-CL-02 proves the
+**interpolated object-literal** path. Whether the bare-attribute `class={{...}}` `.nv` form is
+a distinct emit path or sugar over the same lowering is **not settled** by this increment —
+logged as a minor open question, not blocking.
+
+---
+
+**D-cl-3 — NEW named debt: string-literal class-key quote-inclusion (shipped defect, both back-ends).**
+
+`buildNvHoleBinding` classlist branch (`nv-parser.ts` structural path L368/L401) and the
+emit-thunk extraction (~L2206/L2238) both derive the toggle key via `prop.name.getText()`.
+For a **string-literal** property key (e.g. `'is-active'`), `getText()` returns the source
+text **with surrounding quotes**, so the emitted token is `'is-active'` (quotes included) and
+the lowering wires `classList.toggle("'is-active'", …)` — a class named with literal quote
+characters. **Verified against `main`.**
+
+- **Severity:** silent wrong DOM (no throw, no fallback) for any object/array `class` key that
+  is not a bare identifier — i.e. every hyphenated class name (`is-active`, `btn-primary`),
+  the common real-CSS case.
+- **Scope:** production lowering, both front-end paths (structural + emit). Identifier keys
+  (`card`, `active`) are unaffected — which is why EX-CL-01..04 (identifier-only by design)
+  pass and the defect was masked. The D-cl-1 seam proof does not depend on hyphenated keys, so
+  the close stands.
+- **Fix (mechanical, deferred to next `src/`-touching increment):** for `PropertyAssignment`
+  names use the unquoted value — `ts.isStringLiteral(p.name) ? p.name.text : ts.isIdentifier(p.name) ? p.name.text : …` —
+  mirroring `extractStyleInfo` (L1240–1245), which already extracts keys correctly. Apply at
+  all classlist key-extraction sites (structural + emit, object + array-of-object).
+- **Classification:** renderer-layer FE string handling. Not a §1 invariant; does not touch
+  what a computation observes mid-propagation. **In-stream, not contract-level.** No contract
+  touch, no IR touch.
+- **Test debt to add with the fix:** an EX-CL case with a hyphenated key (the case
+  EX-CL-01..04 deliberately avoided), asserting `classList.contains('is-active')` on the
+  emitted path. This is the failable regression gate.
 
 **No contract touch. No Template-IR touch.** reactive-core v0.4.2, Template-IR v0.4.1 unchanged.
