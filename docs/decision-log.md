@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4**._
+_Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4.1**._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
 > `nv-decision-log-archive.md` (moved 2026-06-21). This snapshot is the resolved
@@ -54,7 +54,7 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4**._
 - **Perf-validation phase:** COMPLETE. All three tripwires resolved (createSignals
   cleared structural-accepted; FALSE-heavy characterized watch-item; cross-engine
   closed). No redesign triggered.
-- **Tests:** 593 green (class-selection increment C, 2026-06-22). `tsc --strict` + DOM lib, biome, build all clean.
+- **Tests:** 595 green (class-selection increment C + self-review fixes, 2026-06-22). `tsc --strict` + DOM lib, biome, build all clean.
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state graph-coloring, push-down
@@ -110,11 +110,19 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4**._
   `factory` form → CSS-custom-property lowering (values reactive, factory NOT re-run);
   injection = hoist-once-per-component-identity + dedup. Renderer/compiler-layer only —
   NOT a reactive-core contract concern (Template-IR §scope already fences this).
-- **Class-selection (`class={...}`) — LANDED (branch feat/class-selection, 2026-06-22).**
-  `cx` helper + `ClassListBinding` IR (v0.4.1) + `classes()` sentinel + both FE routing +
-  both back-end wiring. G1 per-key isolation, G2 FE-equivalence, G3 differential parity,
-  G4/G5 fail-shows-teeth all verified. T=6 width-threshold shipped (looping fallback >6).
-  Named debt: D-cx-1 (`cx` + `classes` exported from renderer surface; sub-path TBD).
+- **Class-selection (`class={...}`) — LANDED, architect-verified 2026-06-22** (branch
+  feat/class-selection, Increment C). `ClassListBinding` (kind `classlist`, entries
+  static|toggle) added to IR union; Template-IR bumped v0.4 → v0.4.1; `AttrBinding`
+  unchanged; reactive-core contract unchanged. `.nv` bare object/array literal +
+  tagged-template `classes(...)` sentinel → same per-key `classList.toggle` lowering
+  (one effect per key ≤6, one looping effect >6; T=6 placeholder pending real-app width
+  evidence). `cx()` pure string builder, both FEs. Per-key isolation behaviorally proven
+  on both back-ends (TC-CL-04 call-count). Computed/shorthand/non-literal-array keys →
+  whole-binding fallback to AttrBinding.
+  **Named debt D-cl-1: `.nv` class-selection is behaviorally proven only via hand-built
+  runtime IR, not the parsed output** (parse-path uses stubExpr — same structural-only
+  limitation as `each` TC-EA-11). Behavioral `.nv` coverage rides the emit-exec path
+  (increment 3 / a future class emit-exec increment).
 - `$style × slots` — STILL parked behind `$style` scoping *implementation* (design tractable
   now that axis-a is chosen, but specced after `$style` lands).
 - SyncBinding (throws at both back-ends today).
@@ -1002,3 +1010,69 @@ APPROVED. Two increments queued, NOT commissioned: (S) `$style` scoping + inject
 (S). No code landed. No contract/IR bump from the decision itself; Template-IR may grow a
 thin `ClassListBinding` (lean (b)) and/or `StyleVarBinding` at build time — renderer
 contract only, never reactive-core.
+
+---
+
+### 2026-06-22 — Increment C (class-selection) LANDED + ARCHITECT-VERIFIED
+
+**Event:** Class-selection (spec §4, APPROVED 2026-06-22) implemented by CC on branch
+feat/class-selection, reported all 8 gates green + 3 self-review gaps fixed. Architect
+verification by reading placed files from GitHub main (raw host; html-tag.ts,
+nv-parser.ts, ir.ts, interpreter.ts, emitted-mount.ts, test/renderer/class-selection.test.ts,
+test/renderer/ir-equivalence.ts), NOT the CC summary or gate table.
+
+**IR decision (spec §6) — option (b) taken, verified sound:** `ClassListBinding`
+(`kind: 'classlist'`, `entries: ({ kind:'static', token } | { kind:'toggle', key, expr })[]`)
+added as a discriminated union member in `ir.ts`. `AttrBinding` byte-unchanged. Template-IR
+bumped v0.4 → **v0.4.1** (doc header in ir.ts cites it; `template-ir.md` PK doc bumped to
+v0.4.1 with `ClassListBinding` §3.7.1). Additive, renderer-layer; NO reactive-core contract
+touch, no §1/§6 invariant affected — correct per Constraint 1 (style/class scoping is out
+of reactive-core contract scope).
+
+**Verified (each failable on inspection):**
+- **G0:** ClassListBinding additive; existing AttrBinding wiring unchanged; routing is at
+  the ATTR hole branch (`html-tag.ts` `name==='class' && isClassesSentinel`; `nv-parser.ts`
+  object/array-literal), NOT `walkNodeList`'s comment branch. `src/core/` untouched.
+- **G1 (load-bearing):** both back-ends (interpreter `wireClassList`, emitted-mount
+  `classlist` case) emit ONE EFFECT PER KEY for ≤6 with correct per-iteration closure
+  capture (`const key=e.key; const expr=e.expr`) — no loop-variable leak. TC-CL-04 counts
+  the `big` thunk's invocations, toggles only `active`, asserts count unchanged, on BOTH
+  back-ends. Failable: a looping-effect regression for a ≤6 object goes red.
+- **G2:** real shared-oracle FE-equivalence — both FEs parse through actual paths;
+  `irStructurallyEqual` comparator's `classlist` case compares entries length/kind/token/key
+  (skips expr-thunk identity, same policy as `list`/other expr fields). Not a comparator
+  exception.
+- **G3:** differential parity (interpreter vs emitted) across object, array, and looping
+  (>6) forms.
+- **G4:** string form (`cx(...)` / `() => cx(...)`) stays `AttrBinding` full-reassign;
+  `cx` (`html-tag.ts`) is a pure string builder, exported from renderer index alongside
+  `classes`.
+- **G5/G6/G7/G7b:** present; real DOM assertions; looping path + computed-key fallback
+  covered.
+
+**Validator/idiom split verified:** `classes(...)` returns a `ClassesSentinel`
+(`__nvClasses`), added to the html-tag thunk-validator allowlist. A BARE object literal
+at a `class` hole in tagged-template still throws (not a function, not a sentinel) —
+enforcing the `.nv`-literal / tagged-sentinel idiom split, matching `<each>` vs `each(...)`.
+`.nv` does not special-case `classes(...)` call-form.
+
+**Named debt logged (non-blocking — coverage overstatements, not code defects):**
+- **D-cl-1 (`.nv` behavioral coverage is via stand-in, not parsed output):** the `.nv`
+  parse path emits `stubExpr` for toggle entries, so the parse-path IR is structural-only
+  and not directly mountable. TC-CL-G7b's behavioral "toggles correctly" half mounts a
+  HAND-BUILT runtimeIr, not the parsed fallback; its real failable assertion is the
+  structural `kind==='attr'` check. Same limitation as `each` TC-EA-11. Close via the
+  emit-exec path when a class emit-exec increment runs.
+- **D-cl-2 (TC-CL-G5 proves a weaker claim than the gate states):** G5 hand-builds a
+  deliberately mis-wired IR and asserts broken DOM. This proves the assertion CAN detect
+  wrong wiring but bypasses production `wireClassList` — it would pass even if the real
+  lowering broke. Real-path wrong-wiring detection is provided by TC-CL-04. G5 is
+  redundant teeth, not the primary guard; no action required, logged for accuracy.
+
+**Threshold:** T=6 (≤6 per-key, >6 looping) shipped as placeholder with `TODO(threshold)`
+comments in both back-ends, gated on real-app `ReactiveNode`-width evidence (kind-split
+watch-item). Not a final value.
+
+**Verdict:** PASS. Class-selection moves to "LANDED, architect-verified." Two named debts
+(D-cl-1, D-cl-2) are coverage-accuracy items, not shipped-code defects — the production
+lowering is correct on both back-ends.

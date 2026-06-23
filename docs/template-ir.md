@@ -1,8 +1,8 @@
-# nv Template IR — Design v0.4
+# nv Template IR — Design v0.4.1
  
 **Stream:** (3) Renderer/templating  
 **Contract reference:** nv Reactive Core Runtime Contract v0.4.2  
-**Status:** Approved — v0.4 (2026-06-22). Increment 2 (scoped-slot shape + authoring) landed.  
+**Status:** Approved — v0.4.1 (2026-06-22). Increment C (class-selection) landed.  
 **Changelog:**  
 - v0.2 (2026-06-17): initial approved IR spec — six binding kinds (PoC scope) + two designed-deferred (List, Sync).  
 - v0.2.1 (2026-06-20): multi-root template shapes; list item single-root constraint noted.  
@@ -11,6 +11,7 @@
 - v0.3.2 (2026-06-21): doc-only. Tagged-template front-end now uses `slots('name')` sentinel for outlet detection; `.nv` front-end keeps `slots.name` AST detection. Both mechanisms produce identical `SlotOutletBinding` — IR shape unchanged. See §6.1.
 - v0.3.3 (2026-06-22): additive `fallback?: TemplateIR` on `SlotOutletBinding`; walk-collapse (GATE-2) — slot content now processed by the same recursive walk as top-level content; component-as-slot-child falls out. reactive-core v0.4.2 unchanged. D-slot-1 retained.
 - v0.4 (2026-06-22): `SlotEntry.content` → factory `(props: SlotProps) => TemplateIR` (hard-cut, no union). `SlotOutletBinding.props?: readonly PropEntry[]` — child-exposed accessor thunks. `SlotFns` updated accordingly. `let={...}` authoring on both front-ends. D-slot-1 retained. reactive-core v0.4.2 unchanged.
+- v0.4.1 (2026-06-22): add `ClassListBinding` (kind `'classlist'`) — per-key `classList.toggle` lowering for object/array `class` expressions. Additive union member; `AttrBinding` byte-unchanged; reactive-core contract unchanged.
  
 ---
  
@@ -156,7 +157,8 @@ type Binding =
   | ListBinding        //  ── designed, deferred (§3.7)
   | SyncBinding        //  ── designed, deferred (§3.8)
   | ComponentBinding   //  ── v0.3 (component API)
-  | SlotOutletBinding; //  ── v0.3.1 (slot consumption); v0.3.3 adds optional `fallback?: TemplateIR`
+  | SlotOutletBinding  //  ── v0.3.1 (slot consumption); v0.3.3 adds optional `fallback?: TemplateIR`
+  | ClassListBinding;  //  ── v0.4.1 (class-selection; per-key classList.toggle)
  
 type BaseBinding = {
   pathIndex: number;   // index into shape.bindingPaths — which node this targets
@@ -379,6 +381,33 @@ nodes for moved keys. Each item root owns that item's `ChildBinding`/`TextBindin
 etc. The reconciliation algorithm itself (LIS-based, Ivi-style) is a back-end
 detail, not an IR concern.
  
+### 3.7.1 ClassListBinding (v0.4.1)
+
+Per-key `classList.toggle` lowering for `class={...}` expressions that are object or
+array literals. Additive to the union; `AttrBinding` (whole-attribute reassign) is
+unchanged and still produced for string/function/cx-call class expressions.
+
+```typescript
+type ClassListEntry =
+  | { kind: 'static'; token: string }            // added once at mount, no effect
+  | { kind: 'toggle'; key: string; expr: () => unknown }  // one effect per key
+
+type ClassListBinding = BaseBinding & {
+  kind:    'classlist';
+  entries: readonly ClassListEntry[];
+};
+```
+
+Back-end: for each `toggle` entry, one `effect(() => el.classList.toggle(key, !!expr()))`.
+Width threshold T=6: ≤6 toggle entries → per-key effects; >6 → one looping effect over all
+entries. T is a placeholder pending real-app `ReactiveNode`-width evidence (kind-split
+watch-item). Multi-token keys split on whitespace at compile time — one entry per token.
+
+Computed / shorthand property keys (non-literal key in `.nv` object literal) → whole-binding
+fallback to `AttrBinding` (full-reassign). `classes(...)` tagged-template sentinel carries
+the pre-split entry list; bare object literal in tagged-template still throws (enforcing the
+`.nv`-literal / tagged-sentinel idiom split, matching `<each>` / `each(...)`).
+
 ### 3.8 SyncBinding (designed, deferred)
  
 Two-way binding. Combines a signal→DOM direction (read, like `PropBinding`) with a
