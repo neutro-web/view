@@ -156,9 +156,11 @@ _Last updated: 2026-06-23. Contract **v0.4.2** · Template-IR **v0.4.2**._
   redirect). LANDED 2026-06-23 at 1aa52b8. G1–G4, G3', G3'-inverse, G6, G7: green.
   G5 (`<each>`-in-slot) DEFERRED 2026-06-23 — out of scope; `<each>`-in-slot capability unwired
   (L773 discard). Styling handles it for free once the capability lands. G5 test skipped w/ reason.
-- `<each>` in slot content — wire `lists` from `walkNvNodeList` into `buildNvSlotContentIR`
-  (collapse toward primary builder, not extend the second path). Re-enables skipped G5. Filed
-  2026-06-23, not scheduled.
+- **Increment SS — COMMISSIONED 2026-06-23, Gate-P (awaiting CC plan).** Joint
+  `<each>`-in-slot wiring + D-slot-style-1 structural collapse (static class → classlist
+  static entry, regex removed). Collapse toward main-walk list-push via shared helper
+  (D-SS-2). Re-enables G5 + adds emit-exec differential (D-SS-3). Gated by the Action-2
+  oracle (D-SS-4). No IR bump. Closes the slot domain. See Log 2026-06-23 + handoff.
 - SyncBinding (throws at both back-ends today).
 - LIS list move-minimization — CLOSED [2026-06-22], not commissioned (O(N) reconcile
   acceptable: N=1k sub-2ms, N=10k 17ms real-Chromium).
@@ -200,9 +202,13 @@ _Last updated: 2026-06-23. Contract **v0.4.2** · Template-IR **v0.4.2**._
 - **D-slot-style-1:** slot-content static `class=` rewritten by string-regex on `shape.html`
   (no structural binding for static attrs); false-match risk on literal `class=` in text.
   Not a shipped defect. [2026-06-23]
+  DISPOSITION CHOSEN 2026-06-23: structural collapse (lift static class → classlist static
+  entry, remove regex) inside Increment SS. Closes on SS land, not before.
 - **Slot static-class all-static limitation:** purely static slot content (no holes) yields no
   ComponentBinding → static class unrewritten. Pre-existing parser constraint (D-each-4 family).
   [2026-06-23]
+  Re-examination commissioned in Increment SS (open-point-1): may close for free given
+  the walk is full-DFS + component detection is sentinel-driven. CC verifies at HEAD.
 - **R-style-1 — OPEN research: `<style>` fallback performance at the compiler level.**
   S1+S2 injection uses `adoptedStyleSheets`-first with graceful `<style>` fallback (OPEN-5,
   architect-ruled 2026-06-23). The fallback path appends a `<style>` element at mount time,
@@ -1793,3 +1799,46 @@ unfalsifiable. Now it is failable.
 **Verdict:** Oracle now covers slot content + style artifacts. tsc --strict clean;
 teeth proven to fire (sandbox smoke). reactive-core v0.4.2 + Template-IR v0.4.2
 untouched.
+
+### 2026-06-23 — Increment SS COMMISSIONED (`<each>`-in-slot + static-class structural collapse); Gate-P
+
+**Decision.** Commission Increment SS to close the slot domain: wire `<each>` in slot
+content AND collapse D-slot-style-1 structurally, in one increment. Gate-P (plan-first):
+CC produces a plan citing HEAD seams, proposes the open points, halts before any `src/`.
+Handoff: `action3-increment-SS-gateP-commission.md`.
+
+**Locked architect decisions (not relitigated in CC's plan):**
+- **D-SS-1:** Item 2 (D-slot-style-1) takes the STRUCTURAL-COLLAPSE path, not
+  accept-as-logged. Static `class="..."` attrs in slot content lift into `classlist`
+  `{kind:'static',token}` entries → existing structural `patchClasslistTokens` rewrites
+  them → the string-regex on `shape.html` (nv-parser.ts ~L1919-1925) is REMOVED. Grounds:
+  the static entry kind already exists, is already produced (array-literal path L391-394),
+  already consumed by both back-ends (`wireClassList` L224-225); element-targeting bindings
+  need no sentinel. Invents nothing; kills the regex + its text-`class=` false-match.
+- **D-SS-2:** Collapse toward the main-walk list-push (L1061-1067) via a SHARED helper both
+  the main builder and `buildNvSlotContentIR` call → structural identity by construction,
+  not assertion. No slot-local list representation (the recurring slot-subsystem wound).
+- **D-SS-3:** Re-enable G5 parse-path-structural AS-IS, AND add an emit-exec differential
+  leg (interpreter vs emitted) for `$style × <each>-in-slot` token carry — because the
+  parse-path list/component bindings are stubs (D-each-2), behavioral proof needs the emit
+  path. D-cl-2 real-path-G5 bonus may ride along if cheap (optional, not a blocker).
+- **D-SS-4:** The Action-2 oracle (slot-content recursion + `styleArtifactEqual`) IS the
+  structural gate. FE-equivalence + differential route through `irStructurallyEqual` with
+  `doc`. A divergent slot-list shape now FAILS the oracle — load-bearing and failable.
+
+**Open points (CC proposes, architect rules at Gate-P):** (1) D-each-4 hole-boundary —
+does the all-static-slot limitation close for free, stay, or need a separate call (CC
+verifies current HEAD behavior empirically first — walk is full DFS, component detection
+is sentinel-driven independent of holes, so the limitation may be narrower than the
+L1906-1907 patch comment states); (2) static-class lift location (in slot builder vs shared
+helper); (3) diagnostics threading for slot `<each>`; (4) depth-2 nesting gate;
+(5) stacked G2 by-ref (list-in-component) — assert or document.
+
+**G0 disqualifiers:** core/contract touch; slot-local list shape; regex still present
+post-increment; new IR kind or `ir.ts` shape change (uses existing classlist static entry,
+no Template-IR bump); FE lockstep broken.
+
+**Scope:** renderer-layer only. reactive-core v0.4.2 + Template-IR v0.4.2 untouched. No IR
+bump (existing classlist static entry reused).
+
+**Status:** Awaiting CC plan → architect Gate-P approval before any `src/`.
