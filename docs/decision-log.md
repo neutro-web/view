@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4.1**._
+_Last updated: 2026-06-23. Contract **v0.4.2** · Template-IR **v0.4.2**._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
 > `nv-decision-log-archive.md` (moved 2026-06-21). This snapshot is the resolved
@@ -54,8 +54,9 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4.1**._
 - **Perf-validation phase:** COMPLETE. All three tripwires resolved (createSignals
   cleared structural-accepted; FALSE-heavy characterized watch-item; cross-engine
   closed). No redesign triggered.
-- **Tests:** 607 green (S0/F1 + D-cl-3, merge `6baa64e`, 2026-06-22). `tsc --strict` + DOM
-  lib, biome, build all clean.
+- **Tests:** S1+S2 landed on `main` (2026-06-23), architect-verified. `tsc --strict`
+  + DOM lib, biome, build clean. (Green count per latest CC report; verify by reading
+  placed files, not the count.)
 
 ### Locked (do not drift without explicit reversal)
 - **Reactivity model:** fine-grained signals, three-state graph-coloring, push-down
@@ -86,9 +87,11 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4.1**._
 - Compile-time DOM encapsulation — still open (Shadow-DOM opt-in path unspecced).
   STYLE encapsulation APPROVED 2026-06-22 (see Log) — Light-DOM scoping via hybrid
   routing; not a contract concern.
-- **`$style` key discriminant + StyleVarBinding APPROVED (spec 2026-06-22).**
-  Two-way class/selector routing; new `StyleVarBinding` IR member (Template-IR v0.4.2 on land).
-  nv-does-not-invent-CSS principle. Renderer-layer; not a contract concern.
+- **`$style` scoping + dynamic lowering — LANDED 2026-06-23 (Template-IR v0.4.2).**
+  Two-way class/selector routing; `StyleVarBinding` IR member; declHash folds property
+  name (OPEN-2); classlist recursion total over conditional/list (OPEN-7). nv-does-not-
+  invent-CSS. Renderer-layer; not a contract concern. Confirm residual OPEN-1/3/4/5/6
+  chosen-at-build vs. open against spec §7.
 
 ### Genuine research / deferred-on-evidence
 - Beating the alien-signals-class baseline: nv wins/ties 5 of 7 cases; two wide-graph
@@ -115,17 +118,9 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4.1**._
   injection = hoist-once-per-component-identity + dedup. Renderer/compiler-layer only —
   NOT a reactive-core contract concern (Template-IR §scope already fences this).
   - **S0 (F1 + D-cl-3): LANDED 2026-06-22 (`6baa64e`).** Parser seam in place.
-  - **S1+S2 — COMMISSIONED 2026-06-22 (`feat/style-s1s2`, plan-first hard gate; not yet landed).**
-    Spec authoritative at `docs/design/spec-style-s1s2-scoping-and-lowering.md`. Handoff
-    `cc-handoff-style-s1s2.md`. CC must produce `docs/design/plan-style-s1s2.md` and halt for
-    architect approval before any `src/` touch (Gate P). Four phases: (1) discriminant+tag-set
-    [sandbox, no IR]; (2) static scoping+injection [browser]; (3) StyleVarBinding+dynamic
-    [browser, **Template-IR v0.4.2**]; (4) ×classlist [browser, OPEN-7 → CLOSED 2026-06-22]. Seven OPEN points ruled
-    against the plan, not pre-decided. Locked constraints L.1–L.6 fenced as G0.
-    - **OPEN-7 RULED 2026-06-23** (`$style` × `<each>` classlist): `patchClasslistTokens` recurses
-      into `list` bindings (total walk via L172 stub factory call); parent-IR call covers all
-      nesting depths. Literal depth-1 patch rejected (misses nested `<each>`, verified L772 discard).
-      In-stream. Gate O7.2 (nested depth-2) is load-bearing, real-browser. Remaining OPEN: 1–6.
+  - **S1+S2 — LANDED 2026-06-23 on `main`, architect-verified.** `StyleVarBinding`
+    (ir.ts L266, v0.4.2 final shape); `buildStyleArtifact` both parser sites; OPEN-2 +
+    OPEN-7 closed in code. See Log 2026-06-23.
 - **Class-selection (`class={...}`) — LANDED, architect-verified 2026-06-22** (branch
   feat/class-selection, Increment C). `ClassListBinding` (kind `classlist`, entries
   static|toggle) added to IR union; Template-IR bumped v0.4 → v0.4.1; `AttrBinding`
@@ -141,10 +136,11 @@ _Last updated: 2026-06-22. Contract **v0.4.2** · Template-IR **v0.4.1**._
   design — structural-only), but behavioral coverage now exists via the emit path. Tests cover
   the **interpolated** object-literal form (`class="${{...}}"`); bare-attribute `class={{...}}`
   form distinctness is a minor open question, not blocking.
-- `$style × slots` — STILL parked behind `$style` scoping *implementation* (design tractable
-  now that axis-a is chosen, but specced after `$style` lands). The slot-boundary scope-carry
-  question is now determined by the S1+S2 discriminant (class-rewrite vs attribute-hash):
-  tractable to spec once S1+S2 lands. `$style × classlist` is OPEN-7 → CLOSED 2026-06-22 inside S1+S2 (sub-phase 4).
+- **`$style × slots` — UNPARKED 2026-06-23; spec in progress.** S1+S2 landed, so the
+  scope-carry rule is answerable. Seam read done: `patchClasslistTokens` has no
+  `component` case → class-form tokens in slot content are un-rewritten on both paths
+  (parse captures slot IR before patch; emit emits source strings, no IR to patch).
+  Semantic = scope-by-lexical-author (parent-wins). See spec-style-slots-scope-carry.md.
 - SyncBinding (throws at both back-ends today).
 - LIS list move-minimization — CLOSED [2026-06-22], not commissioned (O(N) reconcile
   acceptable: N=1k sub-2ms, N=10k 17ms real-Chromium).
@@ -1426,3 +1422,50 @@ collision. Verified in `src/renderer/nv-parser.ts` `buildStyleArtifact` implemen
 `feat/style-s1s2`. No ruling needed — the correct answer was evident from the seam (two dynamic
 decls on one selector is an ordinary case; shared hash would overwrite one). OPEN-2 closed at
 build, not deferred to architect.
+
+### 2026-06-23 — Increment S (S1+S2) LANDED on `main`, architect-verified
+
+`$style` scoping + dynamic-value lowering merged to `main`. Spec authoritative at
+`docs/design/spec-style-s1s2-scoping-and-lowering.md`. Verified by reading placed file
+content on `main` (not CC summary; not a green gate table):
+
+- **`StyleVarBinding` in the IR union, final v0.4.2 shape** — `src/renderer/ir.ts` L266
+  `{ kind:'style-var', varName, expr:ReactiveExpr<string|number|null|undefined> }`,
+  union member L285. Stub comments already removed (L262 reads `StyleVarBinding (v0.4.2)`;
+  the "Phase 3 stub" cleanup flagged last session is DONE).
+- **`buildStyleArtifact` wired at both parser sites** — `src/renderer/nv-parser.ts`
+  parse-path L1990, emit-path L2901.
+- **OPEN-2 ruling reflected in code** — `declHash` folds component identity + CSS property
+  name: `--nv-${simpleHash(`${scopeHash}|${cssProp}`)}` (nv-parser.ts L1772). Distinct
+  custom-property names per (selector, property); no collision.
+- **OPEN-7 fix present** — `patchClasslistTokens` recurses into `conditional` and `list`
+  (nv-parser.ts L1885–1894), making the parent-IR call total over those nesting depths.
+- **`style-inject.ts` present on `main`.**
+
+**Versions on land:** Template-IR **v0.4.1 → v0.4.2** (StyleVarBinding additive member).
+reactive-core **v0.4.2 unchanged** (renderer-layer; no §1 invariant, no mid-propagation
+observation change — write sink on the effect's downstream edge).
+
+**OPEN points status at land** (per their own ruling entries): OPEN-2 CLOSED (above),
+OPEN-7 CLOSED (above). OPEN-1 (`:where()` selector qualification), OPEN-3 (dynamic value
+coercion), OPEN-4 (injection registry shape/lifetime), OPEN-5 (`adoptedStyleSheets`-first
++ `<style>` fallback), OPEN-6 (teardown policy): confirm chosen-at-build vs. genuinely-open
+against the spec §7 before treating any as live. R-style-1 (`<style>` fallback AOT batching)
+remains OPEN research, not blocking.
+
+**Correcting the prior Current State.** The header carried S1+S2 as "COMMISSIONED…
+not yet landed" and Template-IR at v0.4.1 — both stale as of this verification. Recorded
+here as an event; Current State edited to match (below). No reversal of a decision; a
+catch-up of the resolved picture to ground truth.
+
+**Discovered gap (not closed here; routes to next increment).** `patchClasslistTokens`
+has NO `component` case — it does not descend into `ComponentBinding.slots[].content`.
+Parse path captures slot-content IR by-reference into a `SlotContent` closure during the
+walk (nv-parser.ts L656/L677), *before* the patch runs (L2003/L2914). Emit path emits slot
+content as `ThunkSource[]` source strings (L2581+), with no IR object to patch at all.
+**Consequence:** class-form `$style` tokens authored in slot content are currently
+un-rewritten on both paths — slot content renders raw class names, silently breaking parent
+scope across the slot boundary. This is the `$style × slots` axis, now unparked; see its
+spec. Logged as the seam fact that motivates the next increment, not fixed here.
+
+No contract touch. reactive-core v0.4.2, Template-IR v0.4.2.
