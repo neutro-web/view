@@ -364,7 +364,11 @@ function buildNvHoleBinding(
               hasComputed = true
               break
             }
-            const key = prop.name.getText()
+            const key = propertyKeyText(prop.name)
+            if (key === null) {
+              hasComputed = true
+              break
+            }
             for (const token of key.split(/\s+/).filter(Boolean)) {
               entries.push({ kind: 'toggle', key: token, expr: stubExpr as () => unknown })
             }
@@ -396,7 +400,11 @@ function buildNvHoleBinding(
                   hasComputed = true
                   break
                 }
-                const key = prop.name.getText()
+                const key = propertyKeyText(prop.name)
+                if (key === null) {
+                  hasComputed = true
+                  break
+                }
                 for (const token of key.split(/\s+/).filter(Boolean)) {
                   entries.push({ kind: 'toggle', key: token, expr: stubExpr as () => unknown })
                 }
@@ -1218,6 +1226,17 @@ function extractRenderTemplate(
     return processHtmlTemplate(body, doc, symbols.all)
   }
   return null
+}
+
+function propertyKeyText(name: ts.PropertyName): string | null {
+  if (ts.isIdentifier(name)) return name.text
+  if (ts.isStringLiteral(name)) return name.text
+  if (ts.isNoSubstitutionTemplateLiteral(name)) return name.text
+  if (ts.isNumericLiteral(name)) return name.text
+  if (ts.isComputedPropertyName(name)) return null
+  throw new Error(
+    `[nv/parser] propertyKeyText: unhandled static PropertyName kind ${ts.SyntaxKind[name.kind]}`,
+  )
 }
 
 function extractStyleInfo(componentFn: ts.ArrowFunction): NvStyleInfo | null {
@@ -2202,7 +2221,11 @@ function computeThunkSource(
               hasComputed = true
               break
             }
-            const key = prop.name.getText()
+            const key = propertyKeyText(prop.name)
+            if (key === null) {
+              hasComputed = true
+              break
+            }
             const boolSrc = eraseSignalReadsInNode(prop.initializer, symbols.all, propsAccessors)
             for (const token of key.split(/\s+/).filter(Boolean)) {
               entries.push({ kind: 'toggle', key: token, boolSrc })
@@ -2234,7 +2257,11 @@ function computeThunkSource(
                   hasComputed = true
                   break
                 }
-                const key = prop.name.getText()
+                const key = propertyKeyText(prop.name)
+                if (key === null) {
+                  hasComputed = true
+                  break
+                }
                 const boolSrc = eraseSignalReadsInNode(
                   prop.initializer,
                   symbols.all,
