@@ -1341,10 +1341,11 @@ artificial slice. Spec APPROVED 2026-06-22: `spec-style-s1s2-scoping-and-lowerin
    global `document`)** — required by the locked "renderer stays agnostic" decision (SSR/multi-doc).
 
 **Seven OPEN spec points deferred to build (seam-in-front, CC halts not guesses):** selector
-qualification form (OPEN-1, browser-gated), declHash property-name inclusion (OPEN-2), dynamic
+qualification form (OPEN-1, browser-gated), declHash property-name inclusion (**OPEN-2 CLOSED
+2026-06-23** — property name folded in, `--nv-${simpleHash(scopeHash+'|'+cssProp)}`), dynamic
 value coercion (OPEN-3), injection registry shape/lifetime (OPEN-4), `<style>` vs
 `adoptedStyleSheets` (OPEN-5, browser-gated), teardown policy (OPEN-6), `$style × ClassListBinding`
-rewrite consistency (OPEN-7). See spec §7.
+rewrite consistency (**OPEN-7 CLOSED 2026-06-23**). See spec §7.
 
 reactive-core v0.4.2 unchanged. Template-IR v0.4.1 now (bump to v0.4.2 lands with dynamic-lowering
 sub-phase).
@@ -1415,3 +1416,13 @@ the case literal Option A passes structurally while emitting wrong DOM; real-bro
 O7.3 (conditional-inside-each), O7.4 (differential), O7.5 (stub-call inert).
 
 No contract touch. No Template-IR touch. reactive-core v0.4.2, Template-IR v0.4.1 unchanged.
+
+### 2026-06-23 — OPEN-2 (`$style` declHash property-name inclusion) CLOSED: property name folded in
+
+**Decision.** `declHash` folds in both component identity AND the CSS property name:
+`--nv-${simpleHash(`${scopeHash}|${cssProp}`)}`. Two dynamic declarations on the same selector
+(e.g., `color` and `font-size`) therefore get distinct custom-property names, preventing
+collision. Verified in `src/renderer/nv-parser.ts` `buildStyleArtifact` implementation on branch
+`feat/style-s1s2`. No ruling needed — the correct answer was evident from the seam (two dynamic
+decls on one selector is an ordinary case; shared hash would overwrite one). OPEN-2 closed at
+build, not deferred to architect.
