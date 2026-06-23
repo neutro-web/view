@@ -4,16 +4,16 @@
 > (recommended) or superpowers:executing-plans to implement this plan task-by-task.
 > Steps use checkbox (`- [ ]`) syntax for tracking.
 >
-> **⛔ HALT — this plan still requires architect approval before any `src/` touch.**
-> OPEN-S1 is now RESOLVED (B3). OPEN-S2/S3 confirmed. Awaiting final Gate P approval.
+> **Gate P APPROVED 2026-06-23** (plan `f96894e` + merge redirect).
+> CC may proceed to `src/` — no second approval needed for the merge-vs-separate simplification.
 
 **Goal:** Make class-form `$style` tokens authored in parent-supplied slot content carry
 the parent's scope hash, on both front-ends and both back-ends.
 
 **Architecture:** Mechanism B3 — derive `scopeHash` from pre-walk `shapeHtml` (not `ir.id`);
-thread `shapeHtml` through `ProcessResult`; pass `classRewrites` into `buildNvSlotContentIR`
-so slot content tokens are rewritten at IR-build time. One insertion site; no second walk;
-`ir.id` untouched. `injectComponentStyle` injection dedup re-keyed to `scopeHash`.
+thread `shapeHtml` through `ProcessResult`; add a `component` case to the EXISTING
+`patchClasslistTokens` (mirrors the `list` case: stub-call factory, recurse). One walk,
+one function. `injectComponentStyle` injection dedup re-keyed to `scopeHash`. `ir.id` untouched.
 
 **Tech Stack:** TypeScript, `src/renderer/nv-parser.ts` + `src/renderer/interpreter.ts`
 (renderer workstream), existing ir-equivalence + emit-exec gate harness. No reactive-core touch.
@@ -297,7 +297,7 @@ post-capture patching is ONLY safe because `.nv`-built factories are by-referenc
 change that makes factories build fresh IR per call (e.g. truly scoped slot factories with
 per-invocation state) would break this. The plan must note this constraint explicitly.
 
-### 2.3 Revised B3 implementation shape
+### 2.3 Revised B3 implementation shape (Gate P approved)
 
 B3 does NOT add a `classRewrites` parameter to `buildNvSlotContentIR` (that approach required
 `styleInfo` to be available inside `processHtmlTemplate`, which it isn't). Instead:
@@ -305,12 +305,11 @@ B3 does NOT add a `classRewrites` parameter to `buildNvSlotContentIR` (that appr
 1. Add `shapeHtml: string` to `ProcessResult` and return it from `processHtmlTemplate`.
 2. Change L1988/L2899: `const scopeHash = simpleHash(renderResult.shapeHtml)`.
 3. Build `artifact = buildStyleArtifact(styleInfo, scopeHash, symbols)` (unchanged call).
-4. Call `patchSlotContentTokens(renderResult.ir, artifact.classRewrites)` — a NEW thin function
-   that iterates `ir.bindings` for `ComponentBinding` entries, calls `content({})` to get the
-   slot IR, and calls `patchClasslistTokens` on it. Also rewrite `ir.shape.html` class tokens.
-5. Also call the existing `patchClasslistTokens(renderResult.ir, artifact.classRewrites)` (top-
-   level IR; unchanged).
-6. Change `injectComponentStyle` call to key on `scopeHash`.
+4. The existing `patchClasslistTokens(renderResult.ir, artifact.classRewrites)` gains a
+   **`component` case** (mirrors the `list` case): for each `ComponentBinding`, call
+   `slot.content(stubSlotProps)` to get the slot IR, recurse. No new function — collapse into
+   the existing walk. G7 satisfied structurally (one walk, one function).
+5. Change `injectComponentStyle` call to key on `scopeHash`.
 
 **`patchSlotContentTokens` is a thin wrapper, not a new walk.** It iterates existing bindings
 (no DFS, no re-parse) and delegates to `patchClasslistTokens` (existing function). G7: one
@@ -331,45 +330,57 @@ approach as §3.1 of the original plan.
 
 ## 3. Single-Rewrite-Site Design (CONFIRMED)
 
-Both paths share `processHtmlTemplate` → `renderResult.ir`. The new `patchSlotContentTokens`
-call is added at each scopeHash site (L2003 area on parse path; L2914 area on emit path),
-immediately after the existing `patchClasslistTokens(renderResult.ir, ...)` call.
+Both paths share `processHtmlTemplate` → `renderResult.ir`. The `component` case is added to
+the EXISTING `patchClasslistTokens` function (L1870), mirroring the `list` case (L1888–1894).
+No new function, no second walk. `patchClasslistTokens` already descends into `conditional` and
+`list`; `component` is the structurally identical missing case.
 
+`component` case addition to `patchClasslistTokens`:
 ```ts
-// After existing patchClasslistTokens(renderResult.ir, artifact.classRewrites):
-patchSlotContentTokens(renderResult.ir, artifact.classRewrites)
-```
-
-`patchSlotContentTokens` implementation:
-```ts
-function patchSlotContentTokens(ir: TemplateIR, classRewrites: Map<string, string>): void {
-  if (classRewrites.size === 0) return
-  for (const binding of ir.bindings as Binding[]) {
-    if (binding.kind !== 'component') continue
-    for (const slot of binding.slots) {
-      // NOTE: safe only while .nv slot factories return captured-by-ref IR (not fresh per call).
-      // If that changes, this patch must move into the factory closure or B2 must be revived.
-      const slotIR = slot.content({})
-      // Rewrite static class attribute tokens in shape HTML
-      if (slotIR.shape.html.includes('class=')) {
-        (slotIR.shape as { html: string }).html = slotIR.shape.html.replace(
-          /\bclass="([^"]*)"/g,
-          (_, cls: string) =>
-            `class="${cls.replace(/\b([\w-]+)\b/g, (tok) => classRewrites.get(tok) ?? tok)}"`,
-        )
-      }
-      // Rewrite classlist binding tokens (same function, slot IR)
-      patchClasslistTokens(slotIR, classRewrites)
-      // Recurse: slot content may itself contain ComponentBindings
-      patchSlotContentTokens(slotIR, classRewrites)
-    }
+if (binding.kind === 'component') {
+  const stubSlotProps = {}
+  for (const slot of (binding as ComponentBinding).slots) {
+    // NOTE: safe only while .nv slot factories return captured-by-ref IR (not fresh per call).
+    // The scoped-slot shape (props) => TemplateIR permits a fresh-IR factory that would break
+    // this silently — same latent fragility as the 'list' case above.
+    const slotIR = slot.content(stubSlotProps)
+    patchClasslistTokens(slotIR, classRewrites)
   }
 }
 ```
 
-**G7 confirmation:** `patchClasslistTokens` gains NO `component` case. The new
-`patchSlotContentTokens` is a separate thin function that calls `patchClasslistTokens` — it does
-not re-implement descent logic. One logical rewrite site per binding kind.
+Also rewrite static class attribute tokens in `slotIR.shape.html` (the HTML string):
+```ts
+if (binding.kind === 'component') {
+  const stubSlotProps = {}
+  for (const slot of (binding as ComponentBinding).slots) {
+    // NOTE: by-ref factory assumption — see list case comment above.
+    const slotIR = slot.content(stubSlotProps)
+    if (slotIR.shape.html.includes('class=')) {
+      ;(slotIR.shape as { html: string }).html = slotIR.shape.html.replace(
+        /\bclass="([^"]*)"/g,
+        (_, cls: string) =>
+          `class="${cls.replace(/\b([\w-]+)\b/g, (tok) => classRewrites.get(tok) ?? tok)}"`,
+      )
+    }
+    patchClasslistTokens(slotIR, classRewrites)
+  }
+}
+```
+
+Add a corresponding comment to the `list` case flagging its identical latent fragility (no
+behavior change):
+```ts
+if (binding.kind === 'list') {
+  // NOTE: patches stub-call return; sticks only while itemTemplate returns same IR by ref.
+  // Same latent fragility as the 'component' case below — fresh-IR factory would break silently.
+  const stubVs = signal<unknown>(null)
+  ...
+}
+```
+
+**G7 confirmation:** One walk, one function (`patchClasslistTokens`). Structural guarantee — no
+parallel path can exist.
 
 ---
 
@@ -538,11 +549,11 @@ because fresh-IR factories don't exist; the constraint must be documented for fu
   git commit -m "feat(renderer): B3 — thread shapeHtml via ProcessResult; scopeHash = simpleHash(shapeHtml)"
   ```
 
-### Task 2 — `patchSlotContentTokens` + injection dedup fix
+### Task 2 — `component` case in `patchClasslistTokens` + injection dedup fix
 
 **Files:**
-- Modify: `src/renderer/nv-parser.ts` (new `patchSlotContentTokens` function; calls at L2003
-  area and L2914 area)
+- Modify: `src/renderer/nv-parser.ts` (`component` case in `patchClasslistTokens` L1870; list
+  case comment; static HTML rewrite inside component case)
 - Modify: `src/renderer/interpreter.ts` (L711 injection key)
 - Test: `test/renderer/nv-parser.test.ts` (G1, G5 assertions); `test/renderer/` (G3', G4)
 
@@ -604,52 +615,46 @@ because fresh-IR factories don't exist; the constraint must be documented for fu
   Run: `pnpm test -- --grep 'G5'`
   Expected: FAIL
 
-- [ ] **Step 3: Implement `patchSlotContentTokens`**
+- [ ] **Step 3: Add `component` case to `patchClasslistTokens` + list comment**
 
-  Add after `patchClasslistTokens` function (L1897 area) in `nv-parser.ts`:
+  In `patchClasslistTokens` (L1870), add after the `list` case (L1888–1894) and add a
+  latent-fragility comment to the `list` case:
 
   ```ts
-  function patchSlotContentTokens(ir: TemplateIR, classRewrites: Map<string, string>): void {
-    if (classRewrites.size === 0) return
-    for (const binding of ir.bindings as Binding[]) {
-      if (binding.kind !== 'component') continue
-      for (const slot of (binding as ComponentBinding).slots) {
-        // NOTE: safe only while .nv slot factories return the same captured-by-ref IR object.
-        // If a factory ever builds fresh IR per call (truly per-invocation scoped slots),
-        // this post-capture patch will not stick. Revisit with B2 or factory decoration then.
-        const slotIR = slot.content({})
-        // Rewrite static class attribute tokens in slot shape HTML
-        if (slotIR.shape.html.includes('class=')) {
-          ;(slotIR.shape as { html: string }).html = slotIR.shape.html.replace(
-            /\bclass="([^"]*)"/g,
-            (_, cls: string) =>
-              `class="${cls.replace(/\b([\w-]+)\b/g, (tok) => classRewrites.get(tok) ?? tok)}"`,
-          )
-        }
-        // Rewrite classlist binding tokens (delegates to existing function — no new logic)
-        patchClasslistTokens(slotIR, classRewrites)
-        // Recurse: slot content may itself contain ComponentBindings
-        patchSlotContentTokens(slotIR, classRewrites)
+  // Inside patchClasslistTokens, list case — add comment only, no behavior change:
+  if (binding.kind === 'list') {
+    // NOTE: patches stub-call return; sticks only while itemTemplate returns same IR by ref.
+    // Fresh-IR itemTemplate would break this silently. Same latent fragility as 'component' below.
+    const stubVs = signal<unknown>(null)
+    const stubIs = signal<number>(0)
+    const itemIR = binding.itemTemplate(stubVs, stubIs)
+    patchClasslistTokens(itemIR, classRewrites)
+  }
+
+  // NEW: component case — mirrors list; slot content is the structurally identical missing case
+  if (binding.kind === 'component') {
+    const stubSlotProps = {}
+    for (const slot of (binding as ComponentBinding).slots) {
+      // NOTE: safe only while .nv slot factories return the same captured-by-ref IR object
+      // (true for `(_props) => namedIR` closures built by buildNvSlotContentIR today).
+      // The scoped-slot shape (props) => TemplateIR permits fresh-IR-per-call; that would
+      // break this patch silently. Same latent fragility as the 'list' case above. (G2)
+      const slotIR = slot.content(stubSlotProps)
+      // Rewrite static class attr tokens in the slot's shape HTML
+      if (slotIR.shape.html.includes('class=')) {
+        ;(slotIR.shape as { html: string }).html = slotIR.shape.html.replace(
+          /\bclass="([^"]*)"/g,
+          (_, cls: string) =>
+            `class="${cls.replace(/\b([\w-]+)\b/g, (tok) => classRewrites.get(tok) ?? tok)}"`,
+        )
       }
+      patchClasslistTokens(slotIR, classRewrites)
     }
   }
   ```
 
-- [ ] **Step 4: Call `patchSlotContentTokens` at both scopeHash sites**
-
-  Parse path (~L2003):
-  ```ts
-  patchClasslistTokens(renderResult.ir, artifact.classRewrites)
-  patchSlotContentTokens(renderResult.ir, artifact.classRewrites)   // ← add
-  renderResult.ir.classRewrites = artifact.classRewrites
-  ```
-
-  Emit path (~L2914):
-  ```ts
-  patchClasslistTokens(renderResult.ir, artifact.classRewrites)
-  patchSlotContentTokens(renderResult.ir, artifact.classRewrites)   // ← add
-  renderResult.ir.classRewrites = artifact.classRewrites
-  ```
+  No new function. No new call sites — `patchClasslistTokens(renderResult.ir, ...)` at L2003
+  and L2914 already exist and will now descend into slot content.
 
 - [ ] **Step 5: Fix injection dedup key in `interpreter.ts`**
 
@@ -833,7 +838,7 @@ because fresh-IR factories don't exist; the constraint must be documented for fu
 
 | File | Change |
 |------|--------|
-| `src/renderer/nv-parser.ts` | `ProcessResult` + `shapeHtml`; `processHtmlTemplate` returns `shapeHtml`; L1988/L2899 use `simpleHash(shapeHtml)`; new `patchSlotContentTokens`; call sites after existing `patchClasslistTokens` at L2003/L2914 area |
+| `src/renderer/nv-parser.ts` | `ProcessResult` + `shapeHtml`; `processHtmlTemplate` returns `shapeHtml`; L1988/L2899 use `simpleHash(shapeHtml)`; `component` case + list comment in `patchClasslistTokens` (L1870); no new functions, no new call sites |
 | `src/renderer/interpreter.ts` | L711: injection dedup key `ir.id` → `ir.styleArtifact.scopeHash` |
 | `test/renderer/nv-parser.test.ts` | G1, G3, G5 unit tests |
 | `test/renderer/slot-style-scope.test.ts` | G3', G4 differential tests |
