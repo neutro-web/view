@@ -141,12 +141,14 @@ _Last updated: 2026-06-23. Contract **v0.4.2** · Template-IR **v0.4.2**._
   `component` case → class-form tokens in slot content are un-rewritten on both paths
   (parse captures slot IR before patch; emit emits source strings, no IR to patch).
   Semantic = scope-by-lexical-author (parent-wins). See spec-style-slots-scope-carry.md.
-  Mechanism: B3 (scopeHash = simpleHash(shapeHtml); ir.id untouched). Rewrite via NEW `component`
-  case in existing `patchClasslistTokens` (post-walk; NOT a separate fn — collapse principle).
-  Includes interpreter.ts L711 injection-key fix (ir.id → scopeHash). Gate P approved 2026-06-23
-  (plan f96894e + merge redirect). LANDED 2026-06-23. G1–G4, G3', G6, G7: green. G5: deferred (<each>-in-slot increment).
+  Mechanism: B3 + C1 fix. scopeHash = simpleHash(shapeHtml + NUL + $style source) — C1 fix
+  (style source folded in; bare shapeHtml collided same-shape/different-style). ir.id untouched.
+  Rewrite via NEW `component` case in existing `patchClasslistTokens` (post-walk; NOT a separate
+  fn — collapse principle). Injection-key fix on BOTH back-ends: interpreter.ts L711 +
+  emitted-mount.ts L706 (ir.id → scopeHash). Gate P approved 2026-06-23 (plan f96894e + merge
+  redirect). LANDED 2026-06-23 at 1aa52b8. G1–G4, G3', G3'-inverse, G6, G7: green.
   G5 (`<each>`-in-slot) DEFERRED 2026-06-23 — out of scope; `<each>`-in-slot capability unwired
-  (L772 discard). Styling handles it for free once the capability lands. G5 test skipped w/ reason.
+  (L773 discard). Styling handles it for free once the capability lands. G5 test skipped w/ reason.
 - `<each>` in slot content — wire `lists` from `walkNvNodeList` into `buildNvSlotContentIR`
   (collapse toward primary builder, not extend the second path). Re-enables skipped G5. Filed
   2026-06-23, not scheduled.
@@ -188,6 +190,12 @@ _Last updated: 2026-06-23. Contract **v0.4.2** · Template-IR **v0.4.2**._
   `ListBinding` (`buildNvSlotContentIR` ignores returned `lists`).
 - **D-each-5:** `signal()` imported in `nv-emitter.ts` for stub-IR extraction in
   the list emit case (plan-mandated, couples emitter to core at runtime).
+- **D-slot-style-1:** slot-content static `class=` rewritten by string-regex on `shape.html`
+  (no structural binding for static attrs); false-match risk on literal `class=` in text.
+  Not a shipped defect. [2026-06-23]
+- **Slot static-class all-static limitation:** purely static slot content (no holes) yields no
+  ComponentBinding → static class unrewritten. Pre-existing parser constraint (D-each-4 family).
+  [2026-06-23]
 - **R-style-1 — OPEN research: `<style>` fallback performance at the compiler level.**
   S1+S2 injection uses `adoptedStyleSheets`-first with graceful `<style>` fallback (OPEN-5,
   architect-ruled 2026-06-23). The fallback path appends a `<style>` element at mount time,
@@ -1670,3 +1678,44 @@ skipped G5 test as its acceptance gate. Not scheduled.
 Task 2 (`$style × slots`) is otherwise complete pending the remaining gates (G1–G4, G3', G6, G7).
 G5 test stays written-and-skipped with the deferral reason in the skip message, pointing at the
 `<each>`-in-slot increment. reactive-core v0.4.2 untouched. Template-IR v0.4.2 (no bump).
+
+### 2026-06-23 — `$style × slots` close-out verified at `1aa52b8`; C1 seed amendment + debts
+
+Verified landed at HEAD (10 commits, baseline 9b517e6): C1 seed at both sites (nv-parser L2023,
+L2934), both injection-key fixes (interpreter.ts L711, emitted-mount.ts L706 → `scopeHash`),
+`component` case inside `patchClasslistTokens` (single function, G7 holds), G2 fragility comments
+on both `list` and `component`. 647 pass / 2 skipped, browser ×3 green.
+
+**C1 amendment to B3 (supersedes the bare-`shapeHtml` seed from the OPEN-S1/B3 entry, same
+date).** The B3 ruling set `scopeHash = simpleHash(shapeHtml)`. CC's second deep review found
+this collides: two components with identical templates but DIFFERENT `$style` rules get the same
+`shapeHtml` → same scopeHash → same rewritten class token → second component's CSS silently
+dropped by injection dedup. **Landed fix:** seed is
+`simpleHash(`${shapeHtml}\0${styleInfo?.source ?? ''}`)` at both sites — style source folded in,
+NUL-delimited. Distinct `$style` → distinct scopeHash. Gated by G3'-inverse (same shapeHtml +
+different `$style` → distinct hash). This is the correct seed; B3's `ir.id`-decoupling and
+pre-walk availability are unchanged.
+
+**D-slot-style-1 (named debt) — static-class rewrite in slot content is string-regex on
+`shape.html`, not structural.** Static `class="..."` attributes in slot content live in
+`slotIR.shape.html` as strings (no `classlist` binding exists for them), so the `component` case
+rewrites them via `shape.html.replace(/\bclass="([^"]*)"/g, ...)`. Correct for real class attrs,
+but the regex can false-match a literal `class="..."` appearing in TEXT content. Defensible
+(static attrs have no structural token to rewrite; this is the only handle), but it is a
+second rewrite representation for the same logical op (structural for bindings, string for static
+attrs). Not a shipped defect at any tested input. Re-evaluate if slot static-attr handling is
+reworked. Coverage: the static branch is reachable only via the mixed case (static class + a
+hole), tested (F7); the all-static case is unreachable (next debt).
+
+**All-static slot content unrewritten (named limitation; same family as D-each-4).** A
+ComponentBinding is only produced when slot content contains ≥1 interpolation hole (parser uses
+the hole to detect the component boundary). Purely static slot content
+(`<ChildComp><div class="card">x</div></ChildComp>`, no holes) produces no ComponentBinding → the
+`component` case is never reached → its static class stays unrewritten. **Pre-existing parser
+constraint, not a regression** (same boundary-detection family as D-each-4: nested `<each>` in
+slot content also produces no binding). Documented in source + implementation-state.md; recorded
+here for the source-of-truth. Closes when the parser detects component boundaries without
+requiring a hole — not scheduled.
+
+reactive-core v0.4.2 untouched. Template-IR v0.4.2 (no bump). G5 deferral stands (separate
+`<each>`-in-slot increment).
