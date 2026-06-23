@@ -97,16 +97,15 @@
 
 ## OPEN point resolution proposals (P.2)
 
-### OPEN-1 — Selector-form qualification (browser-gated)
+### OPEN-1 — Selector-form qualification — **RULED: `:where()` from the start**
 
-**Options:**
-- (a) Descendant-prefix: `[data-nv-s-<h>] <sel>` — simple, works in all browsers, adds specificity
-- (b) `:where()`-wrapped: `:where([data-nv-s-<h>]) <sel>` — specificity-neutral, requires CSS `:where()` support (Chrome 88+, Safari 14+, Firefox 78+)
-- (c) Compound (when selector is a single class): `.card[data-nv-s-<h>]` — no extra specificity for class selectors
+**Ruling (architect, 2026-06-23):** use `:where([data-nv-s-<h>]) <sel>` unconditionally. Specificity-neutral from day one; no baseline-then-migrate path.
 
-**Recommendation:** Start with (a) as the safe baseline in Phase 2 implementation. Gate G2.1–G2.3 runs in real Chromium. If specificity conflict is observed (a component's styles winning over page styles at unexpected weight), evaluate (b) as the optimization. **CC must not choose (c) alone** — it doesn't generalize to compound selectors.
+**Emitted form:** for selector-form key `<sel>`, emit `:where([data-nv-s-<hash>]) <sel>`. For class-form key `card`, the class-rewrite (`card_<hash>`) is the scoping mechanism — no attribute-hash qualification needed for class-form keys.
 
-**Resolution trigger:** Phase 2 browser gate output. CC reports the actual specificity behavior; architect rules (a) or (b) before Phase 2 merges.
+**Browser compat:** `:where()` Chrome 88+, Safari 14+, Firefox 78+. Confirmed broad enough for this project's targets.
+
+**CC must use this form everywhere** — no descendant-prefix fallback, no compound variant.
 
 ### OPEN-2 — `declHash` includes property name?
 
@@ -374,7 +373,7 @@ type VarBindingDesc = {
 
 **Scope hash:** `simpleHash(ir.id)` — the component IR id is the identity hash. Confirmed: `ir.id` is the stable component identity field used in `TemplateIR`. CC must read the `id` field usage in `interpreter.ts` at HEAD to confirm before building.
 
-**OPEN-1 safe baseline:** use descendant-prefix `[data-nv-s-<hash>] <sel>` for selector-form. Report browser specificity results from G2.1–G2.3 for architect ruling.
+**OPEN-1 RULED:** use `:where([data-nv-s-<hash>]) <sel>` for selector-form — specificity-neutral, no fallback. Class-form keys use class-rewrite only (no attribute qualifier).
 
 **Browser test pattern** (follows `real-browser.spec.ts` pattern):
 ```ts
@@ -386,7 +385,7 @@ import { test, expect } from '@playwright/test'
 
 The `window.__nv` bundle must expose `mount`, `emitMount`, `signal`, `flushSync`. Injection happens inside `mount`/`emitMount`. No extra export needed for the mount path; `injectComponentStyle` exported for gate assertion of injection count.
 
-**OPEN points resolved in Phase 2:** OPEN-1 (baseline chosen, browser result reported), OPEN-4 (per-doc WeakMap), OPEN-5 (`<style>` baseline), OPEN-6 (never-remove).
+**OPEN points resolved in Phase 2:** OPEN-1 (RULED: `:where()` from start), OPEN-4 (per-doc WeakMap), OPEN-5 (`<style>` baseline), OPEN-6 (never-remove).
 
 ### Task 3 — Phase 3: `StyleVarBinding` + dynamic lowering (**IR bump v0.4.2**)
 
