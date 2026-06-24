@@ -124,16 +124,16 @@ a classlist entry everywhere. One rewrite representation, both positions, both p
  * Used by both processHtmlTemplate (main path) and buildNvSlotContentIR (slot path).
  */
 function liftStaticClassBindings(
-  fragWrapper: Element,
+  root: ParentNode,  // accepts both Element (slot path) and DocumentFragment (main path)
   allPaths: NodePath[],
   bindings: Binding[],
 ): void {
-  for (const el of Array.from(fragWrapper.querySelectorAll('[class]')) as Element[]) {
+  for (const el of Array.from(root.querySelectorAll('[class]')) as Element[]) {
     const classVal = el.getAttribute('class')!
     const tokens = classVal.split(/\s+/).filter(Boolean)
     if (tokens.length === 0) continue
     const pathIndex = allPaths.length
-    allPaths.push(computePath(el as Node, fragWrapper))
+    allPaths.push(computePath(el as Node, root as Node))
     el.removeAttribute('class') // strip before HTML serialization
     bindings.push({
       kind: 'classlist',
@@ -198,7 +198,7 @@ G2 as documented, accepted debt per prior ruling.
 - [x] G0 disqualifiers confirmed: no core touch, no slot-local list, regex gone, no IR bump, FE lockstep (html-tag.ts `buildSlotContentIR` also wires `lists`)
 - [x] Main-path static-class bug folded in — G-SS-mainbug + G-SS-symmetry mandatory gates added; Playwright ×3 required for G-SS-mainbug styled leg
 
-> **⚠️ Gate-P OPEN — plan revision in progress (OP-2 shared lift, new gates, widened Task 3). Re-submit after revision for fast confirm.**
+> **✅ Gate-P APPROVED (fast-confirm, 2026-06-23).** One correction applied: Task 3 Step 3c now lifts on `frag` (not `shapeDiv`), param widened to `ParentNode`. G-SS-mainpath-root gate added. Execute Tasks 2–6.
 
 ---
 
@@ -615,6 +615,57 @@ architect for Gate-P approval.
       expect(cl).toBeDefined()
       expect(cl.entries).toContainEqual({ kind: 'static', token: `card_${scopeHash}` })
     })
+
+    it('G-SS-mainpath-root (behavioral): main static-class binding targets the correct element at mount', () => {
+      // G-SS-mainpath-root gate: proves liftStaticClassBindings ran on `frag` (not the
+      // throwaway shapeDiv clone). If the wrong root was used, computePath produces an
+      // incompatible bindingPath and wireClassList targets the wrong/no element at mount.
+      // Mount via emitMount and assert the SPECIFIC intended element carries the scoped class.
+      const dom = new JSDOM('<!DOCTYPE html><body><div id="app"></div></body>')
+      const doc = dom.window.document
+      const container = doc.getElementById('app')!
+
+      const parentHash = 'mainroottest'
+      const rewClass = `card_${parentHash}`
+      const parentCss = `.${rewClass} { color: rgb(0, 0, 255) }`
+
+      // Simulate what processHtmlTemplate produces AFTER liftStaticClassBindings(frag, ...):
+      // shape.html has no class= (stripped from frag before clone+serialize), and bindingPaths[0]
+      // correctly targets the <div data-main-card> via the frag root.
+      const mainIR = {
+        id: 'main:roottest',
+        shape: {
+          // data-main-card is the anchor; shape.html has NO class= (it was lifted)
+          html: '<div data-main-card></div>',
+          bindingPaths: [[0]] as [number[]],  // path [0] = firstChild of fragment root
+        },
+        bindings: [
+          {
+            kind: 'classlist' as const,
+            pathIndex: 0,
+            entries: [{ kind: 'static' as const, token: rewClass }],
+          },
+        ],
+        styleArtifact: { staticCss: parentCss, scopeHash: parentHash },
+      }
+
+      createRoot((d) => {
+        emitMount(mainIR).mountFn(container, doc)
+        return d
+      })
+      flushSync()
+
+      // Must find the SPECIFIC element [data-main-card], not a parent/wrong node
+      const targetEl = container.querySelector('[data-main-card]') as HTMLElement | null
+      expect(targetEl).not.toBeNull()
+      // The scoped class must be on the CORRECT targeted element
+      expect(targetEl!.classList.contains(rewClass)).toBe(true)
+      // Its classList must contain ONLY the scoped token (not leaked onto a parent)
+      const parent = targetEl!.parentElement
+      if (parent && parent !== container) {
+        expect(parent.classList.contains(rewClass)).toBe(false)
+      }
+    })
   })
 
   describe('D-SS-1: static-class attrs lifted to classlist entries (regex removed)', () => {
@@ -721,20 +772,48 @@ architect for Gate-P approval.
   liftStaticClassBindings(fragWrapper, allPaths, bindings)
   ```
 
-  **3c — Main-path call site.** In `processHtmlTemplate`, find the line ~L1096 where
-  `shapeDiv.innerHTML` is serialized (the shape HTML snapshot). Before that line, insert:
+  **3c — Main-path call site.** In `processHtmlTemplate`, the post-walk fragment is `frag`
+  (the `DocumentFragment` root passed to `walkNvNodeList` at L54; `computePath` uses it as
+  root throughout). Around L1094-1096 a THROWAWAY clone is built for serialization:
 
   ```typescript
-  // D-SS-1: shared lift at the main-path call site — same mechanism as slot path.
-  // Fixes live bug: static class= in main template under $style was not scoped
-  // (classRewrites had the mapping but shape.html was never updated).
-  // liftStaticClassBindings removes class= from shapeDiv BEFORE innerHTML snapshot,
-  // so patchClasslistTokens static-entry rewrite (L1876-1885) scopes it uniformly.
-  liftStaticClassBindings(shapeDiv, allPaths, bindings)
+  const shapeDiv = doc.createElement('div')
+  shapeDiv.appendChild(frag.cloneNode(true))   // clone for serialization only
+  const reserializedShape = shapeDiv.innerHTML.replace(…)
   ```
 
-  The variable name for the main-path DOM wrapper may be `shapeDiv` or similar — verify at
-  HEAD by reading `processHtmlTemplate` around L1096 and substituting the actual name.
+  **Critical:** the lift MUST run on `frag` (not `shapeDiv`) — `frag` is the root all other
+  `computePath` calls use. Lifting on `shapeDiv` would mix two incompatible roots in
+  `bindingPaths` → wrong/missing node at mount. Insert BEFORE the clone:
+
+  ```typescript
+  // D-SS-1: lift on `frag` — the SAME root walkNvNodeList used for all other bindingPaths.
+  // Do NOT run on the throwaway shapeDiv clone (different root → path-root mismatch at mount).
+  // Once class= is stripped from frag, the subsequent clone+serialize naturally omits it.
+  liftStaticClassBindings(frag, allPaths, bindings)
+
+  // existing clone + serialize:
+  const shapeDiv = doc.createElement('div')
+  shapeDiv.appendChild(frag.cloneNode(true))   // clone now already class-stripped
+  const reserializedShape = shapeDiv.innerHTML.replace(…)
+  ```
+
+  Since `frag` is a `DocumentFragment` (not an `Element`), widen `liftStaticClassBindings`'s
+  first param from `Element` to `ParentNode` — `querySelectorAll` is available on both
+  `Element` and `DocumentFragment`. The `computePath` root param is `Node`, already correct.
+  Update the OP-2 helper signature and body accordingly:
+
+  ```typescript
+  function liftStaticClassBindings(
+    root: ParentNode,        // was: fragWrapper: Element
+    allPaths: NodePath[],
+    bindings: Binding[],
+  ): void {
+    for (const el of Array.from(root.querySelectorAll('[class]')) as Element[]) {
+      // … rest of body unchanged (computePath(el as Node, root as Node)) …
+    }
+  }
+  ```
 
 - [ ] **Step 4: Remove the shape.html regex from `patchClasslistTokens` component case**
 
@@ -1477,6 +1556,7 @@ for these (standing policy; same reasoning as G6 in slot-style-scope).
 | G-SS-emit | `npx vitest run test/renderer/slot-ss.test.ts -t "emit-exec"` | test fails or uses parse-path stubs |
 | G-SS-static | `npx vitest run test/renderer/slot-ss.test.ts -t "static"` | classList differs from baseline or `class=` still in shape.html |
 | G-SS-mainbug | `npx vitest run test/renderer/slot-ss.test.ts -t "G-SS-mainbug"` + Playwright ×3 | main static class= still in shape.html OR no classlist binding OR CSS not applied |
+| G-SS-mainpath-root | emit-exec mount of main static-class IR; assert the SPECIFIC intended element (not a parent/wrong node) carries the scoped class | lifted classlist binding targets wrong node (path-root mismatch from using shapeDiv as root instead of frag) |
 | G-SS-symmetry | `npx vitest run test/renderer/slot-ss.test.ts -t "G-SS-symmetry"` | main-path and slot-path classlist IR differ |
 | G-SS-oracle | `grep -n "irStructurallyEqual" test/renderer/slot-ss.test.ts` | oracle not used in differential or both-FE test |
 | G-SS-bothFE | `npx vitest run test/renderer/slot-ss.test.ts -t "G-SS-bothFE"` | html-tag FE slot content has no ListBinding OR oracle diverges |
@@ -1512,4 +1592,4 @@ for these (standing policy; same reasoning as G6 in slot-style-scope).
 
 **Placeholder scan:** No placeholders. Task 3 Step 3 uses shared `liftStaticClassBindings` (full code in OP-2 section). Task 5 has concrete `page.evaluate()` bodies for both G-SS-browser and G-SS-mainbug.
 
-**Type consistency:** `pushListBinding` uses `NvWalkedEach`, `NodePath`, `Binding`, `NvDiagnostic` — all in nv-parser.ts scope. `liftStaticClassBindings` uses `Element`, `NodePath`, `Binding`, `computePath` (L232), `ClassListEntry`, `ClassListBinding` — all already in module. html-tag.ts fix uses `WalkedList`, `EachSentinel`, `ListBinding` — all already imported. `createHtmlTag`, `each` in G-SS-bothFE test — exported from html-tag.ts barrel.
+**Type consistency:** `pushListBinding` uses `NvWalkedEach`, `NodePath`, `Binding`, `NvDiagnostic` — all in nv-parser.ts scope. `liftStaticClassBindings` param widened to `ParentNode` (accepts both `Element` for slot path and `DocumentFragment` for main path); uses `NodePath`, `Binding`, `computePath` (L232 — `Node` root, already correct), `ClassListEntry`, `ClassListBinding` — all already in module. html-tag.ts fix uses `WalkedList`, `EachSentinel`, `ListBinding` — all already imported. `createHtmlTag`, `each` in G-SS-bothFE test — exported from html-tag.ts barrel. G-SS-mainpath-root behavioral test uses `emitMount`, `createRoot`, `flushSync` — imported at top of slot-ss.test.ts (Task 4 Step 2 imports).
