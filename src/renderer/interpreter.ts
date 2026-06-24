@@ -346,23 +346,20 @@ function wireSync(binding: SyncBinding, el: Node): void {
     compute = extractor
   }
 
-  // Dev-mode guard: warn if writeTarget is a derived() (non-writable) signal.
+  // Guard: warn if writeTarget is a derived() (non-writable) signal.
   // signal() accessors have a .set method; derived() accessors do not.
   // Thunk forms (() => WritableSignal) are valid — resolve before checking.
-  if (import.meta.env?.DEV !== false) {
-    const wt = binding.writeTarget
-    // Resolve thunk form for the guard check only: if wt is a function without .set,
-    // it may be a thunk (() => WritableSignal) rather than a direct signal/derived accessor.
-    // Call it to obtain the actual target, then check that for .set.
-    const resolvedForGuard =
-      typeof wt === 'function' && typeof (wt as unknown as { set?: unknown }).set !== 'function'
-        ? (wt as () => WritableSignal<unknown>)()
-        : (wt as WritableSignal<unknown>)
-    if (typeof resolvedForGuard?.set !== 'function') {
-      console.error(
-        '[nv] sync: write target is not a writable signal. Use signal(), not derived(), as a :PROP sync target.',
-      )
-    }
+  const wt = binding.writeTarget
+  // Resolve thunk form: if wt is a function without .set, it may be a thunk
+  // (() => WritableSignal) rather than a direct signal/derived accessor.
+  const resolvedForGuard =
+    typeof wt === 'function' && typeof (wt as unknown as { set?: unknown }).set !== 'function'
+      ? (wt as () => WritableSignal<unknown>)()
+      : (wt as WritableSignal<unknown>)
+  if (typeof resolvedForGuard?.set !== 'function') {
+    console.error(
+      '[nv] sync: write target is not a writable signal. Use signal(), not derived(), as a :PROP sync target.',
+    )
   }
 
   sync(
