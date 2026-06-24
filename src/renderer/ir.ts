@@ -190,11 +190,16 @@ export type ListBinding = BaseBinding & {
  */
 export type SyncBinding = BaseBinding & {
   kind: 'sync'
+  // signal→DOM (read direction) — like PropBinding
   propName: string
   readExpr: ReactiveExpr<unknown>
+  // DOM→signal (write-back direction) — via sync() external-source path
   eventName: string
-  writeTarget: () => { set: (v: unknown) => void }
-  writeTargetId?: string // SignalId — compiler path only; build when SyncBinding is scoped
+  // FIX: was `() => { set: (v) => void }` — stale vs v0.4.2 core.
+  // sync() resolves the target via nodeForFn.get(target); needs the accessor itself.
+  writeTarget: WritableSignal<unknown> | (() => WritableSignal<unknown>)
+  // Design placeholder; NOT populated — cross-boundary symbol space problem (see decision-log 2026-06-24).
+  writeTargetId?: string
   transform?: (eventValue: unknown, current: unknown) => unknown
 }
 
