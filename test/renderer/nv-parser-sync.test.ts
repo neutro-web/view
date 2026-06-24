@@ -60,11 +60,13 @@ describe('nv-parser :PROP sync directive', () => {
     ].join('\n')
     const results = parseNvFileForEmit(src, 'Foo.nv', doc)
     const thunk = results[0]?.emit?.bindingThunks[0] as {
-      kind: string; readExprSrc: string; writeTargetSrc: string
+      kind: string
+      readExprSrc: string
+      writeTargetSrc: string
     }
-    expect(thunk.writeTargetSrc).toBe('val')          // bare — NOT erased
-    expect(thunk.readExprSrc).toContain('val()')      // erased read
-    expect(thunk.writeTargetSrc).not.toContain('()')  // must not be val()
+    expect(thunk.writeTargetSrc).toBe('val') // bare — NOT erased
+    expect(thunk.readExprSrc).toContain('val()') // erased read
+    expect(thunk.writeTargetSrc).not.toContain('()') // must not be val()
   })
 
   it('emits error diagnostic for non-identifier bind target (method call)', () => {
