@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-24. Contract **v0.4.2** · Template-IR **v0.4.2**._
+_Last updated: 2026-06-24. Contract **v0.4.3** · Template-IR **v0.4.2**._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
 > `nv-decision-log-archive.md` (moved 2026-06-21). This snapshot is the resolved
@@ -47,6 +47,9 @@ _Last updated: 2026-06-24. Contract **v0.4.2** · Template-IR **v0.4.2**._
     **hand-written `sync()` only**. NOT yet auto-wired into `nvPlugin`/any build — it's a
     callable entry, not an automatic gate. SyncBinding edges still absent (Unit 2 pending).
     §8.5.4 cap remains the runtime backstop for everything not statically caught.
+    As of v0.4.3, §8.5.2 also admits renderer-synthesized SyncBinding edges (Unit 2
+    commissioned to recover them via A2). The driver `checkProgram` is still a callable
+    entry, not yet auto-wired into any build.
 - **Renderer:** interpreter + compiler back-ends at parity for all binding kinds.
   Both front-ends (tagged-template + `.nv`) produce one IR, FE-equivalence-gated.
   Template-IR doc reconciled to v0.4.2 (2026-06-23) — now matches `ir.ts`
@@ -175,17 +178,15 @@ _Last updated: 2026-06-24. Contract **v0.4.2** · Template-IR **v0.4.2**._
   static entry, regex removed). Collapse toward main-walk list-push via shared helper
   (D-SS-2). Re-enables G5 + adds emit-exec differential (D-SS-3). Gated by the Action-2
   oracle (D-SS-4). No IR bump. Closes the slot domain. See Log 2026-06-23 + handoff.
-- **SyncBinding (`:value`/`:checked`):** Parts 1+2 landed (both FEs, `.nv`-compiled
-  + tagged-interpreted). **Part 3 (write-back edge → §8.5.2) DEFERRED [2026-06-24]:**
-  target is Approach A (recover edge from emitted output, one symbol space), contingent
-  on the §8.5.2 build driver landing first. `writeTargetId` retracted, stays retracted.
-  Compiler back-end (`emitMount`) still THROWS on SyncBinding — only `nv-emitter.ts`
-  emits it. Cycle protection = §8.5.4 cap only.
-  - Part 3 prerequisite (Unit 1 / §8.5.2 driver) LANDED [2026-06-24]. SyncBinding edge
-    recovery itself (Unit 2) still pending a viability probe (A1/A2/A3).
-- **D-sync-cond-1 (dynamic write-target sugar):** RESOLVED [2026-06-24] — dynamic
-  targets EXCLUDED from §8.5.2 static checking, fall to the §8.5.4 cap (documented).
-  Static-target edge shape locked: `reads: ∅, writes: {t}`. Sugar itself still deferred.
+- **SyncBinding (`:value`/`:checked`):** Parts 1+2 landed. **Part 3 RESOLVED [2026-06-24]
+  via Approach A2** — classifier recognizes the emitted IR-literal sync shape and
+  contributes a `reads: ∅, writes: {target}` edge through the existing `signalSymbolId`
+  derivation. Contract bumped v0.4.2→v0.4.3 (§8.5.2 admits renderer-synthesized edges).
+  **Unit 2 implementation COMMISSIONED** (WS2/CC, plan-first, G0–G6); `emitMount` still
+  throws on SyncBinding (back-end emit out of scope). Until Unit 2 lands, §8.5.4 cap
+  remains the SyncBinding cycle protection.
+- **D-sync-cond-1 (dynamic write-target sugar):** carried into contract v0.4.3 as an
+  explicit §8.5.2 scope note — dynamic targets excluded from static check, fall to cap.
 - **[2026-06-24] Core confirmed DOM-free** (zero DOM identifiers in `core.ts`). `sync` is
   the general DOM-agnostic primitive; DOM-specificity is correctly quarantined in the
   renderer. Separate un-opened question: whether the **IR** should be renderer-target-
@@ -2539,3 +2540,69 @@ REJECT_DIAGNOSTIC string (the constant is not exported from
 won't track it — but the test then FAILS (safe direction: loud, not silent), so this is
 self-correcting, not a vacuity. Export-and-import would remove even that; not worth a
 cycle now.
+
+---
+
+### SyncBinding Part 3 RESOLVED — A2 accepted; §8.5.2 contract bump v0.4.2 → v0.4.3 [2026-06-24]
+
+**Workstream:** WS4 (architect ruling) → WS2 (commission). **Type:** design ruling +
+contract bump + implementation commission. **Probe verified at `9172e5a`**;
+architect re-verified the load-bearing seams at the same SHA (did not rely on probe
+summary alone).
+
+**Resolves** the deferral in *SyncBinding Part 3* [2026-06-24]. That entry deferred the
+write-back edge mechanism with a lean toward Approach A and named the §8.5.2
+build-integration driver as prerequisite. The driver landed (*Unit 1* [2026-06-24]); the
+Unit 2 probe then tested A's viability empirically.
+
+**Decision: Approach A2 accepted** — the classifier learns to recognize the emitted
+SyncBinding IR-literal shape (`{ kind: 'sync', writeTarget, readExpr }`) and contributes
+its write-graph edge through the **existing** `signalSymbolId` derivation. One symbol
+space, one ID scheme, no second representation.
+
+**Empirical basis (probe + architect re-verification at `9172e5a`).**
+- **Resolution axis CONFIRMED:** emitted `writeTarget: val` and hand-written
+  `sync(..., val)` both resolve via `signalSymbolId` to `signals.ts#val@46`. Alias
+  resolution is context-independent (property value vs. call argument is irrelevant).
+- **Premise CONFIRMED:** `checkProgram` over an emitted module yields zero verdicts today
+  — the IR literal is invisible to the classifier. A2 closes exactly this.
+- **A1 rejected:** a checker-visible `sync()` anchor is a second representation (structural
+  drift — the degraded-copy pattern Part 3 forbade) AND a live anchor double-executes the
+  binding, corrupting the reactive graph with a spurious second node. (Architect confirmed
+  the double-execution hazard.)
+- **A3 rejected:** no TypeChecker at plugin time (settled in Unit 1), so the plugin cannot
+  compute `signalSymbolId`; any raw-edge channel collapses to A2 with added IO complexity.
+
+**Two corrections to the probe's cost estimate (architect re-verification).**
+1. The shared-type change is **two** types, not one: both `TargetVerdict.callNode` AND
+   `SyncEdge.callNode` are `ts.CallExpression`.
+2. The checker derives an ACCEPT edge's `reads` from `verdict.callNode.arguments[0]`
+   (`write-graph-cycle-checker.ts:68`). A SyncBinding verdict has no `.arguments`. So A2 is
+   **not** a blanket widen of `callNode` to `ts.Node` (that would compile but break the
+   `.arguments[0]` access at runtime). **Ruling: model the verdict/edge as a discriminated
+   convergence** — `sync-call` source carries the CallExpression and extracts reads from
+   `arguments[0]`; `sync-binding` source carries `reads: ∅, writes: {target}` directly and
+   never reaches `.arguments`. The type system must make `.arguments`-on-SyncBinding
+   unreachable, not merely untested.
+
+**SyncBinding edge shape (realizes Part 3 §6 static-target ruling):** `reads: ∅, writes:
+{target}`. The write-back is DOM-event-triggered (no reactive read). The `readExpr` is the
+signal→DOM render direction and contributes NO write-graph edge — it must not be routed
+through `analyzeSourceReads`.
+
+**Contract bump v0.4.2 → v0.4.3.** §8.5.2's edge definition widens: renderer-synthesized
+SyncBindings now contribute edges on the same footing as source `sync(...)` calls, and the
+global check explicitly spans the `.nv`/`.ts` front-end boundary. Edits in
+`contract-bump-v0.4.3.md` (title version; §8.5.2 opening paragraph; cross-boundary bullet;
+dynamic-target exclusion note). The Part 3 entry anticipated this bump "at the
+driver-implementation session, against real integration code" — this is that bump, now
+against verified seams. Dynamic-target exclusion (D-sync-cond-1) carried into the contract
+as an explicit scope note, preserving never-false-positive.
+
+**Commissioned:** Unit 2 implementation to WS2/CC (`handoff-unit2-impl-CC.md`), plan-first,
+gates G0–G6. The §2.3 type-convergence shape is pre-decided (this ruling); a blanket-widen
+plan is a G0 re-surface. **Commission authorized to proceed now** — A2-confirmed-on-both-
+axes is a verified fact, not an open gate (architect + Kofi, this session).
+
+**Supersedes:** the deferral in *Part 3* [2026-06-24] (cites it). **Cites:** *Unit 1
+LANDED* [2026-06-24], *D-sync-cond-1* [2026-06-24], probe `unit2-probe-results.md`.
