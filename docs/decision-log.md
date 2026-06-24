@@ -2515,3 +2515,27 @@ the §8.5.4 cap until Unit 2 + build-wiring land. Cites Part 3 [2026-06-24].
 **Follow-on:** Unit 2 probe (SyncBinding edge recovery viability — A1/A2/A3) returns a
 ruling request; build-wiring of `checkProgram` into a runnable gate is a separate later
 unit (the entry point exists; nothing invokes it in CI yet).
+
+---
+
+### D-cp-1 resolved — check-program diagnostic tests now count-exact + message-specific [2026-06-24]
+
+**Workstream:** WS2 (compiler). **Verified at `6cd937b`** (read tests at SHA).
+Resolves D-cp-1, logged in the Unit 1 landing entry [2026-06-24].
+
+The REJECT and UNDECIDABLE diagnostic tests in `check-program.test.ts` previously
+asserted `length > 0` (count-vacuity class). Now:
+- **REJECT:** asserts exactly 1 REJECT verdict, exactly 1 error diagnostic, and
+  `errors[0].message` equals the canonical REJECT_DIAGNOSTIC string verbatim.
+- **UNDECIDABLE:** asserts exactly 1 UNDECIDABLE verdict, exactly 1 warn diagnostic, and
+  the message contains `target type is 'any'` (unique to the `isAnyType` branch).
+
+A future fixture edit introducing an incidental second diagnostic now FAILS the count
+assertion instead of passing silently. Debt cleared.
+
+**Residual (minor, non-blocking).** The REJECT test inlines a verbatim copy of the
+REJECT_DIAGNOSTIC string (the constant is not exported from
+`sync-target-classifier.ts`). If the classifier message is edited, the test's local copy
+won't track it — but the test then FAILS (safe direction: loud, not silent), so this is
+self-correcting, not a vacuity. Export-and-import would remove even that; not worth a
+cycle now.
