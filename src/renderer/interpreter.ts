@@ -348,12 +348,16 @@ function wireSync(binding: SyncBinding, el: Node): void {
 
   // Dev-mode guard: warn if writeTarget is a derived() (non-writable) signal.
   // signal() accessors have a .set method; derived() accessors do not.
+  // Note: thunk forms (() => signal) appear as functions, but can't be analyzed statically
+  // to determine if they return writable signals. Only warn if writeTarget itself lacks .set.
   if (import.meta.env?.DEV !== false) {
     const wt = binding.writeTarget
+    // Check if it's a direct signal accessor (function with .set) or derived accessor (function without .set)
     if (
       typeof wt === 'function' &&
       typeof (wt as unknown as { set?: unknown }).set !== 'function'
     ) {
+      // This is a direct derived() accessor, not a thunk. Warn.
       console.error(
         '[nv] sync: write target is not a writable signal. Use signal(), not derived(), as a :PROP sync target.',
       )

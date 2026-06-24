@@ -2433,3 +2433,43 @@ test('TC-SB-08  SyncBinding: derived() as write target triggers console.error', 
     `Expected dev-mode error about non-writable signal. Got: ${JSON.stringify(errors)}`,
   ).toBe(true)
 })
+
+test('TC-SB-09  SyncBinding: thunk form writeTarget (() => WritableSignal) works end-to-end', () => {
+  const jsdom = new JSDOM('<!DOCTYPE html><html><body></body></html>')
+  const doc = jsdom.window.document as unknown as Document
+  const body = doc.querySelector('body') as Element
+  const val = signal('hello')
+  const dispose = mount(
+    {
+      id: 'sb-09',
+      shape: { html: '<input />', bindingPaths: [[0]] },
+      bindings: [
+        {
+          kind: 'sync',
+          pathIndex: 0,
+          propName: 'value',
+          readExpr: () => val(),
+          eventName: 'input',
+          writeTarget: () => val, // thunk form: function returning the signal
+        } satisfies SyncBinding,
+      ],
+    },
+    body,
+    doc,
+  )
+  flushSync()
+  const input = body.querySelector('input') as HTMLInputElement
+
+  // Test 1: DOM → signal direction (event handler writes back)
+  dispatchInputEvent(input, 'from-dom')
+  flushSync()
+  expect(val()).toBe('from-dom')
+
+  // Test 2: signal → DOM direction (programmatic set updates prop)
+  val.set('from-signal')
+  flushSync()
+  expect(input.value).toBe('from-signal')
+
+  dispose()
+  expect(__test.observerCount(val)).toBe(0)
+})
