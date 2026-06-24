@@ -41,12 +41,12 @@ _Last updated: 2026-06-24. Contract **v0.4.2** · Template-IR **v0.4.2**._
 - **Compiler specialization (steps 1–4):** all wired + gated + measured. Step 3
   (`_compilerEquals`) kept for correctness; step 4 (`_compilerSources`) SHELVED
   (no benefit path). Steps 1–2 (sync classify + cycle check) are the correctness layer.
-  - **§8.5.2 cycle check has NO production build driver** (surfaced 2026-06-24): the
-    checker runs only under test harnesses that hand it a `ts.Program`. No build stage
-    constructs a Program over user `.ts` + emitted `.nv`. Until the driver lands, the
-    §8.5.2 guarantee is not realized in builds for ANY sync (not just SyncBinding);
-    §8.5.4 cap is the only runtime protection. Building this driver is the prerequisite
-    for SyncBinding Part 3 (Approach A).
+  - **§8.5.2 cycle check HAS a production entry point as of [2026-06-24]:**
+    `checkProgram(program, config)` (`check-program.ts`, commits `482425f→0b62d77`) runs
+    classifier→checker→diagnostics over a caller-supplied `ts.Program`. Covers
+    **hand-written `sync()` only**. NOT yet auto-wired into `nvPlugin`/any build — it's a
+    callable entry, not an automatic gate. SyncBinding edges still absent (Unit 2 pending).
+    §8.5.4 cap remains the runtime backstop for everything not statically caught.
 - **Renderer:** interpreter + compiler back-ends at parity for all binding kinds.
   Both front-ends (tagged-template + `.nv`) produce one IR, FE-equivalence-gated.
   Template-IR doc reconciled to v0.4.2 (2026-06-23) — now matches `ir.ts`
@@ -181,6 +181,8 @@ _Last updated: 2026-06-24. Contract **v0.4.2** · Template-IR **v0.4.2**._
   on the §8.5.2 build driver landing first. `writeTargetId` retracted, stays retracted.
   Compiler back-end (`emitMount`) still THROWS on SyncBinding — only `nv-emitter.ts`
   emits it. Cycle protection = §8.5.4 cap only.
+  - Part 3 prerequisite (Unit 1 / §8.5.2 driver) LANDED [2026-06-24]. SyncBinding edge
+    recovery itself (Unit 2) still pending a viability probe (A1/A2/A3).
 - **D-sync-cond-1 (dynamic write-target sugar):** RESOLVED [2026-06-24] — dynamic
   targets EXCLUDED from §8.5.2 static checking, fall to the §8.5.4 cap (documented).
   Static-target edge shape locked: `reads: ∅, writes: {t}`. Sugar itself still deferred.
@@ -2450,3 +2452,66 @@ the build. These are consistent; the §8.5.2 driver is a separate, unbuilt unit.
 **Supersedes:** nothing. **Cites:** `writeTargetId` retraction [2026-06-24].
 **Follow-on:** §8.5.2 build-integration driver = next WS2 unit (the prerequisite for
 A); SyncBinding edge recovery rides on it. [scope: pending architect go-ahead]
+
+---
+
+### §8.5.2 build-integration driver (Unit 1) LANDED — check runs over hand-written sync() [2026-06-24]
+
+**Workstream:** WS2 (compiler). **Type:** implementation landed + architect-verified.
+**Commits:** `482425f → 0b62d77` on main. **Verified against placed source at `0b62d77`**
+(read driver + all gate tests at SHA; not from the landing summary).
+
+**What landed.** `src/compiler/check-program.ts` — `checkProgram(program, config):
+{ verdicts, cycles, diagnostics }`. First production caller of the §8.5.2 analysis:
+orchestrates `SyncTargetClassifier.classifyProgram → WriteGraphCycleChecker.check →
+diagnostic mapping`. Thin orchestration only; both callees untouched (signatures
+unchanged). Exported from `compiler/index.ts`. Resolves the gap logged in the SyncBinding
+Part 3 entry [2026-06-24]: the check existed as libraries but ran on nothing in any build.
+
+**Scope (decided in the Unit 1 commission, confirmed held).** Covers **hand-written
+`sync()` calls in user `.ts` source ONLY**. Does NOT catch SyncBinding cycles — emitted
+`.nv` SyncBinding is an IR object literal, not a `sync()` call, so the classifier yields
+zero SyncBinding verdicts by construction. That closure is Unit 2 (probe pending). The
+§0.1 scope boundary held: no emitted-`.nv` / IR-literal recognition introduced.
+
+**Architect verification (read at SHA, not summary).**
+- Driver is pure orchestration: no Program construction inside, no DOM, no `core.ts`
+  reach. Diagnostic mapping faithful to `TargetVerdict` semantics (REJECT→error via
+  `.diagnostic`; UNDECIDABLE→warn via `.reason`; cycle→error one per `involvedSyncs`).
+- G4 parity is now a real deep-compare (per-index `.kind`, `toEqual` on ACCEPT
+  `.targets`, sorted cycle-path equality) — the pre-execution length-only vacuity
+  (BUG-2) is confirmed fixed in placed source.
+- G5 asserts both no-throw and zero-cycles on a nested-function source read — the
+  conservative-on-incompleteness / never-false-negative posture is real.
+- G2 carries the layer-localizing pre-assertion (ACCEPT count === 2) before the cycle
+  check; G3 guards the acyclic false-positive direction. Matched pair intact.
+- `signalSymbolId` derivation untouched (G1); single-ID invariant preserved.
+
+**Deviation surfaced by CC and accepted (improvement).** Commissioned REJECT fixture
+`() => sigs[i]!` does NOT reach Path B — `NonNullExpression` isn't unwrapped by
+`unwrapTransparent`, so it routes to Path A → UNDECIDABLE, not REJECT. Corrected to a
+CallExpression-bodied thunk `() => getSignal()` → Path B enumeration → NON_ENUMERABLE →
+REJECT. Architect traced classifier paths to confirm. Tests the intended behavior; no
+contract change.
+
+**D-cp-1 — RESOLVED before landing (commit `6cd937b`).** Architect noted that REJECT and
+UNDECIDABLE diagnostic tests asserted `length > 0` rather than specific diagnostic
+identity (same class as BUG-2 count-vacuity, not yet load-bearing). Tightened in the same
+session: REJECT test now asserts exactly 1 REJECT verdict + exactly 1 error diagnostic
+with `.message === REJECT_DIAGNOSTIC` (inlined verbatim — constant is not exported, so
+the inline copy fails loudly if the source drifts, which is the self-correcting
+direction). UNDECIDABLE test asserts exactly 1 UNDECIDABLE verdict + exactly 1 warn
+diagnostic with `.message` containing `"target type is 'any'"`. No open debt remains.
+
+**Contract.** No bump — first caller of an existing analysis; §8.5.2's statement
+unchanged. Stays **v0.4.2**.
+
+**Interim posture update.** §8.5.2 is now realizable in a build for hand-written
+`sync()` (a caller constructs a Program and calls `checkProgram`). It is NOT yet wired
+into `nvPlugin` / any application build automatically — `checkProgram` is a callable
+entry point, not an automatic build step. SyncBinding + cross-`.nv` cycles still fall to
+the §8.5.4 cap until Unit 2 + build-wiring land. Cites Part 3 [2026-06-24].
+
+**Follow-on:** Unit 2 probe (SyncBinding edge recovery viability — A1/A2/A3) returns a
+ruling request; build-wiring of `checkProgram` into a runnable gate is a separate later
+unit (the entry point exists; nothing invokes it in CI yet).
