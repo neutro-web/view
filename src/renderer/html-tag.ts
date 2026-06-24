@@ -42,9 +42,11 @@ import type {
   SlotContent,
   SlotEntry,
   SlotOutletBinding,
+  SyncBinding,
   TemplateIR,
   TemplateShape,
   TextBinding,
+  WritableSignal,
 } from './ir.js'
 
 // ── Slot outlet sentinel (B2 fix) ─────────────────────────────────────────────
@@ -283,6 +285,7 @@ type HoleKind =
   | { kind: 'attr'; name: string }
   | { kind: 'event'; name: string }
   | { kind: 'prop'; name: string }
+  | { kind: 'sync'; name: string }
 
 /** Slot-walk hole info — tracks kind + origIdx so the shared walk can use buildHtmlHoleBinding. */
 type SlotHoleInfo =
@@ -290,6 +293,7 @@ type SlotHoleInfo =
   | { kind: 'attr'; origIdx: number; name: string }
   | { kind: 'prop'; origIdx: number; name: string }
   | { kind: 'event'; origIdx: number; name: string }
+  | { kind: 'sync'; origIdx: number; name: string }
 
 /**
  * Determine the binding kind for the hole between strings[i] and strings[i+1].
@@ -318,6 +322,12 @@ function classifyHole(prevString: string, nextString: string): HoleKind {
     // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
     return { kind: 'prop', name: propMatch[1]! }
   }
+  // Sync hole: :propName=" — MUST precede bare-attr ([\w:-]+ matches colons)
+  const syncMatch = prevString.match(/\s:([\w-]+)=["']$/)
+  if (syncMatch !== null && closingQuote) {
+    // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
+    return { kind: 'sync', name: syncMatch[1]! }
+  }
   // Attr hole: attrName="
   const m = prevString.match(/\s([\w:-]+)=["']$/)
   if (m !== null && closingQuote) {
@@ -325,6 +335,12 @@ function classifyHole(prevString: string, nextString: string): HoleKind {
     return { kind: 'attr', name: m[1]! }
   }
   return { kind: 'text' }
+}
+
+/** Per-prop default DOM event for sync bindings (tagged-template path). */
+function defaultHtmlEventForProp(prop: string): string {
+  if (prop === 'checked') return 'change'
+  return 'input'
 }
 
 // ── Shared per-hole binding constructor ───────────────────────────────────────
@@ -365,6 +381,18 @@ function buildHtmlHoleBinding(holeKind: HoleKind, pathIndex: number, origExpr: u
   }
   if (holeKind.kind === 'prop') {
     const b: PropBinding = { kind: 'prop', pathIndex, name: holeKind.name, expr }
+    return b
+  }
+  if (holeKind.kind === 'sync') {
+    const accessor = origExpr as WritableSignal<unknown>
+    const b: SyncBinding = {
+      kind: 'sync',
+      pathIndex,
+      propName: holeKind.name,
+      readExpr: () => accessor(),
+      eventName: defaultHtmlEventForProp(holeKind.name),
+      writeTarget: accessor,
+    }
     return b
   }
   // event
@@ -493,9 +521,9 @@ function walkNodeList(nodes: Node[], exprs: unknown[], root: Node, doc: Document
         const propEntries: PropEntry[] = []
         const propNames: string[] = []
 
-        // Gather reactive prop holes (data-nv-attr-N, data-nv-prop-N, data-nv-event-N)
+        // Gather reactive prop holes (data-nv-attr-N, data-nv-prop-N, data-nv-event-N, data-nv-sync-N)
         for (let k = 0; k < exprs.length; k++) {
-          for (const atype of ['attr', 'prop', 'event'] as const) {
+          for (const atype of ['attr', 'prop', 'event', 'sync'] as const) {
             const v = el.getAttribute(`data-nv-${atype}-${k}`)
             if (v !== null) {
               el.removeAttribute(`data-nv-${atype}-${k}`)
@@ -601,7 +629,7 @@ function walkNodeList(nodes: Node[], exprs: unknown[], root: Node, doc: Document
       }
 
       for (let k = 0; k < exprs.length; k++) {
-        for (const atype of ['attr', 'prop', 'event'] as const) {
+        for (const atype of ['attr', 'prop', 'event', 'sync'] as const) {
           const name = el.getAttribute(`data-nv-${atype}-${k}`)
           if (name !== null) {
             holeInfos.push(
@@ -609,7 +637,9 @@ function walkNodeList(nodes: Node[], exprs: unknown[], root: Node, doc: Document
                 ? { kind: 'attr', origIdx: k, name }
                 : atype === 'prop'
                   ? { kind: 'prop', origIdx: k, name }
-                  : { kind: 'event', origIdx: k, name },
+                  : atype === 'sync'
+                    ? { kind: 'sync', origIdx: k, name }
+                    : { kind: 'event', origIdx: k, name },
             )
             holePaths.push(computePath(el, root))
             el.removeAttribute(`data-nv-${atype}-${k}`)
@@ -669,7 +699,7 @@ function buildSlotContentIR(
   // shape.html: serialize post-walk subtree (components now replaced by anchors),
   // strip remaining hole sentinels.
   const rawHtml = fragWrapper.innerHTML.replace(
-    /\s+data-nv-(?:attr|prop|event|component)-\d+="[^"]*"/g,
+    /\s+data-nv-(?:attr|prop|event|sync|component)-\d+="[^"]*"/g,
     '',
   )
 
@@ -781,6 +811,18 @@ function buildHtmlStrings(
         sentinelHtml += `${stripped} data-nv-attr-${i}="${hole.name}"`
         // Mark the NEXT string to have its leading closing-quote consumed.
         quoteConsumedAt.add(i + 1)
+      } else if (hole.kind === 'sync') {
+        // Sync hole: strip ` :propName="` from end.
+        const m = raw.match(/(\s+):([\w-]+)=["']$/)
+        if (m === null) {
+          throw new Error(
+            `[nv/html] Internal: sync hole ${i} but no :propName pattern at end of string "${raw}"`,
+          )
+        }
+        // biome-ignore lint/style/noNonNullAssertion: noUncheckedIndexedAccess in-bounds guarantee
+        const stripped = raw.slice(0, raw.length - m[0]!.length)
+        sentinelHtml += `${stripped} data-nv-sync-${i}="${hole.name}"`
+        quoteConsumedAt.add(i + 1)
       } else {
         // Event or prop hole: strip ` @eventName="` / ` .propName="` from end.
         const prefix = hole.kind === 'event' ? '@' : '.'
@@ -808,7 +850,7 @@ function buildHtmlStrings(
 
   // shapeHtml: remove data-nv-attr-N sentinel attributes.
   const shapeHtml = sentinelHtml.replace(
-    /\s+data-nv-(?:attr|event|prop|component)-\d+="[^"]*"|\s+data-nv-component="[^"]*"/g,
+    /\s+data-nv-(?:attr|event|prop|sync|component)-\d+="[^"]*"|\s+data-nv-component="[^"]*"/g,
     '',
   )
 

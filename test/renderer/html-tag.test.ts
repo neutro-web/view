@@ -1,7 +1,8 @@
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
+import { signal } from '../../src/core/core.js'
 import { createHtmlTag } from '../../src/renderer/html-tag.js'
-import type { EventBinding, PropBinding } from '../../src/renderer/ir.js'
+import type { EventBinding, PropBinding, SyncBinding } from '../../src/renderer/ir.js'
 
 function setup() {
   const dom = new JSDOM('<!DOCTYPE html><body></body>')
@@ -68,5 +69,54 @@ describe('html-tag — component element detection (TC-C01-html)', () => {
     // biome-ignore lint/suspicious/noExplicitAny: test cast
     const cb = compBinding as any
     expect(cb.propNames).toContain('label')
+  })
+})
+
+// ── Sync directive ─────────────────────────────────────────────────────────────
+
+describe('html tag :PROP sync directive', () => {
+  it('classifyHole: :value= hole is classified as sync', () => {
+    const { html } = setup()
+    const val = signal('')
+    const ir = html`<input :value="${val}" />`
+    expect(ir.bindings[0]?.kind).toBe('sync')
+  })
+
+  it('buildHtmlHoleBinding sync: propName from sigil', () => {
+    const { html } = setup()
+    const val = signal('hello')
+    const ir = html`<input :value="${val}" />`
+    const b = ir.bindings[0] as SyncBinding
+    expect(b.propName).toBe('value')
+    expect(b.eventName).toBe('input')
+  })
+
+  it('buildHtmlHoleBinding sync: readExpr reads accessor, writeTarget IS accessor', () => {
+    const { html } = setup()
+    const val = signal('hello')
+    const ir = html`<input :value="${val}" />`
+    const b = ir.bindings[0] as SyncBinding
+    // readExpr() reads the current signal value
+    expect(b.readExpr()).toBe('hello')
+    // writeTarget is the accessor itself — set() must work
+    ;(b.writeTarget as typeof val).set('world')
+    expect(val()).toBe('world')
+  })
+
+  it('classifyHole: :checked= uses change event', () => {
+    const { html } = setup()
+    const checked = signal(false)
+    const ir = html`<input type="checkbox" :checked="${checked}" />`
+    const b = ir.bindings[0] as SyncBinding
+    expect(b.propName).toBe('checked')
+    expect(b.eventName).toBe('change')
+  })
+
+  it('classifyHole: :value is not classified as attr (sigil priority)', () => {
+    const { html } = setup()
+    const val = signal('')
+    const ir = html`<input :value="${val}" />`
+    // Must NOT fall through to attr binding
+    expect(ir.bindings[0]?.kind).not.toBe('attr')
   })
 })
