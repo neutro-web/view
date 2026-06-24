@@ -659,7 +659,7 @@ function buildSlotContentIR(
     fragWrapper.appendChild(n.cloneNode(true))
   }
 
-  const { holeInfos, holePaths, components, consumed } = walkNodeList(
+  const { holeInfos, holePaths, components, consumed, lists } = walkNodeList(
     Array.from(fragWrapper.childNodes),
     exprs,
     fragWrapper,
@@ -686,6 +686,21 @@ function buildSlotContentIR(
     const pathIndex = allPaths.length
     allPaths.push(c.anchorPath)
     bindings.push(makeUnresolvedComponentBinding(pathIndex, c))
+  }
+  // Wire <each>-in-slot: mirrors the main html() function list loop (L893-905).
+  // buildSlotContentIR previously discarded `lists` — this closes the both-FE gap (G-SS-bothFE).
+  for (const wl of lists) {
+    const pathIndex = allPaths.length
+    allPaths.push(wl.anchorPath)
+    const { items, key, factory } = wl.sentinel
+    bindings.push({
+      kind: 'list',
+      pathIndex,
+      items,
+      key,
+      itemTemplate: (valueSig, indexSig) =>
+        factory({ item: () => valueSig(), index: () => indexSig() }),
+    } satisfies ListBinding)
   }
 
   const holeIndices = [...holeInfos.map((h) => h.origIdx), ...consumed].filter(

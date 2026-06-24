@@ -1350,7 +1350,7 @@ describe('G1: classlist token in slot content carries parent scopeHash', () => {
 // The slot content builder (buildNvSlotContentIR) calls walkNvNodeList but intentionally
 // ignores the `lists` return — so <each> elements inside slots throw a parse error.
 // G5 would require wiring `lists` into slot IR first (a separate fix).
-describe.skip('G5: classlist token in <each>-inside-slot carries parent scopeHash', () => {
+describe('G5: classlist token in <each>-inside-slot carries parent scopeHash', () => {
   it('G5: classlist token in <each>-inside-slot carries parent scopeHash', () => {
     const items = signal<unknown[]>([])
     const src = `
@@ -1358,7 +1358,7 @@ describe.skip('G5: classlist token in <each>-inside-slot carries parent scopeHas
         $style({ card: { color: 'red' } })
         $render(() => html\`
           <ChildComp>
-            <each .of=\${items} key="\${(item) => item}" let={item}>
+            <each .of="\${items}" key="\${(item) => item}" let={item}>
               <div class="\${{card: true}}">\${item}</div>
             </each>
           </ChildComp>

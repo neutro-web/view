@@ -489,6 +489,7 @@ function walkNvNodeList(
   doc: Document,
   root: Node,
   signals: ReadonlySet<string>,
+  diagnostics: NvDiagnostic[] = [],
 ): NvWalkResult {
   const stubExpr = (() => undefined) as ReactiveExpr<unknown>
   const holeInfos: NvSlotHoleInfo[] = []
@@ -652,6 +653,8 @@ function walkNvNodeList(
               doc,
               `slot:${tagName}:default`,
               signals,
+              [],
+              diagnostics,
             )
             const defaultContent: SlotContent = (_props) => defaultIR
             slots.push({ name: 'default', content: defaultContent })
@@ -673,6 +676,7 @@ function walkNvNodeList(
               `slot:${tagName}:${slotName}`,
               signals,
               slotLet,
+              diagnostics,
             )
             const namedContent: SlotContent = (_props) => namedIR
             slots.push({ name: slotName, content: namedContent })
@@ -730,6 +734,40 @@ function walkNvNodeList(
 // ── Slot content IR builder (collapse: uses walkNvNodeList) ────────────────────
 
 /**
+ * Push one <each> list binding into allPaths + bindings.
+ * Shared by processHtmlTemplate (main) and buildNvSlotContentIR (slot) so both paths
+ * produce structurally identical ListBinding shapes (D-SS-2: identity by construction).
+ * Emits a warning diagnostic when no let={} bindings are present.
+ */
+function pushListBinding(
+  wl: NvWalkedEach,
+  allPaths: NodePath[],
+  bindings: Binding[],
+  diagnostics: NvDiagnostic[],
+): void {
+  if (wl.letNames.length === 0) {
+    diagnostics.push({
+      kind: 'warning',
+      message:
+        '<each> has no let={} bindings. Item and index will not be accessible in the body template. Add let={item} or let={item, index}.',
+      start: 0,
+      end: 0,
+    })
+  }
+  const pathIndex = allPaths.length
+  allPaths.push(wl.anchorPath)
+  // PARSE-PATH ONLY: structural IR shape for FE-equivalence checking.
+  // itemTemplate returns the captured bodyIR by ref (same G2 by-ref fragility as component slots).
+  bindings.push({
+    kind: 'list',
+    pathIndex,
+    items: (() => []) as () => readonly unknown[],
+    key: ((_item: unknown, i: number) => i) as (item: unknown, i: number) => string | number,
+    itemTemplate: (_valueSig, _indexSig) => wl.bodyIR,
+  } satisfies ListBinding)
+}
+
+/**
  * Build a TemplateIR from sentinel-DOM nodes (slot content), via the SAME
  * walkNvNodeList used for the top-level template. Component elements in slot
  * content produce ComponentBindings (component-as-slot-child).
@@ -744,6 +782,7 @@ function buildNvSlotContentIR(
   slotId: string,
   signals: ReadonlySet<string>,
   letNames: string[] = [],
+  diagnostics: NvDiagnostic[] = [],
 ): { ir: TemplateIR; holeIndices: number[]; letNames: string[] } {
   const stubExpr = (() => undefined) as ReactiveExpr<unknown>
   const stubHandler = (() => (_e: Event) => undefined) as HandlerExpr
@@ -764,13 +803,20 @@ function buildNvSlotContentIR(
     fragWrapper.appendChild(n.cloneNode(true))
   }
 
-  const { holeInfos, holePaths, components, consumed } = walkNvNodeList(
+  const {
+    holeInfos,
+    holePaths,
+    components,
+    consumed,
+    lists: slotLists,
+  } = walkNvNodeList(
     Array.from(fragWrapper.childNodes),
     holeExprs,
     doc,
     fragWrapper,
     slotSignals,
-  ) // lists is intentionally ignored in slot content builder
+    diagnostics,
+  )
 
   const rawHtml = fragWrapper.innerHTML.replace(
     /\s+data-nv-(?:attr|prop|event|component)-\d+="[^"]*"/g,
@@ -793,6 +839,11 @@ function buildNvSlotContentIR(
     const pathIndex = allPaths.length
     allPaths.push(c.anchorPath)
     bindings.push(makeUnresolvedNvComponentBinding(pathIndex, c))
+  }
+  // Wire <each>-in-slot via the shared helper (D-SS-2: structural identity by construction).
+  // OP-3: thread diagnostics to the parent's diagnostic channel.
+  for (const wl of slotLists) {
+    pushListBinding(wl, allPaths, bindings, diagnostics)
   }
 
   const holeIndices = [...holeInfos.map((h) => h.origIdx), ...consumed].filter(
@@ -992,7 +1043,7 @@ function processHtmlTemplate(
     components: pendingComponents,
     consumed: consumedByComponent,
     lists: pendingLists,
-  } = walkNvNodeList(Array.from(frag.childNodes), holeExprs, doc, frag, signals)
+  } = walkNvNodeList(Array.from(frag.childNodes), holeExprs, doc, frag, signals, processdiagnostics)
   // Map encounter-order hole paths back to GLOBAL hole indices (top-level convention).
   for (let h = 0; h < holeInfos.length; h++) {
     bindingPaths[holeInfos[h]?.origIdx as number] = holePaths[h] as NodePath
@@ -1041,30 +1092,9 @@ function processHtmlTemplate(
     bindings.push(cb)
   }
 
-  // Add list bindings from <each> elements (anchor paths appended after component paths)
+  // Add list bindings from <each> elements via shared helper (D-SS-2: structural identity).
   for (const wl of pendingLists) {
-    // Diagnostic: no let={} bindings — body expressions cannot reference item or index reactively
-    if (wl.letNames.length === 0) {
-      processdiagnostics.push({
-        kind: 'warning',
-        message:
-          '<each> has no let={} bindings. Item and index will not be accessible in the body template. Add let={item} or let={item, index}.',
-        start: 0,
-        end: 0,
-      })
-    }
-    const pathIndex = allPaths.length
-    allPaths.push(wl.anchorPath)
-    // PARSE-PATH ONLY: This ListBinding is for structural IR shape checking (parseNvFile path).
-    // The items, key, and itemTemplate are intentional stubs — they are non-functional placeholders.
-    // Never call mount() on this IR; use parseNvFileForEmit for runtime consumption and proper factories.
-    bindings.push({
-      kind: 'list',
-      pathIndex,
-      items: (() => []) as () => readonly unknown[],
-      key: ((_item: unknown, i: number) => i) as (item: unknown, i: number) => string | number,
-      itemTemplate: (_valueSig, _indexSig) => wl.bodyIR,
-    } satisfies ListBinding)
+    pushListBinding(wl, allPaths, bindings, processdiagnostics)
   }
 
   for (let i = 0; i < holeExprs.length; i++) {
