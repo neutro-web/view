@@ -384,6 +384,10 @@ function buildHtmlHoleBinding(holeKind: HoleKind, pathIndex: number, origExpr: u
     return b
   }
   if (holeKind.kind === 'sync') {
+    // Conditional-target form (:value="${() => cond ? a : b}") is deferred (small debt).
+    // The interpreter handles it natively via sync's thunk resolution (core.ts:1075-1077).
+    // The read direction for a conditional thunk is non-trivial to derive in the tagged path.
+    // Single-accessor form (`:value="${val}"`) covers the primary use case.
     const accessor = origExpr as WritableSignal<unknown>
     const b: SyncBinding = {
       kind: 'sync',
