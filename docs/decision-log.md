@@ -103,10 +103,18 @@ _Last updated: 2026-06-23. Contract **v0.4.2** · Template-IR **v0.4.2**._
 ### Genuine research / deferred-on-evidence
 - Beating the alien-signals-class baseline: nv wins/ties 5 of 7 cases; two wide-graph
   cases (~1.5x/~1.7x) and createSignals (~5–7x) are proven **structural**, both trace to
-  `ReactiveNode` width, both gated behind the **kind-split tripwire** (real-app
-  evidence only — noted, not approved).
+  `ReactiveNode` width, both gated behind the **kind-split tripwire** (real-app evidence
+  only — noted, not approved). **[2026-06-24] Evidence harness COMMISSIONED**
+  (`cc-handoff-wide-graph-realapp-harness.md`): app-shaped grid (1000×10), steady-state
+  updates, ~5% edge churn, full-frame through the renderer under Playwright real-browser.
+  Pre-committed **2-of-2 gate**: fires the kind-split spike iff propagation breaches the
+  reactive share of a 60fps frame (absolute) AND exceeds 30% of the update frame (relative);
+  else CLEAR (gap stays accepted). CC returns the verdict to architecture; does not open the
+  spike. Awaiting CC harness + verdict.
 - **FALSE-heavy row-churn** watch-item (reopen on real-app evidence with a
-  steady-state-update harness).
+  steady-state-update harness). **[2026-06-24] The commissioned wide-graph steady-state
+  harness is that instrument** — it can serve the FALSE-heavy read-tax measurement as a
+  secondary read if FALSE density is varied; not the harness's primary verdict.
 - **Per-key class-toggle node-width** — object-form `class={{...}}` emits one effect per
   key (fine-grained). For wide objects this trades N graph nodes against 1 looping effect.
   Same `ReactiveNode`-width structural cost as the kind-split tripwire; per-key default
@@ -1947,3 +1955,73 @@ gate is deferred. Tracked as a named follow-up below.
 
 **Verdict:** Increment SS landed at `58afe25`, 659/0, typecheck clean, structural claims
 verified by source read. reactive-core v0.4.2 + Template-IR v0.4.2 untouched.
+
+### 2026-06-24 — Kind-split tripwire: real-app evidence harness COMMISSIONED with a pre-committed 2-of-2 gate
+
+**Serves** the kind-split tripwire (2026-06-18 wide-graph spike confirmation) and,
+secondarily, the FALSE-heavy row-churn watch-item (2026-06-20) — both call for the same
+missing instrument: a *steady-state update* harness. Neither existing harness supplies it:
+`js-reactivity-benchmark` is synthetic topologies (the tripwire excludes "the synthetic gap
+alone"); `bench/row-churn.mjs` is app-shaped but construction-only.
+
+**Decision.** Do WS1 by *honoring* the tripwire, not bypassing it: build the evidence harness
+that converts "gated, waiting" into "decidable." This is door 1 of the three legitimate WS1
+moves (vs. an in-stream bottleneck-shave, or a launch-blocking-priority call that would fire
+the spike directly). Door 1 chosen — no untried in-stream hypothesis exists (the 2026-06-18
+profile already refuted H3/H4 and localized 71% to `fn`+`runRecompute` cache traffic →
+struct width, which is gated), and wide-graph perf is not being declared launch-blocking.
+
+**Harness shape (locked design parameters):**
+- App: grid / virtualized list, **1000 rows × 10 reactive cells** (aligned to the synthetic
+  gap's 1000 width; reuses the row-churn app model).
+- Per-cell graph: signal → 1–2 deriveds → 1 binding-effect.
+- Driver: **sustained signal updates (steady-state)**, ~5% dynamic-edge churn per tick
+  (mirrors `dyn5%`). NOT mount/dispose — the read tax lives in updates.
+- Denominator: **full update frame** (propagation + binding application + DOM mutation +
+  effect work), measured **full-frame through the renderer**.
+- Environment: **Playwright real-browser, M2 Max, Node v20.19.0**. JSDOM is barred from the
+  verdict path — it distorts the denominator (row-churn caught a 13.4% megamorphic IC that
+  was JSDOM, not nv). Frame-share is a real-browser number by definition.
+- Comparison: **nv-alone** (the tripwire asks "is it a top cost," answered by frame-share,
+  not the nv/alien ratio we already have and which was deemed insufficient).
+
+**Pre-committed decision rule — 2-of-2 conservative gate (fire ⟺ BOTH hold):**
+- **Condition A — absolute breach:** propagation self-time/tick exceeds the reactive share
+  of a 16.7ms (60fps) frame at scale. Reactive budget = 16.7ms − measured render/DOM floor
+  (CC sets the concrete ms from the floor; floor reported, not asserted).
+- **Condition B — relative dominance:** propagation self-time exceeds **30%** of total
+  update-frame time. (Architect-set "top cost" line.)
+- **FIRE** (both) → kind-split spike opens; evidence base = this result + the converging
+  2026-06-18 wide-graph and createSignals struct-shape spikes. **CC returns FIRE to
+  architecture; does not open the spike** (cross-stream, contract-adjacent §9, own soundness
+  obligation).
+- **CLEAR** (either fails) → wide-graph propagation confirmed *not* a top user-facing cost;
+  structural gap stays accepted, kind-split stays gated. A complete, valid terminal result.
+- **AMBIGUOUS** (straddles within noise) → surface to architect; only here is an optional
+  alien head-to-head variant considered.
+
+**Rationale for 2-of-2 conservative.** The kind-split is exactly the change a tripwire should
+make *hard* to fire: cross-stream (every `ReactiveNode` call-site), contract-adjacent (§9
+single kind-distinguished struct), with the 2026-06-18 field-reorder regression (+18%/+27%)
+standing as proof that struct-shape changes regress unpredictably. A single-metric rule trips
+too easily on an unrepresentative scale. Both an absolute budget breach and dominant share
+are required so the spike opens only when wide-graph propagation genuinely hurts a real frame.
+
+**Failable gate (harness-discipline, encodes the three row-churn corrections):** G-WG-1
+steady-state-not-construction; G-WG-2 honest timer split; G-WG-3 per-tick warm-up isolation;
+G-WG-4 bookkeeping symmetry; G-WG-5 dynamic edges actually churn; G-WG-6 real-browser
+denominator; G-WG-7 floor reported / budget derived; G-WG-8 `src/` untouched. **G0 hard
+stop:** no edit to `ReactiveNode`/`makeNode` field order or count — this commission measures,
+it does not touch the locked struct.
+
+**Verification.** Architect reads the placed harness across revisions before trusting any
+number (the row-churn precedent: three corrections each flipped or hid a result on read).
+Sandbox validates harness logic only; the frame-share verdict is a real-browser number.
+
+**Contract impact.** None. Contract stays v0.4.2. A FIRE verdict would later carry a §9
+kind-split entry with its own version bump — gated on this harness, not decided here.
+
+**Handoff.** `cc-handoff-wide-graph-realapp-harness.md`.
+
+**Status.** Harness commissioned with pre-committed 2-of-2 gate. WS1 reopened in the
+tripwire-honoring mode (door 1). Awaiting CC harness + verdict. No `src/` change authorized.
