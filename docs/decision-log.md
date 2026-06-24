@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-23. Contract **v0.4.2** · Template-IR **v0.4.2**._
+_Last updated: 2026-06-24. Contract **v0.4.2** · Template-IR **v0.4.2**._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
 > `nv-decision-log-archive.md` (moved 2026-06-21). This snapshot is the resolved
@@ -41,6 +41,12 @@ _Last updated: 2026-06-23. Contract **v0.4.2** · Template-IR **v0.4.2**._
 - **Compiler specialization (steps 1–4):** all wired + gated + measured. Step 3
   (`_compilerEquals`) kept for correctness; step 4 (`_compilerSources`) SHELVED
   (no benefit path). Steps 1–2 (sync classify + cycle check) are the correctness layer.
+  - **§8.5.2 cycle check has NO production build driver** (surfaced 2026-06-24): the
+    checker runs only under test harnesses that hand it a `ts.Program`. No build stage
+    constructs a Program over user `.ts` + emitted `.nv`. Until the driver lands, the
+    §8.5.2 guarantee is not realized in builds for ANY sync (not just SyncBinding);
+    §8.5.4 cap is the only runtime protection. Building this driver is the prerequisite
+    for SyncBinding Part 3 (Approach A).
 - **Renderer:** interpreter + compiler back-ends at parity for all binding kinds.
   Both front-ends (tagged-template + `.nv`) produce one IR, FE-equivalence-gated.
   Template-IR doc reconciled to v0.4.2 (2026-06-23) — now matches `ir.ts`
@@ -169,26 +175,15 @@ _Last updated: 2026-06-23. Contract **v0.4.2** · Template-IR **v0.4.2**._
   static entry, regex removed). Collapse toward main-walk list-push via shared helper
   (D-SS-2). Re-enables G5 + adds emit-exec differential (D-SS-3). Gated by the Action-2
   oracle (D-SS-4). No IR bump. Closes the slot domain. See Log 2026-06-23 + handoff.
-- `SyncBinding`: **[2026-06-24] LANDED + ACCEPTED at `4e92b09`.** `:value`/`:checked` two-way
-  binding via `:PROP={accessor}`, both front-ends (.nv parser + tagged-template), both back-ends.
-  Architect-verified on placed source (erasure asymmetry, per-prop `:checked` extractor,
-  transform-extractor composition, derived-target dev guard). G-SB-9 lockstep parity proven
-  across the **two real runtime paths** (tagged-interpreted, .nv-compiled) — ".nv interpreted"
-  is not a runtime (`.nv` = parse→emit→exec), so the original 3-path framing collapses to 2.
-  Single-source-of-truth intact (Solid-model sugar over one-way flows). 682/0 tests, core
-  diff empty.
-- **D-sync-cond-1 [2026-06-24]:** conditional-target authoring sugar
-  (`:value={() => cond ? a : b}`) deferred in both front-ends — bind target restricted to a
-  bare signal identifier. Runtime substrate already works (thunk `writeTarget` via TC-SB-09);
-  only front-end read-direction derivation is missing. Recommend folding into Part 3 (dynamic
-  write-edge is the same design space as the cross-boundary write-graph).
-- **[2026-06-24] OPEN (design-gated, contract-adjacent §8.5.2):** SyncBinding write-back edge →
-  cross-boundary write-graph cycle check (Part 3). **Re-scoped from "checker-only wiring" to a
-  genuine design problem:** the `.nv` emit pipeline (no `ts.Program`) and the §8.5.2 cycle
-  checker (TS-symbol-based `signalSymbolId`) do **not** share a symbol space; `writeTargetId`
-  cannot bridge them as originally designed (retracted). Sole cycle protection meanwhile:
-  §8.5.4 cascade cap (`MAX_CASCADE=100`). Recommend absorbing D-sync-cond-1 (conditional/
-  dynamic write-edge) into this session — same design space. Architecture session required.
+- **SyncBinding (`:value`/`:checked`):** Parts 1+2 landed (both FEs, `.nv`-compiled
+  + tagged-interpreted). **Part 3 (write-back edge → §8.5.2) DEFERRED [2026-06-24]:**
+  target is Approach A (recover edge from emitted output, one symbol space), contingent
+  on the §8.5.2 build driver landing first. `writeTargetId` retracted, stays retracted.
+  Compiler back-end (`emitMount`) still THROWS on SyncBinding — only `nv-emitter.ts`
+  emits it. Cycle protection = §8.5.4 cap only.
+- **D-sync-cond-1 (dynamic write-target sugar):** RESOLVED [2026-06-24] — dynamic
+  targets EXCLUDED from §8.5.2 static checking, fall to the §8.5.4 cap (documented).
+  Static-target edge shape locked: `reads: ∅, writes: {t}`. Sugar itself still deferred.
 - **[2026-06-24] Core confirmed DOM-free** (zero DOM identifiers in `core.ts`). `sync` is
   the general DOM-agnostic primitive; DOM-specificity is correctly quarantined in the
   renderer. Separate un-opened question: whether the **IR** should be renderer-target-
@@ -2375,3 +2370,83 @@ parsers gain conditional-target read-direction derivation).
 
 **Status.** OPEN, recommend-folded-into-Part-3. Substrate done; only front-end derivation
 pending.
+
+---
+
+### SyncBinding Part 3 — write-back edge deferred; §8.5.2 has no build driver (root cause) [2026-06-24]
+
+**Workstream:** WS4 (architect). **Type:** design ruling. **Verified at HEAD `ff3b7f2`**
+(moved from `4e92b09` in the handoff; re-read at SHA).
+
+**Question.** How does a SyncBinding (`:value`/`:checked`) write-back edge enter the
+same symbol-space graph that `WriteGraphCycleChecker.check` reasons over, given the
+analysis owns a `ts.Program` and the `.nv` pipeline does not? (Continues the
+`writeTargetId` retraction of [2026-06-24].)
+
+**Gating fact established by reading the pipeline (the decisive finding).**
+There is **no pipeline stage that constructs a `ts.Program`** — not over emitted `.nv`
+output, not over user `.ts` source — during a build. Three confirmations at `ff3b7f2`:
+1. No `src/` code calls `createProgram`/`getTypeChecker` to build a Program. Every
+   analysis (`classifyProgram`, `inferProgram`, `analyzeProgram`,
+   `WriteGraphCycleChecker.check`) *receives* `program: ts.Program` as a parameter;
+   the only producer is the test harness.
+2. `compiler/index.ts` is a bare export barrel — no driver, no orchestration.
+3. The only `.nv → js` integration is `nvPlugin` (`nv-esbuild-plugin.ts`): a per-file
+   esbuild `onLoad` doing `parseNvFileForEmit → emitModule → rewriteNvSpecifiers`.
+   It builds no Program and invokes zero compiler analysis.
+Corollary: `emitMount` (compiler back-end) currently **throws** on SyncBinding
+(`'SyncBinding is deferred'`); only `nv-emitter.ts` emits it.
+
+**Consequence — reframing.** SyncBinding's missing edge is a *special case of a larger
+gap*: **§8.5.2 has no production build driver at all.** The base-case cross-module
+`sync()` cycle check is also not running in any build today. There is no assembled
+global graph for a SyncBinding edge to "fail to join" — so all four Part-3 candidates
+(A/B/C/D), each of which presupposes a running global check to integrate with, are
+moot *now* regardless of their individual merits.
+
+**Ruling.**
+1. **DEFER the SyncBinding edge mechanism.** Adopt **Approach A's shape** as the
+   eventual target — recover the edge from emitted output via the *existing*
+   `signalSymbolId` derivation, keeping one symbol space and one ID scheme — but it is
+   **contingent on a prerequisite that must land first: the §8.5.2 build-integration
+   driver** (the stage that constructs a Program over user source + emitted `.nv`,
+   runs the classifier, runs the checker). That driver is the real unblocker and is
+   larger than SyncBinding; SyncBinding-edge recovery is a rider on it.
+   - B (inert emitted `sync()`) **rejected**: degraded-second-representation pattern
+     the §2 hard invariant forbids ("collapse, don't patch").
+   - C **rejected for now**: same Program-bearing-stage dependency as A, with no
+     offsetting benefit over A.
+   - D (restrict-and-prove) **rejected**: amputates the common case (imported
+     signals are exactly the hard case).
+   - `writeTargetId` **stays retracted** — Approach A makes it unnecessary, not merely
+     unused. (No second AST-only ID scheme; cites the [2026-06-24] retraction.)
+2. **Dynamic write-targets (D-sync-cond-1): EXCLUDED from static checking; fall to the
+   cap; documented.** Static target edge shape is `reads: ∅, writes: {t}` (DOM-event
+   write-back, no reactive read). A union-write `writes: {a, b}` for a dynamic target
+   that flags a cycle realizable in only one branch **is a false positive**, and
+   §8.5.2's "never a false cycle report" guarantee is load-bearing (it's what makes a
+   reported cycle a trustworthy build error). Rather than weaken that guarantee
+   (contract change) or build per-branch splitting (needs branch-variant analysis the
+   deferred sugar lacks), dynamic targets are excluded from the static write-graph and
+   protected by the §8.5.4 cap. Preserves conservative-on-incompleteness
+   (missed edge → cap, never a false negative claiming soundness it lacks).
+3. **Contract: §8.5.2 UNCHANGED. No version bump. Contract stays v0.4.2.** A
+   SyncBinding *is* a renderer-synthesized sync; the contract already speaks of sync
+   edges, and Approach A keeps the edge flowing through the existing derivation, so
+   "what contributes an edge" does not widen at the contract level. Any precise
+   contract wording belongs to the driver-implementation session, stated against real
+   integration code, not speculatively now.
+
+**Interim disposition (explicit).** §8.5.4 `MAX_CASCADE=100` remains the sole cycle
+protection for SyncBinding — **and**, given the gating fact, for hand-written
+cross-module `sync()` cycles too, since the build-time check runs on nothing in
+production. Defensible short-term; erodes with use. Correctly scoped: this is **not**
+SyncBinding-specific.
+
+**Note on Current State consistency.** "Build pipeline `.nv → .js`: Mode A, landed"
+remains true (emit transform compiles + executes). It does **not** mean §8.5.2 runs in
+the build. These are consistent; the §8.5.2 driver is a separate, unbuilt unit.
+
+**Supersedes:** nothing. **Cites:** `writeTargetId` retraction [2026-06-24].
+**Follow-on:** §8.5.2 build-integration driver = next WS2 unit (the prerequisite for
+A); SyncBinding edge recovery rides on it. [scope: pending architect go-ahead]
