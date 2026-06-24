@@ -9,6 +9,8 @@ export { ReadWriteErasureAnalyzer } from './read-write-erasure-analyzer.js'
 export { emitMount } from './emitted-mount.js'
 export type { EmitResult } from './emitted-mount.js'
 export { emitEqualityHook, emitEqualityHooks } from './equality-hook-emitter.js'
+export { checkProgram } from './check-program.js'
+export type { CheckProgramResult, CheckProgramDiagnostic } from './check-program.js'
 
 export type {
   ClassifierConfig,
