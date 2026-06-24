@@ -32,9 +32,9 @@ export function checkProgram(program: ts.Program, config: ClassifierConfig): Che
 
   for (const verdict of verdicts) {
     if (verdict.kind === 'REJECT') {
-      diagnostics.push(makeDiagnostic('error', verdict.diagnostic, verdict.callNode, program))
+      diagnostics.push(makeDiagnostic('error', verdict.diagnostic, verdict.callNode))
     } else if (verdict.kind === 'UNDECIDABLE') {
-      diagnostics.push(makeDiagnostic('warn', verdict.reason, verdict.callNode, program))
+      diagnostics.push(makeDiagnostic('warn', verdict.reason, verdict.callNode))
     }
     // ACCEPT: no diagnostic unless it is part of a cycle (handled below)
   }
@@ -42,7 +42,7 @@ export function checkProgram(program: ts.Program, config: ClassifierConfig): Che
   for (const cycle of cycles) {
     const message = `[nv] §8.5.2 write-graph cycle detected: ${cycle.cycle.join(' → ')}`
     for (const callNode of cycle.involvedSyncs) {
-      diagnostics.push(makeDiagnostic('error', message, callNode, program))
+      diagnostics.push(makeDiagnostic('error', message, callNode))
     }
   }
 
@@ -53,7 +53,6 @@ function makeDiagnostic(
   severity: 'error' | 'warn',
   message: string,
   callNode: ts.CallExpression,
-  program: ts.Program,
 ): CheckProgramDiagnostic {
   const sf = callNode.getSourceFile()
   const pos = ts.getLineAndCharacterOfPosition(sf, callNode.getStart())

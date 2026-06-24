@@ -43,7 +43,7 @@ export function nvCoreInTmp(): string {
 
 // ── TypeScript compiler options ───────────────────────────────────────────────
 
-const OPTIONS: ts.CompilerOptions = {
+export const TEST_COMPILER_OPTIONS: ts.CompilerOptions = {
   target: ts.ScriptTarget.ES2022,
   module: ts.ModuleKind.CommonJS,
   lib: ['lib.es2022.d.ts', 'lib.dom.d.ts'],
@@ -85,7 +85,7 @@ export function makeTestProgram(fixtureSource: string): {
   const fixturePath = path.join(dir, fixtureName)
   fs.writeFileSync(fixturePath, resolved, 'utf-8')
 
-  const program = ts.createProgram([nvCorePath, fixturePath], OPTIONS)
+  const program = ts.createProgram([nvCorePath, fixturePath], TEST_COMPILER_OPTIONS)
   return { program, nvCorePath, fixtureFile: fixturePath }
 }
 

@@ -11,21 +11,12 @@ import { checkProgram } from '../../src/compiler/check-program.js'
 import { SyncTargetClassifier } from '../../src/compiler/sync-target-classifier.js'
 import type { CycleReport } from '../../src/compiler/types.js'
 import { WriteGraphCycleChecker } from '../../src/compiler/write-graph-cycle-checker.js'
-import { PROJECT_CORE_PATH, makeTestProgram } from './test-helpers.js'
+import { PROJECT_CORE_PATH, TEST_COMPILER_OPTIONS, makeTestProgram } from './test-helpers.js'
 
 // ── Two-file test helper ──────────────────────────────────────────────────────
 // Builds a Program from two fixture sources (a.ts and b.ts, both in same tmpdir).
 // MUST use the same CompilerOptions as makeTestProgram (CommonJS, lib.dom, skipLibCheck,
 // esModuleInterop) so that core.ts resolves its DOM types and isNvSignalType fires.
-const TWO_FILE_OPTIONS: ts.CompilerOptions = {
-  target: ts.ScriptTarget.ES2022,
-  module: ts.ModuleKind.CommonJS,
-  lib: ['lib.es2022.d.ts', 'lib.dom.d.ts'],
-  strict: true,
-  skipLibCheck: true,
-  noEmit: true,
-  esModuleInterop: true,
-}
 
 function makeTwoFileResult(srcA: string, srcB: string): ReturnType<typeof checkProgram> {
   const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'nv-check-test-'))
@@ -38,7 +29,7 @@ function makeTwoFileResult(srcA: string, srcB: string): ReturnType<typeof checkP
     const rewrite = (src: string) => src.replace(/from\s+['"]@nv\/core['"]/g, `from './core'`)
     fs.writeFileSync(aPath, rewrite(srcA), 'utf-8')
     fs.writeFileSync(bPath, rewrite(srcB), 'utf-8')
-    const program = ts.createProgram([coreDest, aPath, bPath], TWO_FILE_OPTIONS)
+    const program = ts.createProgram([coreDest, aPath, bPath], TEST_COMPILER_OPTIONS)
     return checkProgram(program, { nvCorePath: coreDest })
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true })
