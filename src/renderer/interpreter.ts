@@ -300,11 +300,9 @@ function wireProp(binding: PropBinding, el: Node): void {
 
 // ── SyncBinding ───────────────────────────────────────────────────────────────
 
-/**
- * Per-prop default DOM value extractor.
- * 'checked' → event.target.checked (boolean) — a .value default would write "on"/undefined.
- * Everything else → event.target.value (string).
- */
+// Per-prop default DOM value extractor.
+// 'checked' → event.target.checked (boolean) — a .value default would write "on"/undefined.
+// Everything else → event.target.value (string).
 function defaultExtractorForProp(prop: string): (ev: unknown) => unknown {
   if (prop === 'checked') {
     return (ev: unknown) => (ev as { target?: { checked?: unknown } } | null)?.target?.checked
