@@ -734,6 +734,34 @@ function walkNvNodeList(
 // ── Slot content IR builder (collapse: uses walkNvNodeList) ────────────────────
 
 /**
+ * Lift all `class=` attributes from elements under `root` into ClassListBinding entries.
+ * Strips the `class` attr from each element so shape.html carries no class= after this call.
+ * Must run AFTER walkNvNodeList (so anchor comments are in place) and BEFORE shape
+ * serialization (innerHTML). Paths computed relative to `root` (same root as all other bindings).
+ * Accepts ParentNode (DocumentFragment for main path; Element for slot path) — both have querySelectorAll.
+ * D-SS-1: shared lift eliminates the patchClasslistTokens regex rewrite for component slot content.
+ */
+function liftStaticClassBindings(
+  root: ParentNode,
+  allPaths: NodePath[],
+  bindings: Binding[],
+): void {
+  for (const el of Array.from(root.querySelectorAll('[class]')) as Element[]) {
+    const classVal = el.getAttribute('class') ?? ''
+    const tokens = classVal.split(/\s+/).filter(Boolean)
+    if (tokens.length === 0) continue
+    const pathIndex = allPaths.length
+    allPaths.push(computePath(el as Node, root as Node))
+    el.removeAttribute('class')
+    bindings.push({
+      kind: 'classlist',
+      pathIndex,
+      entries: tokens.map((token): ClassListEntry => ({ kind: 'static', token })),
+    } satisfies ClassListBinding)
+  }
+}
+
+/**
  * Push one <each> list binding into allPaths + bindings.
  * Shared by processHtmlTemplate (main) and buildNvSlotContentIR (slot) so both paths
  * produce structurally identical ListBinding shapes (D-SS-2: identity by construction).
@@ -818,23 +846,31 @@ function buildNvSlotContentIR(
     diagnostics,
   )
 
+  // D-SS-1: lift static class= attrs into ClassListBinding entries BEFORE serialization.
+  // This replaces the regex rewrite in patchClasslistTokens component case for slot content.
+  // Paths computed relative to fragWrapper (same root as all holePaths and component anchorPaths).
+  const allPaths: NodePath[] = [...holePaths]
+  const preLiftBindings: Binding[] = []
+  liftStaticClassBindings(fragWrapper, allPaths, preLiftBindings)
+
   const rawHtml = fragWrapper.innerHTML.replace(
     /\s+data-nv-(?:attr|prop|event|component)-\d+="[^"]*"/g,
     '',
   )
-
-  const allPaths: NodePath[] = [...holePaths]
-  const bindings: Binding[] = holeInfos.map((info, compactIdx) =>
-    buildNvHoleBinding(
-      info,
-      compactIdx,
-      holeExprs[info.origIdx] as ts.Expression,
-      doc,
-      signals,
-      stubExpr,
-      stubHandler,
+  const bindings: Binding[] = [
+    ...preLiftBindings,
+    ...holeInfos.map((info, compactIdx) =>
+      buildNvHoleBinding(
+        info,
+        compactIdx,
+        holeExprs[info.origIdx] as ts.Expression,
+        doc,
+        signals,
+        stubExpr,
+        stubHandler,
+      ),
     ),
-  )
+  ]
   for (const c of components) {
     const pathIndex = allPaths.length
     allPaths.push(c.anchorPath)
@@ -1120,7 +1156,12 @@ function processHtmlTemplate(
     )
   }
 
-  // Re-serialize shape from post-walk fragment (component elements replaced by anchors)
+  // D-SS-1 (main path): lift static class= attrs into ClassListBinding entries on frag
+  // BEFORE cloning to shapeDiv. allPaths use frag as root — same root as all other paths.
+  // Using shapeDiv as root would produce wrong paths (path-root bug caught in Gate-P review).
+  liftStaticClassBindings(frag, allPaths, bindings)
+
+  // Re-serialize shape from post-walk fragment (component elements replaced by anchors, class= stripped)
   const shapeDiv = doc.createElement('div')
   shapeDiv.appendChild(frag.cloneNode(true))
   const reserializedShape = shapeDiv.innerHTML.replace(
@@ -1945,14 +1986,8 @@ export function patchClasslistTokens(ir: TemplateIR, classRewrites: Map<string, 
         // The scoped-slot shape (props) => TemplateIR permits fresh-IR-per-call; that would
         // break this patch silently. Same latent fragility as the 'list' case above. (G2)
         const slotIR = slot.content(stubSlotProps)
-        // Rewrite static class attr tokens in the slot's shape HTML
-        if (slotIR.shape.html?.includes('class=')) {
-          ;(slotIR.shape as { html: string }).html = slotIR.shape.html.replace(
-            /\bclass="([^"]*)"/g,
-            (_, cls: string) =>
-              `class="${cls.replace(/\b([\w-]+)\b/g, (tok) => classRewrites.get(tok) ?? tok)}"`,
-          )
-        }
+        // D-SS-1: static class= attrs are now lifted to ClassListBinding entries at IR build time
+        // (liftStaticClassBindings in buildNvSlotContentIR). No shape.html regex rewrite needed.
         patchClasslistTokens(slotIR, classRewrites)
       }
     }

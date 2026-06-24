@@ -291,11 +291,12 @@ describe('G4: parse-path IR and emit-path agree on slot-content classlist tokens
 //   (b) slotIR.shape.html regex rewrite — exercised here (requires a hole to trigger
 //       component detection; purely static slot content is a known parser limitation)
 
-describe('Static-class-in-slot: literal class attr rewritten via shape.html regex', () => {
-  it('static class + text hole in slot content: literal class attr carries parent scopeHash', () => {
-    // A text hole (${1+1}) forces the parser to detect <ChildComp> as a ComponentBinding.
-    // Once detected, the shape.html regex rewrites the literal class="card extra" string.
-    // "extra" is not in classRewrites → passes through unchanged.
+describe('Static-class-in-slot: literal class attr lifted to ClassListBinding (D-SS-1)', () => {
+  it('static class + text hole in slot content: literal class attr lifted to classlist entries', () => {
+    // D-SS-1: liftStaticClassBindings(fragWrapper, ...) runs in buildNvSlotContentIR before
+    // shape.html serialization. class= attrs are stripped from shape.html and replaced with
+    // ClassListBinding entries. patchClasslistTokens then rewrites entry tokens with scopeHash.
+    // "extra" is not in classRewrites → token remains "extra" unchanged.
     const src = `const P = $component((_props) => {
       $style({ card: { color: 'red' } })
       $render(() => html\`<ChildComp><div class="card extra">\${1 + 1}</div></ChildComp>\`)
@@ -307,11 +308,18 @@ describe('Static-class-in-slot: literal class attr rewritten via shape.html rege
     expect(compBinding).toBeDefined()
     const slotIR = compBinding.slots[0]?.content({})
     expect(slotIR).toBeDefined()
-    // The static class token "card" must be rewritten; "extra" (not a $style key) unchanged
-    expect(slotIR!.shape.html).toContain(`card_${scopeHash}`)
-    expect(slotIR!.shape.html).toContain('extra')
-    expect(slotIR!.shape.html).not.toContain('"card ')
-    expect(slotIR!.shape.html).not.toContain(' card"')
+    // D-SS-1: class= stripped from shape.html; tokens in ClassListBinding entries instead
+    expect(slotIR!.shape.html).not.toMatch(/class=/)
+    const cl = slotIR!.bindings.find((b) => b.kind === 'classlist') as ComponentBinding
+    expect(cl).toBeDefined()
+    expect((cl as unknown as ClassListBinding).entries).toContainEqual({
+      kind: 'static',
+      token: `card_${scopeHash}`,
+    })
+    expect((cl as unknown as ClassListBinding).entries).toContainEqual({
+      kind: 'static',
+      token: 'extra',
+    })
   })
 })
 
