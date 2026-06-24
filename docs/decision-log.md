@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-24. Contract **v0.4.3** · Template-IR **v0.4.2**._
+_Last updated: 2026-06-24. Contract **v0.4.2** · Template-IR **v0.4.2**._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
 > `nv-decision-log-archive.md` (moved 2026-06-21). This snapshot is the resolved
@@ -41,15 +41,11 @@ _Last updated: 2026-06-24. Contract **v0.4.3** · Template-IR **v0.4.2**._
 - **Compiler specialization (steps 1–4):** all wired + gated + measured. Step 3
   (`_compilerEquals`) kept for correctness; step 4 (`_compilerSources`) SHELVED
   (no benefit path). Steps 1–2 (sync classify + cycle check) are the correctness layer.
-  - **§8.5.2 cycle check HAS a production entry point as of [2026-06-24]:**
-    `checkProgram(program, config)` (`check-program.ts`, commits `482425f→0b62d77`) runs
-    classifier→checker→diagnostics over a caller-supplied `ts.Program`. Covers
-    **hand-written `sync()` only**. NOT yet auto-wired into `nvPlugin`/any build — it's a
-    callable entry, not an automatic gate. SyncBinding edges still absent (Unit 2 pending).
-    §8.5.4 cap remains the runtime backstop for everything not statically caught.
-    As of v0.4.3, §8.5.2 also admits renderer-synthesized SyncBinding edges (Unit 2
-    commissioned to recover them via A2). The driver `checkProgram` is still a callable
-    entry, not yet auto-wired into any build.
+  - **§8.5.2 has a production entry point** `checkProgram(program, config)` (Unit 1,
+    `482425f→0b62d77`): runs classifier→checker→diagnostics over a caller-supplied
+    `ts.Program`. Covers hand-written `sync()` (reactive-source syncs). NOT auto-wired into
+    any build yet. SyncBindings are external-source syncs and correctly contribute no edge
+    (Part 3 CLOSED [2026-06-24]).
 - **Renderer:** interpreter + compiler back-ends at parity for all binding kinds.
   Both front-ends (tagged-template + `.nv`) produce one IR, FE-equivalence-gated.
   Template-IR doc reconciled to v0.4.2 (2026-06-23) — now matches `ir.ts`
@@ -178,15 +174,17 @@ _Last updated: 2026-06-24. Contract **v0.4.3** · Template-IR **v0.4.2**._
   static entry, regex removed). Collapse toward main-walk list-push via shared helper
   (D-SS-2). Re-enables G5 + adds emit-exec differential (D-SS-3). Gated by the Action-2
   oracle (D-SS-4). No IR bump. Closes the slot domain. See Log 2026-06-23 + handoff.
-- **SyncBinding (`:value`/`:checked`):** Parts 1+2 landed. **Part 3 RESOLVED [2026-06-24]
-  via Approach A2** — classifier recognizes the emitted IR-literal sync shape and
-  contributes a `reads: ∅, writes: {target}` edge through the existing `signalSymbolId`
-  derivation. Contract bumped v0.4.2→v0.4.3 (§8.5.2 admits renderer-synthesized edges).
-  **Unit 2 implementation COMMISSIONED** (WS2/CC, plan-first, G0–G6); `emitMount` still
-  throws on SyncBinding (back-end emit out of scope). Until Unit 2 lands, §8.5.4 cap
-  remains the SyncBinding cycle protection.
-- **D-sync-cond-1 (dynamic write-target sugar):** carried into contract v0.4.3 as an
-  explicit §8.5.2 scope note — dynamic targets excluded from static check, fall to cap.
+- **SyncBinding (`:value`/`:checked`):** Parts 1+2 landed. **Part 3 CLOSED [2026-06-24] —
+  no static cycle check applies.** A static SyncBinding is an external-source sync (DOM
+  event = external producer, §8.5/§8.6): no reactive source, cannot form a §8.5.2
+  write-graph cycle. The §8.5.4 **external-event budget** is the correct permanent
+  protection. A2 (IR-literal edge recovery) was ruled then REVERSED same day — it solved a
+  non-problem (the `reads: ∅` edge is a no-op in `buildGraph`; CC self-review C1).
+  `writeTargetId` stays retracted. No Unit 2; `emitMount` still throws on SyncBinding
+  (back-end emit, separate concern).
+- **D-sync-cond-1:** moot for the write-graph — all SyncBinding targets fall to the
+  external-event budget. Dynamic-target authoring sugar remains deferred (front-ends
+  restrict to bare identifier).
 - **[2026-06-24] Core confirmed DOM-free** (zero DOM identifiers in `core.ts`). `sync` is
   the general DOM-agnostic primitive; DOM-specificity is correctly quarantined in the
   renderer. Separate un-opened question: whether the **IR** should be renderer-target-
@@ -2606,3 +2604,68 @@ axes is a verified fact, not an open gate (architect + Kofi, this session).
 
 **Supersedes:** the deferral in *Part 3* [2026-06-24] (cites it). **Cites:** *Unit 1
 LANDED* [2026-06-24], *D-sync-cond-1* [2026-06-24], probe `unit2-probe-results.md`.
+
+---
+
+### A2 ruling REVERSED — static SyncBinding is an external-source sync; contributes no §8.5.2 edge [2026-06-24]
+
+**Workstream:** WS4 (architect). **Type:** reversal. **Supersedes** *SyncBinding Part 3
+RESOLVED — A2 accepted; contract bump v0.4.3* [2026-06-24] (same day). **Trigger:** CC
+plan self-review finding C1, verified against source at `9172e5a`.
+
+**What C1 found (confirmed mechanically + semantically + against the contract).**
+The A2 ruling specified the SyncBinding write-graph edge as `reads: ∅, writes: {target}`.
+But `WriteGraphCycleChecker.buildGraph` constructs graph edges *only* via
+`for read in edge.reads → for write in edge.writes → addEdge`. An edge with `reads: ∅`
+contributes **zero** graph edges and zero attribution — it is invisible to cycle
+detection. The A2 edge is a no-op for the very check it claimed to feed; the commissioned
+G3 ("reports a cross-boundary cycle with the SyncBinding in `involvedSyncs`") asserts the
+detection of an object that cannot exist, and is vacuous (C2).
+
+**The deeper error (why the edge shape can't be "fixed").** A static bare-identifier
+SyncBinding (`:value={val}`) writes its target on a **DOM event**. Per §8.5 / §8.6, a
+DOM event is an **external producer** (`{ subscribe }` protocol); a sync with an external
+source is **untracked — it has no reactive source and cannot close a reactive cycle**
+(contract §8.5, the `sync(clicks, count, …)` pattern: "external source (DOM/socket/timer);
+no reactive source ⇒ no cycle"). The SyncBinding write is a **graph root** (no signal
+in-edge), and the §8.5.2 write-graph contains only signal→signal edges. A root cannot
+participate in a cycle. **There is no SyncBinding write-graph cycle for §8.5.2 to catch.**
+
+**The Part 3 framing was wrong for the static case.** Part 3 claimed two-way binding
+becomes "a static build error, not a runtime reconciliation loop," analogizing to escaping
+Angular's digest. That conflated two different things: (a) a *reactive* feedback loop
+between `sync()` calls — which §8.5.2 catches, and which arises from `sync`+`sync` pairs
+**regardless of any SyncBinding** (Unit 1 already delivers this); and (b) the SyncBinding's
+own write-back — which is external-event-driven and is governed by the §8.5.4
+**external-event budget**, not the reactive write-graph. The SyncBinding never needed to
+participate in §8.5.2, and architecturally cannot.
+
+**Ruling (reversal).**
+1. **A2 is withdrawn.** No classifier IR-literal recognition, no SyncBinding write-graph
+   edge. The mechanism solved a non-problem.
+2. **Contract bump v0.4.3 is withdrawn before application.** §8.5.2 does NOT widen to admit
+   renderer-synthesized edges — there are none. **Contract stays v0.4.2.** (`contract-bump-
+   v0.4.3.md` is not applied.)
+3. **Unit 2 implementation commission is withdrawn.** Nothing to implement.
+4. **§8.5.4 external-event budget is the correct, PERMANENT protection** for a runaway
+   two-way binding — not a temporary backstop. A SyncBinding write-back is an external
+   entry; a genuinely runaway external feedback loop terminates on the external-event
+   budget exactly as §8.5.4 already specifies. No new mechanism required.
+5. **What survives from Part 3, correctly scoped:** a reactive feedback loop between two
+   `sync()` calls is a build-time error via §8.5.2, delivered by Unit 1. SyncBinding is
+   irrelevant to that guarantee.
+
+**Architect accountability.** This was an architect error: the A2 ruling derived
+`reads: ∅` correctly from the DOM-event semantics but failed to check that (i) `buildGraph`
+only creates edges from reads, making the edge a no-op, and (ii) the contract already
+classifies external-source syncs as cycle-incapable (§8.5). CC's plan self-review caught
+both before any `src/` touch — the plan-first gate worked as designed. The retraction is
+logged at the same SHA the (now-reversed) ruling was made against.
+
+**D-sync-cond-1 (dynamic targets):** unaffected and now moot for the write-graph — dynamic
+targets were excluded from static checking [2026-06-24]; with A2 withdrawn, *all*
+SyncBinding targets (static and dynamic) fall to the §8.5.4 external budget, which is
+correct. No contract note needed (the v0.4.3 note that would have carried it is withdrawn).
+
+**Supersedes:** *A2 accepted* [2026-06-24]. **Cites:** *Part 3* [2026-06-24], *Unit 1
+LANDED* [2026-06-24], contract §8.5 / §8.5.4, CC plan self-review C1/C2.
