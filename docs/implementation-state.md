@@ -116,7 +116,7 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
   ClassListBinding entries at IR build time (both main and slot paths). Main-path static-class
   live bug CLOSED (was: shape.html kept bare class=, CSS scoped but element unscoped). **G5
   CLOSED:** `<each>`-in-slot wired in both FEs; `pushListBinding` shared helper (D-SS-2).
-  G1–G5, G3', G6, G7 green. 659 pass / 1 skip.
+  G1–G5, G3', G6, G7 green. 659 pass / 0 skip.
   Playwright gate (G-SS-browser ×3) deferred to follow-up increment.
 - **`extractModuleScope` edge:** non-`$component` top-level statements pass through verbatim.
 

@@ -1912,3 +1912,38 @@ when SS lands.
 **Status: LANDED.** D-slot-style-1 closed. Main-path static-class live bug CLOSED.
 `<each>`-in-slot wired in both FEs (.nv + html-tag). Closes `$style × slots` for the
 structural surface (Playwright gate deferred to Task 5 in a follow-up increment).
+
+### 2026-06-23 — Increment SS LANDED: bookkeeping correction (supersedes commit range + skip count in the entry above)
+
+**Why.** Architect verified the landed state at real HEAD `58afe25` (resolved via
+`git ls-remote`; raw host cannot report SHA). Two facts in the SS-LANDED entry above are
+stale/incorrect. This entry corrects them; the code itself is verified correct and
+unchanged by this entry.
+
+**Correction 1 — commit range.** The entry above cites `b8be335..a071b1b` (landing
+`a071b1b`). Real `main` HEAD is **`58afe25`**. The gate suite (`slot-ss.test.ts`, 11 gates)
+and subsequent doc/state syncs landed PAST `a071b1b` (CC's own report listed later commits
+`f8fdef9`, `04318d6`; main has since advanced to `58afe25`). Treat **`58afe25`** as the
+authoritative landed SHA for Increment SS; the `a071b1b` reference is incomplete.
+
+**Correction 2 — skip count.** The entry above states "648 pass / 1 skip → 659 pass / 1
+skip." Verified at `58afe25`: **659 passed, 0 skipped** (29 files), `tsc --strict` clean.
+There is NO remaining skip. G5 was the single skip; it was re-enabled and now passes as a
+live test. The "/ 1 skip" in the entry above is wrong — the correct landed state is
+**659 / 0 skip**. (A `grep` for `.skip`/`xit`/`xdescribe` across `test/` at `58afe25`
+returns nothing.)
+
+**Unchanged / re-confirmed at `58afe25`:** regex removed (no `shape.html.replace` in
+nv-parser.ts); `liftStaticClassBindings(root: ParentNode)` called on `frag` (main, the walk
+root — Gate-P correction honored) and `fragWrapper` (slot); `pushListBinding` shared by both
+main-walk sites and html-tag.ts consumes `lists`. D-slot-style-1 closed; main-path
+static-class bug closed; `<each>`-in-slot wired both FEs.
+
+**Still open (carried, not a defect):** G-SS-browser (Playwright ×3) DEFERRED — `$style`
+scope-attr stamping needs a real browser (`root instanceof Element` is undefined under
+inline-jsdom). The behavioral correctness (correct element targeted) IS covered by
+G-SS-mainpath-root + G-SS-depth2 behavioral legs; only the real-cascade CSS-application
+gate is deferred. Tracked as a named follow-up below.
+
+**Verdict:** Increment SS landed at `58afe25`, 659/0, typecheck clean, structural claims
+verified by source read. reactive-core v0.4.2 + Template-IR v0.4.2 untouched.
