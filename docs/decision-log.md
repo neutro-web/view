@@ -1842,3 +1842,30 @@ no Template-IR bump); FE lockstep broken.
 bump (existing classlist static entry reused).
 
 **Status:** Awaiting CC plan → architect Gate-P approval before any `src/`.
+
+### 2026-06-23 — BUG FOUND: main-path static class unscoped under $style; fix folded into Increment SS
+
+**Finding (verified by parse+emit at ce79d23, not inference).** A purely-static
+`class="card"` in a MAIN component template under `$style({card:{...}})` is NOT scoped:
+`classRewrites` computes `card→card_<hash>` and the emitted CSS is `.card_<hash>{...}`, but
+`shape.html` keeps bare `class="card"`. Selector and element mismatch → the $style rule
+silently never applies. `.nv`-FE, both back-ends (shared parse). Untested (no test covers
+static class in any position), which is why it was latent.
+
+**Contrast:** static class in SLOT content DOES scope today, via the regex
+(nv-parser.ts L1919-1925) Increment SS removes. So main and slot diverge on identical
+source — a single-IR-source-of-truth violation in spirit, plus a live bug on main.
+
+**Fix (decided).** Fold into Increment SS: make the static-class→classlist lift a SHARED
+mechanism applied to BOTH `processHtmlTemplate` (main) and `buildNvSlotContentIR` (slot),
+not slot-only. Existing `patchClasslistTokens` static-entry rewrite (L1876-1885) then scopes
+both uniformly; the slot regex is removed. One rewrite representation for all static class,
+both positions. This is the same collapse principle as D-SS-2.
+
+**Consequence for plan:** OP-2 Option A (slot-only scan) REJECTED → shared lift. New gates
+G-SS-mainbug (main static → matching scoped class + CSS, Playwright ×3) and G-SS-symmetry
+(same fragment, same IR, via Action-2 oracle). reactive-core v0.4.2 untouched; no IR shape
+change (reuses classlist static entry). Renderer-layer; not a §1 touch.
+
+**Status:** fix folded into Increment SS (Gate-P, awaiting CC plan revision). Bug closes
+when SS lands.

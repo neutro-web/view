@@ -98,36 +98,51 @@ are handled uniformly.
 
 ### OP-2: Static-class lift location — WHERE in `buildNvSlotContentIR`
 
-**Two options:**
+**⛔ ARCHITECT RULED: Option A REJECTED. Replaced with shared lift (decided fix).**
 
-**(A) Post-walk scan in `buildNvSlotContentIR`** (after `walkNvNodeList` returns):
+**Why Option A was rejected:** The architect verified at ce79d23 that a MAIN-path static
+`class="card"` under `$style({card:{...}})` is a live bug today — `classRewrites` computes
+`card→card_<hash>` and emits the scoped CSS, but `shape.html` keeps bare `class="card"`.
+Selector and element don't match; the rule silently never applies. Option A (slot-only scan)
+would have fixed slot static class while leaving the main-path bug open — widening the
+divergence.
+
+**Decided fix:** Extract a module-level `liftStaticClassBindings(fragWrapper, allPaths, bindings)` helper called from BOTH `processHtmlTemplate` (before `shapeDiv.innerHTML`
+serialization, ~L1096) AND `buildNvSlotContentIR` (before `rawHtml = fragWrapper.innerHTML`,
+~L775). After the lift, both paths carry static class as `classlist {kind:'static'}` entries;
+the existing `patchClasslistTokens` static-entry rewrite (L1876-1885) scopes them uniformly
+on the main path too. The slot-path regex (L1919-1925) is removed because static class is now
+a classlist entry everywhere. One rewrite representation, both positions, both paths.
+
+**Implementation:**
 ```typescript
-// After walkNvNodeList call and before rawHtml computation:
-for (const el of Array.from(fragWrapper.querySelectorAll('[class]')) as Element[]) {
-  const classVal = el.getAttribute('class')!
-  const tokens = classVal.split(/\s+/).filter(Boolean)
-  if (tokens.length === 0) continue
-  const pathIndex = allPaths.length
-  allPaths.push(computePath(el, fragWrapper))
-  el.removeAttribute('class') // strip so rawHtml doesn't double-count
-  bindings.push({
-    kind: 'classlist',
-    pathIndex,
-    entries: tokens.map((token) => ({ kind: 'static' as const, token })),
-  })
+/**
+ * Lift remaining static class= attrs on DOM elements into classlist {kind:'static'} entries.
+ * Called AFTER walkNvNodeList (or walkNodeList) so sentinel-based attrs are already gone.
+ * Strips the class attr from the element before caller serializes shape/raw HTML so the
+ * token appears only in the binding, not duplicated in shape.html.
+ * Used by both processHtmlTemplate (main path) and buildNvSlotContentIR (slot path).
+ */
+function liftStaticClassBindings(
+  fragWrapper: Element,
+  allPaths: NodePath[],
+  bindings: Binding[],
+): void {
+  for (const el of Array.from(fragWrapper.querySelectorAll('[class]')) as Element[]) {
+    const classVal = el.getAttribute('class')!
+    const tokens = classVal.split(/\s+/).filter(Boolean)
+    if (tokens.length === 0) continue
+    const pathIndex = allPaths.length
+    allPaths.push(computePath(el as Node, fragWrapper))
+    el.removeAttribute('class') // strip before HTML serialization
+    bindings.push({
+      kind: 'classlist',
+      pathIndex,
+      entries: tokens.map((token): ClassListEntry => ({ kind: 'static', token })),
+    } satisfies ClassListBinding)
+  }
 }
 ```
-The `class` attr removal happens BEFORE `rawHtml = fragWrapper.innerHTML` (L775),
-so the static class is only in the binding, not duplicated in `shape.html`.
-
-**(B) In the shared list-push helper (D-SS-2)** — doesn't fit: the helper is for list
-bindings, not static-class scanning; mixing concerns would break its interface.
-
-**Proposed resolution (OP-2):** Option A. It's localized to `buildNvSlotContentIR` and
-follows the same post-walk extension pattern as the existing component loop (L792-796).
-The `computePath` function already works on any element relative to root.
-
-**Architect ruling requested:** accept Option A?
 
 ### OP-3: Diagnostics threading for slot `<each>`
 
@@ -135,15 +150,12 @@ The main list-push loop (L1047-1054) emits a `'warning'` diagnostic into
 `processdiagnostics` when `<each>` has no `let={}`. `buildNvSlotContentIR` has no
 diagnostics channel — its return is `{ir, holeIndices, letNames}`.
 
-**Proposed resolution (OP-3):** Thread an optional `diagnostics?: NvDiagnostic[]` param
-through the shared `pushListBinding` helper. In the main builder, pass `processdiagnostics`
-(current behavior preserved). In `buildNvSlotContentIR`, pass an empty local array
-(diagnostics surfaced to the slot's immediate build context — this is the correct level,
-since the slot content is built during the parent's walk; alternatively omit and leave slot
-`<each>`-no-let as undocumented behavior). Either way: no new exported diagnostic type,
-no IR change.
-
-**Architect ruling requested:** thread the sink (preferred) or leave undocumented?
+**⛔ ARCHITECT RULED: ACCEPT with clarification.** Thread `processdiagnostics` (the parent's
+diagnostic channel) as the sink — not a silent empty local array. Since
+`buildNvSlotContentIR` is called during the parent's walk context (where `processdiagnostics`
+is in scope), thread it as an explicit parameter to `pushListBinding`. Named-debt fallback
+only if the plumbing proves non-trivial; state that explicitly if punted. No new exported
+type, no IR change.
 
 ### OP-4: Depth-2 nesting gate
 
@@ -154,10 +166,10 @@ The component case calls `patchClasslistTokens(slotIR, ...)`, which then hits th
 case and calls `patchClasslistTokens(itemIR, ...)` — depth-2 falls out of the existing
 recursion by construction.
 
-**Proposed resolution (OP-4):** add a depth-2 parse test: parent with `$style`, child
-component, slot content is `<each>` with classlist toggle. Assert `itemIR.bindings.find(b
-=> b.kind === 'classlist').entries[0].key === 'card_<hash>'`. This is the failable gate
-row (G-SS-depth2).
+**⛔ ARCHITECT RULED: ACCEPT — but require a BEHAVIORAL (mounted) depth-2 test, not
+parse-path stub only.** The structural claim (`patchClasslistTokens` recurses correctly) must
+be backed by an emit-exec test that mounts a depth-2 template and asserts the rendered DOM
+element carries the scoped class. Parse-path stubs do not prove the back-end applies it.
 
 ### OP-5: Stacked G2 by-ref fragility
 
@@ -176,16 +188,17 @@ G2 as documented, accepted debt per prior ruling.
 
 ---
 
-## Gate-P checklist (architect reviews these before approving)
+## Gate-P checklist
 
-- [ ] OP-1 resolution accepted (static-class lift closes all-static limitation via post-walk scan)
-- [ ] OP-2 resolution accepted (Option A: post-walk scan in `buildNvSlotContentIR`)
-- [ ] OP-3 resolution accepted (thread diagnostics sink through shared helper)
-- [ ] OP-4 resolution accepted (depth-2 falls out; gate row added)
-- [ ] OP-5 resolution accepted (stacked G2 documented + by-ref invariant tested)
-- [ ] G0 disqualifiers confirmed: no core touch, no slot-local list, regex gone, no IR bump, FE lockstep (html-tag.ts `buildSlotContentIR` also wires `lists`)
+- [x] OP-1 ACCEPTED — post-walk scan closes all-static limitation
+- [x] OP-2 DECIDED — shared `liftStaticClassBindings` helper, both call sites (main + slot); Option A rejected (would ship main-path bug)
+- [x] OP-3 ACCEPTED — thread parent diagnostics channel; named-debt fallback only if non-trivial
+- [x] OP-4 ACCEPTED — behavioral (mounted) depth-2 test required, not parse-path stub only
+- [x] OP-5 ACCEPTED — code comment + by-ref invariant test; no runtime assert
+- [x] G0 disqualifiers confirmed: no core touch, no slot-local list, regex gone, no IR bump, FE lockstep (html-tag.ts `buildSlotContentIR` also wires `lists`)
+- [x] Main-path static-class bug folded in — G-SS-mainbug + G-SS-symmetry mandatory gates added; Playwright ×3 required for G-SS-mainbug styled leg
 
-> **Once architect checks all boxes, execute Tasks 2–6 in order.**
+> **⚠️ Gate-P OPEN — plan revision in progress (OP-2 shared lift, new gates, widened Task 3). Re-submit after revision for fast confirm.**
 
 ---
 
@@ -193,7 +206,7 @@ G2 as documented, accepted debt per prior ruling.
 
 | File | Change |
 |---|---|
-| `src/renderer/nv-parser.ts` | Extract `pushListBinding` module-level helper; `buildNvSlotContentIR` consumes `lists` + static-class scan; remove shape.html regex; `patchClasslistTokens` updated comment |
+| `src/renderer/nv-parser.ts` | Extract `pushListBinding` + `liftStaticClassBindings` module-level helpers; both call sites (main + slot) lift static class; `buildNvSlotContentIR` consumes `lists`; remove shape.html regex; `patchClasslistTokens` comment updated |
 | `src/renderer/html-tag.ts` | `buildSlotContentIR` consumes `lists` from `walkNodeList` and pushes `ListBinding` (mirrors main `html` function L893-905); closes both-FE gap (G-SS-bothFE) |
 | `test/renderer/nv-parser.test.ts` | Re-enable `describe.skip` G5 at L1353 |
 | `test/renderer/slot-style-scope.test.ts` | Expand G5 `it.skip` to real test body; update describe block title (regex language removed) |
@@ -463,18 +476,16 @@ architect for Gate-P approval.
 
   Add the list loop immediately after it:
   ```typescript
-  // Wire <each>-in-slot via the shared helper (D-SS-2: structural identity by construction)
-  const slotDiagnostics: NvDiagnostic[] = [] // slot-context diagnostics; surfaced to parent if desired
+  // Wire <each>-in-slot via the shared helper (D-SS-2: structural identity by construction).
+  // OP-3 ruling: thread parent diagnostics channel, not a silent local sink.
   for (const wl of slotLists) {
-    pushListBinding(wl, allPaths, bindings, slotDiagnostics)
+    pushListBinding(wl, allPaths, bindings, diagnostics) // diagnostics = threaded parameter
   }
   ```
 
-  Note: `slotDiagnostics` is a local sink per OP-3 proposal. If the architect rules to
-  thread diagnostics to the parent, pass `processdiagnostics` instead (this is inside the
-  parent's walk context so `processdiagnostics` is in scope from the outer parse function,
-  but `buildNvSlotContentIR` is a standalone function — would need the sink threaded as a
-  parameter in that case).
+  Add `diagnostics: NvDiagnostic[]` parameter to `buildNvSlotContentIR`'s signature and
+  thread `processdiagnostics` at the call site inside `processHtmlTemplate`. Named-debt
+  fallback (local sink) only if the plumbing proves non-trivial — state that explicitly.
 
 - [ ] **Step 6: Wire `<each>`-in-slot in `html-tag.ts` `buildSlotContentIR`**
 
@@ -562,17 +573,20 @@ architect for Gate-P approval.
 
 ---
 
-## Task 3 — Static-class structural lift + regex removal (Item 2 / D-SS-1)
+## Task 3 — `liftStaticClassBindings` shared helper + both call sites + regex removal (Item 2 / D-SS-1 + main-path bug fix)
 
 **Files:**
-- Modify: `src/renderer/nv-parser.ts` (add static-class scan in `buildNvSlotContentIR`;
-  remove `shape.html` regex from `patchClasslistTokens` component case)
+- Modify: `src/renderer/nv-parser.ts` (extract `liftStaticClassBindings` module-level
+  helper; call it in BOTH `processHtmlTemplate` and `buildNvSlotContentIR`; remove
+  `shape.html` regex from `patchClasslistTokens` component case)
 
 **Interfaces:**
-- Consumes: `computePath` (L232, already internal), `ClassListBinding`, `ClassListEntry`
-- No new exports.
+- Produces: `function liftStaticClassBindings(fragWrapper: Element, allPaths: NodePath[], bindings: Binding[]): void` (module-level, not exported; see OP-2 code block above for body)
+- Consumes: `computePath` (L232, internal), `ClassListBinding`, `ClassListEntry` — all already in module
+- Main call site: `processHtmlTemplate` (~L1096, before `shapeDiv.innerHTML`)
+- Slot call site: `buildNvSlotContentIR` (~L775, before `rawHtml = fragWrapper.innerHTML`)
 
-- [ ] **Step 1: Write failing tests for static-class lift + all-static closure**
+- [ ] **Step 1: Write failing tests — MAIN-path bug + slot lift + all-static closure**
 
   In `test/renderer/slot-ss.test.ts` (new file), add:
 
@@ -582,9 +596,29 @@ architect for Gate-P approval.
   import type { ClassListBinding, ComponentBinding } from '../../src/renderer/ir.js'
   import { parseNvFile } from '../../src/renderer/nv-parser.js'
 
+  describe('G-SS-mainbug: MAIN static class= under $style scopes correctly (live bug fix)', () => {
+    it('G-SS-mainbug (parse): main template static class= produces classlist {kind:static} with scoped token', () => {
+      // This is the live bug at ce79d23: classRewrites has card→card_<hash> but
+      // shape.html keeps bare class="card". liftStaticClassBindings fixes it.
+      const src = `const P = $component((_props) => {
+        $style({ card: { color: 'red' } })
+        $render(() => html\`<div class="card">hello</div>\`)
+      })`
+      const doc = new JSDOM('').window.document
+      const r = parseNvFile(src, 'test.nv', doc)[0]!
+      const scopeHash = r.ir.styleArtifact?.scopeHash
+      expect(scopeHash).toBeDefined()
+      // shape.html must NOT contain class= after lift
+      expect(r.ir.shape.html).not.toMatch(/class=/)
+      // A classlist {kind:'static'} binding must exist with the scoped token
+      const cl = r.ir.bindings.find((b) => b.kind === 'classlist') as ClassListBinding
+      expect(cl).toBeDefined()
+      expect(cl.entries).toContainEqual({ kind: 'static', token: `card_${scopeHash}` })
+    })
+  })
+
   describe('D-SS-1: static-class attrs lifted to classlist entries (regex removed)', () => {
     it('static class= in slot content produces a classlist {kind:static} binding with scoped token', () => {
-      // Mixed case: static class + text hole (the hole causes ComponentBinding detection)
       const src = `const P = $component((_props) => {
         $style({ card: { color: 'red' } })
         $render(() => html\`<ChildComp><div class="card extra">\${1 + 1}</div></ChildComp>\`)
@@ -596,20 +630,14 @@ architect for Gate-P approval.
       const comp = r.ir.bindings.find((b) => b.kind === 'component') as ComponentBinding
       expect(comp).toBeDefined()
       const slotIR = comp.slots[0]!.content({})
-      // After lift: shape.html must NOT contain class= (it was moved to binding)
       expect(slotIR.shape.html).not.toMatch(/class=/)
-      // Classlist binding must be present
       const cl = slotIR.bindings.find((b) => b.kind === 'classlist') as ClassListBinding
       expect(cl).toBeDefined()
-      // 'card' must be rewritten to card_<hash>; 'extra' is not a $style key → unchanged
-      const cardEntry = cl.entries.find((e) => e.kind === 'static' && e.token === `card_${scopeHash}`)
-      expect(cardEntry).toBeDefined()
-      const extraEntry = cl.entries.find((e) => e.kind === 'static' && e.token === 'extra')
-      expect(extraEntry).toBeDefined()
+      expect(cl.entries).toContainEqual({ kind: 'static', token: `card_${scopeHash}` })
+      expect(cl.entries).toContainEqual({ kind: 'static', token: 'extra' })
     })
 
     it('all-static slot content (no holes): static class= produces classlist binding', () => {
-      // OP-1 closure: no holes, but static class must still be lifted
       const src = `const P = $component((_props) => {
         $style({ card: { color: 'red' } })
         $render(() => html\`<ChildComp><div class="card">static</div></ChildComp>\`)
@@ -624,8 +652,46 @@ architect for Gate-P approval.
       expect(slotIR.shape.html).not.toMatch(/class=/)
       const cl = slotIR.bindings.find((b) => b.kind === 'classlist') as ClassListBinding
       expect(cl).toBeDefined()
-      const cardEntry = cl.entries.find((e) => e.kind === 'static' && e.token === `card_${scopeHash}`)
-      expect(cardEntry).toBeDefined()
+      expect(cl.entries).toContainEqual({ kind: 'static', token: `card_${scopeHash}` })
+    })
+  })
+
+  describe('G-SS-symmetry: same static class fragment in main vs slot → same classlist IR', () => {
+    it('G-SS-symmetry: identical <div class="card"> in main and slot produce identical ClassListBinding', () => {
+      // Oracle gate: verifies that the shared lift produces structurally identical
+      // classlist IR regardless of whether the element is in main template or slot content.
+      const docMain = new JSDOM('').window.document
+      const docSlot = new JSDOM('').window.document
+
+      // Main template: <div class="card">
+      const srcMain = `const P = $component((_props) => {
+        $style({ card: { color: 'red' } })
+        $render(() => html\`<div class="card">hello</div>\`)
+      })`
+      const rMain = parseNvFile(srcMain, 'test.nv', docMain)[0]!
+      const clMain = rMain.ir.bindings.find((b) => b.kind === 'classlist') as ClassListBinding
+      expect(clMain).toBeDefined()
+
+      // Slot content: same <div class="card"> nested in a component's slot
+      const srcSlot = `const P = $component((_props) => {
+        $style({ card: { color: 'red' } })
+        $render(() => html\`<ChildComp><div class="card">hello</div></ChildComp>\`)
+      })`
+      const rSlot = parseNvFile(srcSlot, 'test.nv', docSlot)[0]!
+      const comp = rSlot.ir.bindings.find((b) => b.kind === 'component') as ComponentBinding
+      const slotIR = comp.slots[0]!.content({})
+      const clSlot = slotIR.bindings.find((b) => b.kind === 'classlist') as ClassListBinding
+      expect(clSlot).toBeDefined()
+
+      // Both must have the same {kind:'static', token:'card_<hash>'} entry structure
+      // (tokens differ only by hash but hash is determined by the same $style def + template)
+      expect(clMain.entries).toHaveLength(1)
+      expect(clSlot.entries).toHaveLength(1)
+      expect(clMain.entries[0]!.kind).toBe('static')
+      expect(clSlot.entries[0]!.kind).toBe('static')
+      // shape.html must not contain class= in either path
+      expect(rMain.ir.shape.html).not.toMatch(/class=/)
+      expect(slotIR.shape.html).not.toMatch(/class=/)
     })
   })
   ```
@@ -638,33 +704,37 @@ architect for Gate-P approval.
 
   Expected: FAIL — shape.html still contains `class=`, no classlist binding found.
 
-- [ ] **Step 3: Add static-class scan to `buildNvSlotContentIR`**
+- [ ] **Step 3: Extract `liftStaticClassBindings` module-level helper + call in both sites**
 
-  In `buildNvSlotContentIR`, after the `slotLists` loop added in Task 2, and BEFORE the
-  `rawHtml = fragWrapper.innerHTML` line (currently L775), insert:
+  **3a — Extract helper.** Define `liftStaticClassBindings` just above `buildNvSlotContentIR`
+  (~L739, after the `NvWalkedEach`/`NvWalkResult` block and alongside `pushListBinding`). The
+  full body is in the OP-2 section above — copy it verbatim. No new imports needed
+  (`computePath` is at L232, `ClassListEntry`/`ClassListBinding` already imported from ir.ts).
+
+  **3b — Slot call site.** In `buildNvSlotContentIR`, after the `slotLists` loop added in
+  Task 2, and BEFORE `rawHtml = fragWrapper.innerHTML` (~L775), insert:
 
   ```typescript
-  // D-SS-1: lift static class= attrs to classlist {kind:'static'} entries.
-  // scan AFTER walkNvNodeList so hole-based class attrs (already removed as sentinels)
-  // are gone — remaining class= attrs are purely static. Remove from DOM so rawHtml
-  // doesn't double-count them (binding is the canonical source).
-  for (const el of Array.from(fragWrapper.querySelectorAll('[class]'))) {
-    const classVal = (el as Element).getAttribute('class')!
-    const tokens = classVal.split(/\s+/).filter(Boolean)
-    if (tokens.length === 0) continue
-    const pathIndex = allPaths.length
-    allPaths.push(computePath(el as Node, fragWrapper))
-    ;(el as Element).removeAttribute('class')
-    bindings.push({
-      kind: 'classlist',
-      pathIndex,
-      entries: tokens.map((token): ClassListEntry => ({ kind: 'static', token })),
-    } satisfies ClassListBinding)
-  }
+  // D-SS-1 + OP-2: shared lift — static class= attrs → classlist {kind:'static'} entries.
+  // fragWrapper attrs consumed AFTER walkNvNodeList so sentinel-based attrs are gone.
+  // Remove class attr from DOM before rawHtml serialization (binding is canonical).
+  liftStaticClassBindings(fragWrapper, allPaths, bindings)
   ```
 
-  Note: `computePath` is already defined at L232 (internal to the module). `ClassListEntry`
-  and `ClassListBinding` are already imported from `ir.ts`. No new imports needed.
+  **3c — Main-path call site.** In `processHtmlTemplate`, find the line ~L1096 where
+  `shapeDiv.innerHTML` is serialized (the shape HTML snapshot). Before that line, insert:
+
+  ```typescript
+  // D-SS-1: shared lift at the main-path call site — same mechanism as slot path.
+  // Fixes live bug: static class= in main template under $style was not scoped
+  // (classRewrites had the mapping but shape.html was never updated).
+  // liftStaticClassBindings removes class= from shapeDiv BEFORE innerHTML snapshot,
+  // so patchClasslistTokens static-entry rewrite (L1876-1885) scopes it uniformly.
+  liftStaticClassBindings(shapeDiv, allPaths, bindings)
+  ```
+
+  The variable name for the main-path DOM wrapper may be `shapeDiv` or similar — verify at
+  HEAD by reading `processHtmlTemplate` around L1096 and substituting the actual name.
 
 - [ ] **Step 4: Remove the shape.html regex from `patchClasslistTokens` component case**
 
@@ -934,8 +1004,8 @@ architect for Gate-P approval.
     })
   })
 
-  describe('G-SS-depth2: depth-2 <each>-in-each-in-slot (class token scoped)', () => {
-    it('depth-2: classlist toggle key is scoped at item body depth', () => {
+  describe('G-SS-depth2: depth-2 <each>-in-slot (parse + behavioral)', () => {
+    it('depth-2 (parse-path): classlist toggle key is scoped at item body depth', () => {
       // <each>-in-slot produces slotIR.bindings=[ListBinding].
       // patchClasslistTokens component case → list case → recurses itemIR → classlist hit.
       const src = `const P = $component((_props) => {
@@ -958,6 +1028,85 @@ architect for Gate-P approval.
       const cl = itemIR.bindings.find((b) => b.kind === 'classlist') as ClassListBinding
       const toggle = cl.entries.find((e) => e.kind === 'toggle') as { kind: 'toggle'; key: string; expr: () => unknown }
       expect(toggle.key).toBe(`card_${scopeHash}`)
+    })
+
+    it('depth-2 (behavioral/mounted): rendered item in slot-<each> carries scoped class in DOM', () => {
+      // OP-4 ruling: behavioral proof required — parse-path stubs don't prove back-end applies it.
+      // Mount a depth-2 IR (component → slot → list → item with classlist toggle) and assert
+      // the rendered DOM element carries the scoped class.
+      const dom = new JSDOM('<!DOCTYPE html><body><div id="app"></div></body>')
+      const doc = dom.window.document
+      const container = doc.getElementById('app')!
+
+      const parentHash = 'depth2test'
+      const rewClass = `card_${parentHash}`
+      const parentCss = `.${rewClass} { color: rgb(255, 0, 0) }`
+
+      const makeItemIR = () => ({
+        id: 'item:depth2',
+        shape: { html: '<div data-depth2-item></div>', bindingPaths: [[0]] as [number[]] },
+        bindings: [
+          {
+            kind: 'classlist' as const,
+            pathIndex: 0,
+            entries: [{ kind: 'toggle' as const, key: rewClass, expr: () => true }],
+          },
+        ],
+      })
+      const slotContentIR = {
+        id: 'slot:depth2',
+        shape: { html: '<!--nv-0-->', bindingPaths: [[0]] as [number[]] },
+        bindings: [
+          {
+            kind: 'list' as const,
+            pathIndex: 0,
+            items: () => ['x'] as readonly unknown[],
+            key: (item: unknown) => String(item),
+            itemTemplate: (_vs: unknown, _is: unknown) => makeItemIR(),
+          },
+        ],
+      }
+      const childIR = {
+        id: 'child:depth2',
+        shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0, 0]] as [number[]] },
+        bindings: [{ kind: 'slot-outlet' as const, pathIndex: 0, name: 'default' }],
+      }
+      const parentIR = {
+        id: 'parent:depth2',
+        shape: { html: '<div><!--nv-comp-0--></div>', bindingPaths: [[0, 0]] as [number[]] },
+        bindings: [
+          {
+            kind: 'component' as const,
+            pathIndex: 0,
+            component: () => childIR,
+            props: [],
+            propNames: [],
+            slots: [{ name: 'default', content: () => slotContentIR }],
+          },
+        ],
+        styleArtifact: { staticCss: parentCss, scopeHash: parentHash },
+      }
+
+      // Test interpreter back-end
+      createRoot((d) => {
+        mount(parentIR, container, doc)
+        return d
+      })
+      flushSync()
+      const itemEl = container.querySelector('[data-depth2-item]') as HTMLElement
+      expect(itemEl).not.toBeNull()
+      expect(itemEl.classList.contains(rewClass)).toBe(true)
+
+      // Test emitMount back-end
+      container.innerHTML = ''
+      createRoot((d) => {
+        emitMount(parentIR).mountFn(container, doc)
+        return d
+      })
+      flushSync()
+      const itemElEmit = container.querySelector('[data-depth2-item]') as HTMLElement
+      expect(itemElEmit).not.toBeNull()
+      expect(itemElEmit.classList.contains(rewClass)).toBe(true)
     })
   })
   ```
@@ -1165,19 +1314,87 @@ for these (standing policy; same reasoning as G6 in slot-style-scope).
   - Each has `color: rgb(255, 0, 0)` from the injected stylesheet (real cascade in browser)
   - Passes on Chromium, Firefox, and WebKit (Playwright ×3)
 
-- [ ] **Step 3: Run the browser tests (Playwright ×3)**
+- [ ] **Step 3: Add G-SS-mainbug browser test to `slot-ss.spec.ts`**
+
+  Append a second `test.describe` block to the file — the main-path static class bug gate.
+  This is Playwright ×3 per the architect's ruling (G-SS-mainbug requires real cascade, not jsdom).
+
+  ```typescript
+  test.describe('G-SS-mainbug: main-path static class= scoped (live bug fix)', () => {
+    test('main-path static class= carries scoped token and CSS color in DOM', async ({ page }) => {
+      await loadNv(page)
+
+      const result = await page.evaluate(() => {
+        const { mount, flushSync } = window.__nv
+
+        const parentHash = 'mainbugfix1'
+        const rewClass = `card_${parentHash}`
+        const parentCss = `.${rewClass} { color: rgb(0, 128, 0) }`
+
+        // Main template IR: a single <div class="card"> lifted to a classlist binding.
+        // This represents what processHtmlTemplate produces AFTER liftStaticClassBindings runs:
+        //   shape.html has no class= attribute (stripped by lift)
+        //   bindings has a classlist {kind:'static', token:'card_<hash>'}
+        const mainIR = {
+          id: 'main:mainbug',
+          shape: {
+            html: '<div data-mainbug-root></div>',
+            bindingPaths: [[0]] as [number[]],
+          },
+          bindings: [
+            {
+              kind: 'classlist' as const,
+              pathIndex: 0,
+              entries: [{ kind: 'static' as const, token: rewClass }],
+            },
+          ],
+          styleArtifact: { staticCss: parentCss, scopeHash: parentHash },
+        }
+
+        const container = document.createElement('div')
+        document.body.appendChild(container)
+        mount(mainIR, container, document)
+        flushSync()
+
+        const root = container.querySelector('[data-mainbug-root]') as HTMLElement | null
+        const findings: string[] = []
+
+        if (!root) {
+          findings.push('root not found in DOM')
+        } else {
+          // Must carry the scoped class token (static entry applied by wireClassList)
+          if (!root.classList.contains(rewClass)) {
+            findings.push(`missing scoped class ${rewClass}: classList=${root.className}`)
+          }
+          // CSS rule must apply (real cascade in browser)
+          const color = getComputedStyle(root).color
+          if (color !== 'rgb(0, 128, 0)') {
+            findings.push(`expected color rgb(0,128,0) got ${color}`)
+          }
+        }
+
+        container.remove()
+        return { ok: findings.length === 0, findings }
+      })
+
+      expect(result.ok, result.findings.join('\n')).toBe(true)
+    })
+  })
+  ```
+
+- [ ] **Step 4: Run the browser tests (Playwright ×3)**
 
   ```bash
   npx playwright test test/browser/slot-ss.spec.ts --project=chromium --project=firefox --project=webkit 2>&1 | tail -15
   ```
 
-  Expected: all 3 browsers pass.
+  Expected: all 3 browsers pass for both test.describe blocks (G-SS-browser + G-SS-mainbug).
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
   ```bash
   git add test/browser/slot-ss.spec.ts
-  git commit -m "test(browser): G-SS-browser Playwright ×3 for \$style × <each>-in-slot cascade"
+  git commit -m "test(browser): G-SS-browser + G-SS-mainbug Playwright ×3 for slot-<each> and main static class"
   ```
 
 ---
@@ -1222,17 +1439,18 @@ for these (standing policy; same reasoning as G6 in slot-style-scope).
     from `walkNvNodeList` and calls `pushListBinding` (shared helper extracted from main
     builder L1044-1068). Structural identity by construction (D-SS-2). G5 re-enabled in
     both test files; structural + emit-exec differential both pass.
-  - **Item 2 (D-slot-style-1 structural collapse):** Static `class=` attrs in slot content
-    lifted to `{kind:'static',token}` classlist entries via post-walk scan of
-    `fragWrapper.querySelectorAll('[class]')`. `shape.html` regex (nv-parser.ts ~L1919-1925)
-    REMOVED (G0-3 satisfied). Both back-ends' `wireClassList` already consumed
-    `{kind:'static'}` entries — no back-end change needed.
-  - **All-static limitation CLOSED** (OP-1 resolution): post-walk scan handles purely-static
-    slot content (no holes) by computing `computePath(el, fragWrapper)` for static-class
-    elements. No ComponentBinding required.
+  - **Item 2 (D-slot-style-1 structural collapse + main-path bug fix):** Shared
+    `liftStaticClassBindings` helper extracted and called by BOTH `processHtmlTemplate` (main
+    path, before `shapeDiv.innerHTML`) AND `buildNvSlotContentIR` (slot path, before
+    `rawHtml`). Fixes the live main-path bug (class= was unscoped under `$style`; now lifted
+    to classlist static entry before shape serialization). `shape.html` regex
+    (nv-parser.ts ~L1919-1925) REMOVED (G0-3 satisfied). Both back-ends' `wireClassList`
+    already consumed `{kind:'static'}` entries — no back-end change.
+  - **All-static limitation CLOSED** (OP-1 resolution): shared lift post-walk scan handles
+    purely-static slot content (no holes). No ComponentBinding required.
 
   **Gates passed:** G-SS-struct, G-SS-regex-gone, G-SS-G5, G-SS-emit, G-SS-static,
-  G-SS-oracle, G-SS-bothFE, G-SS-depth2, G-SS-browser ×3.
+  G-SS-mainbug, G-SS-symmetry, G-SS-oracle, G-SS-bothFE, G-SS-depth2, G-SS-browser ×3.
 
   **Slot domain:** DONE. D-slot-style-1 CLOSED. D-each-4 all-static limitation CLOSED.
   reactive-core v0.4.2 + Template-IR v0.4.2 untouched.
@@ -1253,15 +1471,17 @@ for these (standing policy; same reasoning as G6 in slot-style-scope).
 
 | Gate | Evidence command | Failure condition |
 |---|---|---|
-| G-SS-struct | `grep -n "pushListBinding" src/renderer/nv-parser.ts && grep -n "lists.*wl\|wl.*lists\|for.*lists" src/renderer/html-tag.ts` | helper not module-level, or html-tag.ts fix missing |
+| G-SS-struct | `grep -n "pushListBinding\|liftStaticClassBindings" src/renderer/nv-parser.ts && grep -n "for.*lists" src/renderer/html-tag.ts` | helpers not module-level, or html-tag.ts fix missing |
 | G-SS-regex-gone | `grep -n "shape\.html\.replace\|shape\.html.*replace" src/renderer/nv-parser.ts` | any output from the slot path |
 | G-SS-G5 | `grep -n "describe.skip\|it.skip" test/renderer/nv-parser.test.ts test/renderer/slot-style-scope.test.ts` | G5 still appears as skip |
 | G-SS-emit | `npx vitest run test/renderer/slot-ss.test.ts -t "emit-exec"` | test fails or uses parse-path stubs |
 | G-SS-static | `npx vitest run test/renderer/slot-ss.test.ts -t "static"` | classList differs from baseline or `class=` still in shape.html |
+| G-SS-mainbug | `npx vitest run test/renderer/slot-ss.test.ts -t "G-SS-mainbug"` + Playwright ×3 | main static class= still in shape.html OR no classlist binding OR CSS not applied |
+| G-SS-symmetry | `npx vitest run test/renderer/slot-ss.test.ts -t "G-SS-symmetry"` | main-path and slot-path classlist IR differ |
 | G-SS-oracle | `grep -n "irStructurallyEqual" test/renderer/slot-ss.test.ts` | oracle not used in differential or both-FE test |
 | G-SS-bothFE | `npx vitest run test/renderer/slot-ss.test.ts -t "G-SS-bothFE"` | html-tag FE slot content has no ListBinding OR oracle diverges |
-| G-SS-depth2 | `npx vitest run test/renderer/slot-ss.test.ts -t "depth-2"` | token not scoped at depth-2 |
-| G-SS-browser | `npx playwright test test/browser/slot-ss.spec.ts --project=chromium --project=firefox --project=webkit` | any browser fails |
+| G-SS-depth2 | `npx vitest run test/renderer/slot-ss.test.ts -t "depth-2"` | parse-path token not scoped OR behavioral mount not proven |
+| G-SS-browser | `npx playwright test test/browser/slot-ss.spec.ts --project=chromium --project=firefox --project=webkit` | any browser fails (G-SS-browser or G-SS-mainbug describe block) |
 | G0-1 | `git diff HEAD src/core/` | any core file changed |
 | G0-2 | inspect slot IR's list binding shape vs main-walk shape | structurally divergent |
 | G0-3 | G-SS-regex-gone above | regex still present |
@@ -1273,21 +1493,23 @@ for these (standing policy; same reasoning as G6 in slot-style-scope).
 ## Self-review
 
 **Spec coverage:**
-- ✅ D-SS-1 (static-class structural collapse + regex removal): Tasks 2–3
+- ✅ D-SS-1 (static-class structural collapse + regex removal): Task 3 (shared `liftStaticClassBindings` helper + both call sites)
 - ✅ D-SS-2 (shared list-push helper): Task 2 (`pushListBinding` module-level in nv-parser.ts)
 - ✅ D-SS-3 (G5 re-enable + emit-exec differential): Task 4
 - ✅ D-SS-4 (Action-2 oracle as structural gate): Task 4 G-SS-differential + G-SS-bothFE tests
-- ✅ OP-1 (all-static limitation): Task 3 + OP-1 proposal
-- ✅ OP-2 (lift location): Task 3 Step 3 (Option A)
-- ✅ OP-3 (diagnostics threading): Task 2 Step 5 (local sink)
-- ✅ OP-4 (depth-2): Task 4 G-SS-depth2 test
+- ✅ OP-1 (all-static limitation): Task 3 + `liftStaticClassBindings` post-walk scan (no holes required)
+- ✅ OP-2 (DECIDED — shared lift both call sites): Task 3 Steps 3a/3b/3c (`liftStaticClassBindings` in both `processHtmlTemplate` + `buildNvSlotContentIR`)
+- ✅ OP-3 (diagnostics threading to parent): Task 2 Step 5 (thread `processdiagnostics` as parameter)
+- ✅ OP-4 (depth-2 behavioral + parse): Task 4 G-SS-depth2 — both parse-path structural AND behavioral/mounted test
 - ✅ OP-5 (stacked G2): Task 4 by-ref invariant test + comment in Task 3 Step 4
-- ✅ G0 disqualifiers: gate table
+- ✅ Main-path static-class bug fix: Task 3 Step 3c + G-SS-mainbug tests (parse + Playwright ×3)
+- ✅ G-SS-symmetry (same fragment → same IR): Task 3 Step 1 G-SS-symmetry test
+- ✅ G0 disqualifiers: gate table (G-SS-struct now checks `liftStaticClassBindings` too)
 - ✅ G0-5 / both-FE: Task 2 Step 6 (html-tag.ts fix) + Task 4 G-SS-bothFE test
-- ✅ Playwright ×3: Task 5 (real assertions, no placeholder)
+- ✅ Playwright ×3: Task 5 (G-SS-browser + G-SS-mainbug, real assertions)
 - ✅ Landing docs: Task 6
-- ⬜ D-cl-2 real-path-G5 bonus (optional, not a blocker per handoff) — not covered. If cheap during Task 4, add as an optional step targeting the real-path G5 skipped test for the classlist emit differential.
+- ⬜ D-cl-2 real-path-G5 bonus (optional, not a blocker per handoff) — not covered.
 
-**Placeholder scan:** No placeholders. Task 5 was re-written with a concrete `page.evaluate()` body matching the `slot-style-scope.spec.ts` pattern (manual IR, `window.__nv.mount`, `flushSync`, `getComputedStyle` color assertion).
+**Placeholder scan:** No placeholders. Task 3 Step 3 uses shared `liftStaticClassBindings` (full code in OP-2 section). Task 5 has concrete `page.evaluate()` bodies for both G-SS-browser and G-SS-mainbug.
 
-**Type consistency:** `pushListBinding` signature uses `NvWalkedEach`, `NodePath`, `Binding`, `NvDiagnostic` — all present in nv-parser.ts module scope. `ClassListEntry` used in Task 3 Step 3 — already imported. `computePath` — internal at L232. html-tag.ts fix uses `WalkedList`, `EachSentinel`, `ListBinding`, `SlotContentFactory` — all already imported in html-tag.ts. `createHtmlTag` and `each` used in G-SS-bothFE test — exported from html-tag.ts barrel.
+**Type consistency:** `pushListBinding` uses `NvWalkedEach`, `NodePath`, `Binding`, `NvDiagnostic` — all in nv-parser.ts scope. `liftStaticClassBindings` uses `Element`, `NodePath`, `Binding`, `computePath` (L232), `ClassListEntry`, `ClassListBinding` — all already in module. html-tag.ts fix uses `WalkedList`, `EachSentinel`, `ListBinding` — all already imported. `createHtmlTag`, `each` in G-SS-bothFE test — exported from html-tag.ts barrel.
