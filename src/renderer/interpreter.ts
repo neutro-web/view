@@ -40,7 +40,16 @@
  *   - Flag if jsdom diverges from real browsers on any of these.
  */
 
-import { createRoot, effect, getOwner, onCleanup, runWithOwner, signal } from '../core/core.js'
+import {
+  createRoot,
+  effect,
+  getOwner,
+  onCleanup,
+  pubsub,
+  runWithOwner,
+  signal,
+  sync,
+} from '../core/core.js'
 import type {
   AttrBinding,
   Binding,
@@ -156,9 +165,8 @@ function wireBinding(
       break
     }
     case 'sync': {
-      throw new Error(
-        `[nv/interpreter] v0: '${binding.kind}' binding is designed but not yet implemented in the interpreter. Deferred per IR §9.2.`,
-      )
+      wireSync(binding as SyncBinding, targetNode)
+      break
     }
     default: {
       const _exhaustive: never = binding
@@ -288,6 +296,52 @@ function wireProp(binding: PropBinding, el: Node): void {
   effect(() => {
     ;(element as unknown as Record<string, unknown>)[name] = binding.expr()
   })
+}
+
+// ── SyncBinding ───────────────────────────────────────────────────────────────
+
+/**
+ * Per-prop default DOM value extractor.
+ * 'checked' → event.target.checked (boolean) — a .value default would write "on"/undefined.
+ * Everything else → event.target.value (string).
+ */
+function defaultExtractorForProp(prop: string): (ev: unknown) => unknown {
+  if (prop === 'checked') {
+    return (ev: unknown) => (ev as { target?: { checked?: unknown } } | null)?.target?.checked
+  }
+  return (ev: unknown) => (ev as { target?: { value?: unknown } } | null)?.target?.value
+}
+
+function wireSync(binding: SyncBinding, el: Node): void {
+  if (el.nodeType !== 1 /* ELEMENT_NODE */) {
+    throw new Error(
+      `[nv/interpreter] SyncBinding expects an Element node; got nodeType ${el.nodeType}`,
+    )
+  }
+  const element = el as Element
+
+  // signal→DOM (read direction) — wireProp pattern
+  effect(() => {
+    ;(element as unknown as Record<string, unknown>)[binding.propName] = binding.readExpr()
+  })
+
+  // DOM→signal (write-back) — wireEvent pattern + external-source sync
+  const ps = pubsub()
+  const listener = (e: Event): void => ps.publish(e)
+  element.addEventListener(binding.eventName, listener)
+  onCleanup(() => element.removeEventListener(binding.eventName, listener))
+
+  // Pass writeTarget straight to sync(). sync() handles both the direct-accessor
+  // and conditional-thunk forms internally via nodeForFn (core.ts:1075-1077).
+  const compute = binding.transform ?? defaultExtractorForProp(binding.propName)
+
+  sync(
+    ps,
+    binding.writeTarget as WritableSignal<unknown> | (() => WritableSignal<unknown>),
+    compute as (incoming: unknown) => unknown,
+  )
+  // sync's disposer is intentionally discarded — sync owns its node via
+  // currentOwner (core.ts:1071-1072) and disposes with the enclosing createRoot.
 }
 
 // ── EventBinding ──────────────────────────────────────────────────────────────

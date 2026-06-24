@@ -40,6 +40,7 @@ import type {
   EventBinding,
   ListBinding,
   PropBinding,
+  SyncBinding,
   TemplateIR,
   TextBinding,
   WritableSignal,
@@ -2135,4 +2136,176 @@ test('TC-C13  wireComponent: factory called exactly once at mount, not on prop u
 
   dispose()
   rmParent(parent)
+})
+
+// ── TC-SB: SyncBinding ─────────────────────────────────────────────────────────
+// Helper: dispatch events with synthetic target properties.
+// Must use the jsdom window's Event constructor to satisfy jsdom's type checks.
+function dispatchInputEvent(el: Element, value: string): void {
+  Object.defineProperty(el, 'value', { value, writable: true, configurable: true })
+  const EventCtor =
+    (el.ownerDocument?.defaultView as { Event?: typeof Event } | null)?.Event ?? Event
+  el.dispatchEvent(new EventCtor('input', { bubbles: true }))
+}
+function dispatchChangeEvent(el: Element, checked: boolean): void {
+  Object.defineProperty(el, 'checked', { value: checked, writable: true, configurable: true })
+  const EventCtor =
+    (el.ownerDocument?.defaultView as { Event?: typeof Event } | null)?.Event ?? Event
+  el.dispatchEvent(new EventCtor('change', { bubbles: true }))
+}
+
+test('TC-SB-01  SyncBinding: programmatic set → DOM prop updates (value)', () => {
+  const jsdom = new JSDOM('<!DOCTYPE html><html><body></body></html>')
+  const doc = jsdom.window.document as unknown as Document
+  const body = doc.querySelector('body') as Element
+  const val = signal('hello')
+  const ir: TemplateIR = {
+    id: 'sb-01',
+    shape: { html: '<input />', bindingPaths: [[0]] },
+    bindings: [
+      {
+        kind: 'sync',
+        pathIndex: 0,
+        propName: 'value',
+        readExpr: () => val(),
+        eventName: 'input',
+        writeTarget: val,
+      } satisfies SyncBinding,
+    ],
+  }
+  const dispose = mount(ir, body, doc)
+  flushSync()
+  const input = body.querySelector('input') as HTMLInputElement
+  expect(input.value).toBe('hello')
+  val.set('world')
+  flushSync()
+  expect(input.value).toBe('world')
+  dispose()
+})
+
+test('TC-SB-02  SyncBinding: DOM event → signal write-back (value, string)', () => {
+  const jsdom = new JSDOM('<!DOCTYPE html><html><body></body></html>')
+  const doc = jsdom.window.document as unknown as Document
+  const body = doc.querySelector('body') as Element
+  const val = signal('')
+  const dispose = mount(
+    {
+      id: 'sb-02',
+      shape: { html: '<input />', bindingPaths: [[0]] },
+      bindings: [
+        {
+          kind: 'sync',
+          pathIndex: 0,
+          propName: 'value',
+          readExpr: () => val(),
+          eventName: 'input',
+          writeTarget: val,
+        } satisfies SyncBinding,
+      ],
+    },
+    body,
+    doc,
+  )
+  flushSync()
+  const input = body.querySelector('input') as Element
+  dispatchInputEvent(input, 'typed')
+  flushSync()
+  expect(val()).toBe('typed')
+  dispose()
+})
+
+test('TC-SB-03  SyncBinding: checked extractor yields boolean, not string', () => {
+  const jsdom = new JSDOM('<!DOCTYPE html><html><body></body></html>')
+  const doc = jsdom.window.document as unknown as Document
+  const body = doc.querySelector('body') as Element
+  const checked = signal(false)
+  const dispose = mount(
+    {
+      id: 'sb-03',
+      shape: { html: '<input type="checkbox" />', bindingPaths: [[0]] },
+      bindings: [
+        {
+          kind: 'sync',
+          pathIndex: 0,
+          propName: 'checked',
+          readExpr: () => checked(),
+          eventName: 'change',
+          writeTarget: checked,
+        } satisfies SyncBinding,
+      ],
+    },
+    body,
+    doc,
+  )
+  flushSync()
+  const input = body.querySelector('input') as Element
+  dispatchChangeEvent(input, true)
+  flushSync()
+  expect(typeof checked()).toBe('boolean') // NOT 'string'
+  expect(checked()).toBe(true)
+  dispose()
+})
+
+test('TC-SB-04  SyncBinding: dispose removes listener, signal goes to 0 observers', () => {
+  const jsdom = new JSDOM('<!DOCTYPE html><html><body></body></html>')
+  const doc = jsdom.window.document as unknown as Document
+  const body = doc.querySelector('body') as Element
+  const val = signal('a')
+  const dispose = mount(
+    {
+      id: 'sb-04',
+      shape: { html: '<input />', bindingPaths: [[0]] },
+      bindings: [
+        {
+          kind: 'sync',
+          pathIndex: 0,
+          propName: 'value',
+          readExpr: () => val(),
+          eventName: 'input',
+          writeTarget: val,
+        } satisfies SyncBinding,
+      ],
+    },
+    body,
+    doc,
+  )
+  flushSync()
+  const input = body.querySelector('input') as Element
+  dispose()
+  dispatchInputEvent(input, 'after-dispose')
+  flushSync()
+  expect(val()).toBe('a') // listener removed — write-back did not fire
+  expect(__test.observerCount(val)).toBe(0)
+})
+
+test('TC-SB-05  SyncBinding: custom transform (map arity)', () => {
+  const jsdom = new JSDOM('<!DOCTYPE html><html><body></body></html>')
+  const doc = jsdom.window.document as unknown as Document
+  const body = doc.querySelector('body') as Element
+  const num = signal(0)
+  const dispose = mount(
+    {
+      id: 'sb-05',
+      shape: { html: '<input />', bindingPaths: [[0]] },
+      bindings: [
+        {
+          kind: 'sync',
+          pathIndex: 0,
+          propName: 'value',
+          readExpr: () => String(num()),
+          eventName: 'input',
+          writeTarget: num,
+          transform: (_ev: unknown) => 42, // always writes 42
+        } satisfies SyncBinding,
+      ],
+    },
+    body,
+    doc,
+  )
+  flushSync()
+  const input = body.querySelector('input') as Element
+  dispatchInputEvent(input, 'anything')
+  flushSync()
+  expect(num()).toBe(42)
+  dispose()
 })
