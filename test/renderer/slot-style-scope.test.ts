@@ -310,16 +310,10 @@ describe('Static-class-in-slot: literal class attr lifted to ClassListBinding (D
     expect(slotIR).toBeDefined()
     // D-SS-1: class= stripped from shape.html; tokens in ClassListBinding entries instead
     expect(slotIR!.shape.html).not.toMatch(/class=/)
-    const cl = slotIR!.bindings.find((b) => b.kind === 'classlist') as ComponentBinding
+    const cl = slotIR!.bindings.find((b) => b.kind === 'classlist') as ClassListBinding | undefined
     expect(cl).toBeDefined()
-    expect((cl as unknown as ClassListBinding).entries).toContainEqual({
-      kind: 'static',
-      token: `card_${scopeHash}`,
-    })
-    expect((cl as unknown as ClassListBinding).entries).toContainEqual({
-      kind: 'static',
-      token: 'extra',
-    })
+    expect(cl!.entries).toContainEqual({ kind: 'static', token: `card_${scopeHash}` })
+    expect(cl!.entries).toContainEqual({ kind: 'static', token: 'extra' })
   })
 })
 
