@@ -169,7 +169,30 @@ _Last updated: 2026-06-23. Contract **v0.4.2** · Template-IR **v0.4.2**._
   static entry, regex removed). Collapse toward main-walk list-push via shared helper
   (D-SS-2). Re-enables G5 + adds emit-exec differential (D-SS-3). Gated by the Action-2
   oracle (D-SS-4). No IR bump. Closes the slot domain. See Log 2026-06-23 + handoff.
-- SyncBinding (throws at both back-ends today).
+- `SyncBinding`: **[2026-06-24] LANDED + ACCEPTED at `4e92b09`.** `:value`/`:checked` two-way
+  binding via `:PROP={accessor}`, both front-ends (.nv parser + tagged-template), both back-ends.
+  Architect-verified on placed source (erasure asymmetry, per-prop `:checked` extractor,
+  transform-extractor composition, derived-target dev guard). G-SB-9 lockstep parity proven
+  across the **two real runtime paths** (tagged-interpreted, .nv-compiled) — ".nv interpreted"
+  is not a runtime (`.nv` = parse→emit→exec), so the original 3-path framing collapses to 2.
+  Single-source-of-truth intact (Solid-model sugar over one-way flows). 682/0 tests, core
+  diff empty.
+- **D-sync-cond-1 [2026-06-24]:** conditional-target authoring sugar
+  (`:value={() => cond ? a : b}`) deferred in both front-ends — bind target restricted to a
+  bare signal identifier. Runtime substrate already works (thunk `writeTarget` via TC-SB-09);
+  only front-end read-direction derivation is missing. Recommend folding into Part 3 (dynamic
+  write-edge is the same design space as the cross-boundary write-graph).
+- **[2026-06-24] OPEN (design-gated, contract-adjacent §8.5.2):** SyncBinding write-back edge →
+  cross-boundary write-graph cycle check (Part 3). **Re-scoped from "checker-only wiring" to a
+  genuine design problem:** the `.nv` emit pipeline (no `ts.Program`) and the §8.5.2 cycle
+  checker (TS-symbol-based `signalSymbolId`) do **not** share a symbol space; `writeTargetId`
+  cannot bridge them as originally designed (retracted). Sole cycle protection meanwhile:
+  §8.5.4 cascade cap (`MAX_CASCADE=100`). Recommend absorbing D-sync-cond-1 (conditional/
+  dynamic write-edge) into this session — same design space. Architecture session required.
+- **[2026-06-24] Core confirmed DOM-free** (zero DOM identifiers in `core.ts`). `sync` is
+  the general DOM-agnostic primitive; DOM-specificity is correctly quarantined in the
+  renderer. Separate un-opened question: whether the **IR** should be renderer-target-
+  agnostic (non-DOM renderers) — larger, not scheduled.
 - LIS list move-minimization — CLOSED [2026-06-22], not commissioned (O(N) reconcile
   acceptable: N=1k sub-2ms, N=10k 17ms real-Chromium).
 - Multi-root list items (single-root guard today; close before promoting multi-root).
@@ -2096,3 +2119,259 @@ future pathological-scale real-app profile, would carry a §9 entry with its own
 set (reopens only on a materially different real-app shape). No `src/` change. WS1 returns to
 its characterized, defensible stopping point — now with the synthetic gap confirmed
 launch-irrelevant at realistic scale, not merely deferred.
+
+### 2026-06-24 — SyncBinding (Parts 1+2) COMMISSIONED — interpreter + emitter, lockstep
+
+**WS3.** Makes `bind:value` two-way binding functional end-to-end on both back-ends. Closes
+the long-standing `SyncBinding`-throws debt. Handoff: `cc-handoff-syncbinding-parts-1-2.md`.
+
+**Seam reads (against `1e59fe1`) that reshaped the increment from the §3.8 blueprint:**
+1. **`sync` has zero production callers.** Verified: every `sync(...)` call site is in the §12
+   conformance suite or cycle-checker fixtures. The renderer calls it nowhere (consistent with
+   the throw). SyncBinding is `sync`'s **first production consumer and first DOM consumer**.
+   Consequence: §3.8 is treated as an *unverified blueprint*, not trusted code — and indeed it
+   carried a stale type (next point).
+2. **§3.8 / `ir.ts` `writeTarget` type is stale vs v0.4.2 core.** Doc + `ir.ts:196` declare
+   `writeTarget: () => { set }`. Live `sync` (`core.ts:1065-1078`) takes the `SignalAccessor`
+   itself and resolves it via `nodeForFn.get(target)`. The setter-object form would fail target
+   resolution silently. Fix: `writeTarget: WritableSignal<unknown> | (() => WritableSignal<unknown>)`,
+   reusing the IR's existing `WritableSignal` (structurally identical to `SignalAccessor`,
+   already used by `ListBinding`). This bug survived precisely because nothing ever called it.
+3. **There is ONE runtime wiring path.** The compiler emits an **IR object literal** + calls
+   the **shared `mount`** (`emitter.ts:281,297`), not `sync()` calls. So the `sync`-calling
+   logic is written once in the interpreter's `wireSync`; the compiler's job is purely to
+   *serialize the SyncBinding literal*. This collapses "two back-ends" to one behavior + one
+   serialization.
+4. **Read/write erasure asymmetry is the correctness crux.** `readExpr` is read-erased
+   (`formField()`); `writeTarget` must be the **bare, un-erased identifier** (`formField`) —
+   the accessor identity `sync` looks up. Erasing the write target would unwrap it to a value
+   and break the write.
+
+**Composition.** Interpreter `wireSync` = `wireProp` pattern (signal→DOM `effect`) +
+`wireEvent` pattern (listener + `onCleanup`) feeding a `pubsub`, then `sync(ps, target,
+compute)`. External `pubsub` source ⇒ cycle-safe by construction (§8.5.1) ⇒ no interpreter
+cycle check needed.
+
+**Decided in-stream (surface syntax / pure renderer, not contract):**
+- **`:PROP={accessor}` directive** — single-char `:` sigil, parallel to `@`(event)/`.`(prop).
+  Chosen over `bind:` (breaks single-char grammar) and `.prop:sync` (noisy) for consistency
+  with nv's existing sigil family. Claims the leading-colon attribute slot (native HTML never
+  uses it — the Vue-`:bind` precedent); matcher runs before the bare-attr matcher in both
+  front-ends. Per-prop default event (`value`→`input`, `checked`→`change`); explicit event
+  override deferred (small debt).
+- **Both front-ends in scope.** A seam read found the tagged-template front-end (`html-tag.ts`)
+  has its **own parallel directive matcher** (`classifyHole`/`buildHtmlHoleBinding`), distinct
+  from the `.nv` parser's `classifyPosition`. `:` must be added to BOTH. The original spec
+  under-scoped this to `.nv` only; corrected. Tagged path is interpret-only (no compile step)
+  and its hole value IS the live accessor, so it derives read (`accessor()`) and write
+  (`accessor.set()`) from one hole — no erasure/identifier-split, no `writeTargetId`. The
+  `.nv` path remains the harder one (source-text split into read-erased + bare identifier).
+- DOM-specific default extractor lives in the **renderer** (`wireSync`), not core — confirmed
+  core is DOM-free (zero DOM identifiers in `core.ts`). **Per-prop:** `value`→`event.target.value`
+  (string), `checked`→`event.target.checked` (boolean). A single `.value` default would write
+  `"on"`/`undefined` for a checkbox — a silent correctness bug; the extractor is keyed on
+  `propName` parallel to the per-prop event default. Shared by both front-ends.
+- `transform` arity selects map vs reduce by **inheriting** contract §8.5's existing rule —
+  **not a new decision** (confirmed: this is the contract working as designed; `sync` reads
+  map/reduce from `compute.length`).
+- `writeTargetId` **emitted now** (Part 2) though consumed only by Part 3 — it is the agreed
+  §3.8 field, derived by the *same imported* `signalSymbolId` as compiler steps 1–2/4.
+  Emitting early makes Part 3 a checker-only change and lets Part 1+2's gate verify the
+  derivation agrees with the classifier (de-risks Part 3 before it starts).
+- `writeTargetId` stays **compiler-path-only/optional**; the interpreter holds the live
+  accessor and ignores it (the §3.8 asymmetry, confirmed intended).
+
+**Lockstep gate (G-SB-9).** Shared-oracle differential parity across **all three authoring
+paths**: `:value` authored as (i) `.nv` interpreted, (ii) `.nv` compiled-then-mounted,
+(iii) tagged-template; driven through the same event+signal sequence; all pinned to a shared
+expected oracle (stricter than mutual `structurallyEqual`). Must prove the round trip both
+directions (programmatic `.set` → DOM; DOM event → signal) in every path.
+
+**Confirmed core is DOM-free; nothing to de-DOM.** A side-investigation this session
+confirmed `core.ts` contains zero DOM identifiers; `sync` is already the general,
+DOM-agnostic primitive. DOM-specificity is correctly quarantined in the renderer call site.
+The separate question of whether the **IR** (not the core) should be renderer-target-agnostic
+(non-DOM renderers) is noted as a distinct, larger, un-opened architectural question — NOT
+folded into this increment.
+
+**Contract impact.** None (v0.4.2). `template-ir.md` §3.8 gets an in-version correction
+(stale `writeTarget` type + back-end mapping snippet) + a consistency pass; note in its
+changelog, no IR version bump (a type *correction* to a designed-but-unimplemented binding,
+not a semantic change).
+
+**Status.** Commissioned, plan-first (Gate-P) pending. Part 3 (cycle-graph integration)
+opened as a committed close follow-up (see next entry) — Part 1+2 ships with a bounded,
+backstop-covered soundness caveat.
+
+### 2026-06-24 — OPEN (sequenced): SyncBinding write-back edge → §8.5.2 cycle graph (Part 3)
+
+**Type:** committed close follow-up to the SyncBinding increment (same-session). **Not** an
+evidence-gated park — it is the immediate next WS3 increment.
+
+**Problem.** The §8.5.2 build-time write-graph cycle checker
+(`write-graph-cycle-checker.ts`) analyzes `sync(...)` **call expressions in user source**
+(`verdict.callNode.arguments`). SyncBinding's write-back `sync` is **synthesized at runtime**
+inside `wireSync` — there is no user-source call expression. Therefore the SyncBinding
+write-back edge is **absent from the global cycle graph** until Part 3 wires it in. §8.5.2
+mandates the check be **global** ("two syncs can form a cycle neither exhibits alone"), so an
+omitted edge is a completeness gap in a contract-mandated global invariant.
+
+**Why bounded, not unsound (the window is defensible only because Part 3 is next).** The
+runtime cascade cap (§8.5.4) is the backstop: an escaped cycle hits the cap and emits the
+dev diagnostic at runtime — it does not loop forever. So the gap is **degraded diagnostics**
+(build-time error → runtime cap-fire), not a runtime-unsound state. Exposure: a `bind:value`
+target that is also a reactive `sync` source elsewhere, forming a cycle, is uncaught at build
+time during the Part 1+2 → Part 3 window. If Part 3 slips, this stops being defensible.
+
+**[2026-06-24 RETRACTION — see next entry.] Enabling data was NOT emitted.** The premise that
+`writeTargetId` from the emitter could match the cycle-checker's `SignalId` derivation is false:
+the two pipelines are architecturally disjoint (`.nv` parser has no `ts.TypeChecker`; the
+cycle-checker requires one). The `writeTargetId` bridge as designed cannot connect the graphs.
+
+**Re-scoped: not "checker-only wiring" but a genuine cross-boundary design problem.** The
+`.nv` write-back edges and `.ts` write-graph edges live in disjoint symbol spaces. Resolving
+this requires an architectural decision (give `.nv` pipeline a `ts.Program`, or give the
+checker a `.nv`-aware edge channel, or restrict bind targets to cross-derivable forms).
+See the retraction entry (below) for options and full analysis.
+
+**Status.** DESIGN-GATED. Architecture session required before any Part 3 implementation
+is commissioned. Backstop: §8.5.4 cascade cap (degraded diagnostics, not unsoundness).
+
+### 2026-06-24 — RETRACTION: "emit writeTargetId now" decision reversed; Part 3 re-scoped
+
+**Retracts the "emit now" recommendation from the SyncBinding Parts 1+2 commission entry.**
+
+**What was wrong.** The commission argued that emitting `writeTargetId` in Part 2 de-risks
+Part 3 by making it "checker-only plumbing." That argument rests on a false premise: the `.nv`
+emit pipeline (`nv-parser.ts` → `nv-emitter.ts`) and the §8.5.2 cycle-checker
+(`write-graph-cycle-checker.ts` + `sync-target-classifier.ts`) do NOT share a symbol space.
+`signalSymbolId` requires a `ts.TypeChecker` (from a full `ts.Program`); the `.nv` parser uses
+`ts.createSourceFile()` only — no program, no checker, no shared derivation. A `writeTargetId`
+computed in the parser cannot match the ID the cycle-checker would produce for the same signal,
+because they are generated by architecturally disjoint analyses. Emitting the field now would
+ship something that **looks** like a cycle-graph bridge but cannot function as one — actively
+misleading to Part 3's implementer.
+
+**Consequence for Part 3.** Part 3 is not "checker-only wiring." It is a genuine cross-boundary
+architecture problem: the `.nv` write-graph edges (from SyncBinding write-back) and the `.ts`
+write-graph edges (from user-source `sync(...)` calls, analyzed by the classifier) live in
+disjoint symbol spaces. The design problem to solve is: **how do these become one graph?**
+Options include (a) give the `.nv` pipeline a `ts.Program` so it can derive real `SignalId`s;
+(b) give the cycle-checker a second input channel for IR-declared edges, with a cross-reference
+convention the `.nv` emitter can satisfy without a checker; (c) restrict `:PROP` bind targets to
+a form whose identity is cross-derivable (e.g. restrict to names that also appear in analyzed
+user-source `sync(...)` calls). None of these is "plumbing" — each is an architectural decision
+gated to the architect.
+
+**Consequence for Parts 1+2.** The runtime behavior is unaffected (`:value` works, both
+back-ends, cursor-stable). The soundness caveat is now **larger** than previously stated:
+it is not "edges absent from the cycle graph until Part 3 wires the checker"; it is "the
+cross-boundary write-graph is an unsolved design problem; the §8.5.4 runtime cascade cap is
+the only cycle protection for SyncBinding write-back until that design is resolved." This is
+still defensible for shipping `:value` (the cap prevents infinite loops; a cycle produces a
+runtime diagnostic rather than a build error), but must be approved knowing static cycle
+detection for SyncBinding is further away than one increment.
+
+**Plan changes (applied immediately):**
+- `writeTargetId` field is **not emitted** in Parts 1+2. The `ir.ts` `SyncBinding` type retains
+  the optional `writeTargetId?: string` field as a design placeholder, but it is not populated.
+- Gate G-SB-6 (writeTargetId canonical derivation) is **dropped** from Parts 1+2.
+- The `ThunkSource` 'sync' union variant does NOT carry `writeTargetId`.
+- `ScriptSymbols` is NOT extended with declaration positions.
+- Part 3 is re-opened as a **design-gated** increment: architect determines the cross-boundary
+  approach before any implementation is commissioned.
+
+**Status.** RETRACTION applied. Parts 1+2 plan updated. Part 3 status changed from
+"sequenced close follow-up" to "design-gated — architecture session required."
+
+---
+
+### 2026-06-24 — SyncBinding Parts 1+2 LANDED + ACCEPTED (architect-verified at `4e92b09`)
+
+**Verdict: ACCEPT.** `:value`/`:checked` two-way binding ships on both real runtime paths.
+Verified by reading placed source at **real HEAD `4e92b09`** (one commit past CC's reported
+`70804cf` — a follow-up removing an `import.meta.env` guard untyped in tsconfig; read at real
+HEAD per discipline, not the reported SHA). Test suite 682/0; `src/core/` diff empty across
+the whole increment (`8d4b36e..4e92b09`), not just CC's window.
+
+**Correctness cruxes verified on read (not from the report):**
+- **Erasure asymmetry** (emitter `case 'sync'`): `readExpr: () => (formField())` (erased read)
+  vs `writeTarget: formField` (bare accessor). Holds. `writeTargetId` correctly NOT emitted
+  (comment cites the retraction entry; field retained in `ir.ts` as placeholder only).
+- **`:checked` per-prop extractor** (`defaultExtractorForProp`): `checked`→`event.target.checked`
+  (boolean), else `.value`. The silent-`"on"`-string bug is fixed (G-SB-14 / TC-SB-03).
+- **No `as never`** (concrete `WritableSignal` cast), **no redundant pre-discriminator**
+  (`writeTarget` passed straight to `sync`), **disposer-discard documented** — all three
+  architect notes followed.
+
+**CC self-review fixes scrutinized (not rubber-stamped):**
+- Transform-extractor composition (`ed0b092`): composes `extractor(ev)` before the user
+  `transform` in both arity branches; `t.length >= 2` selects reduce. Correct — without it
+  `transform` would receive the raw `Event`, violating §8.5 map/reduce. Verified.
+- Derived-target dev guard (`ed0b092`/`70804cf`): `console.error` if the resolved write target
+  lacks `.set`. **Verified safe** — the guard invokes the thunk form once at wire time, but
+  `wireSync` runs in the `createRoot` body with `currentObserver === null`, and `trackRead`
+  no-ops without an active observer (core.ts:302), so **no phantom subscription** is created.
+  Minor note: the guard calls a conditional-target thunk once at mount for validation
+  (selectors must be effectively pure); harmless, recorded.
+
+**Correction — "three authoring paths" was an architect spec artifact; two real paths verified.**
+The commission specified G-SB-9 across three paths (tagged-interpreted, .nv-interpreted,
+.nv-compiled). Seam reads confirm **`.nv` has no standalone interpret runtime** — `.nv` is
+parse→emit→exec, so "Path C (.nv compiled)" *is* how `.nv` runs; a distinct "Path B (.nv
+interpreted)" does not exist (`parseNvFile` yields a stub IR). CC correctly omitted Path B as
+subsumed. G-SB-9 is therefore satisfied **maximally**: shared-oracle parity across the two
+real runtime paths (tagged-interpreted, .nv-compiled) + a cross-path equality assertion, all
+pinned to a fixed `ORACLE` constant (stricter than mutual `structurallyEqual`), exercising
+both directions (programmatic `.set`→DOM, DOM event→signal). **Do not "restore" a Path B
+later — it has no runtime to test.** The 3-path framing was the architect's error (assumed a
+.nv interpret path that the build pipeline doesn't have), not a coverage gap.
+
+**Conditional-target form — clarified scope of the deferral.** The report's "deferred" label
+is broader than the reality:
+- **Already works (NOT deferred):** the thunk-form write target at the IR/interpreter level —
+  a `SyncBinding` with `writeTarget: () => someSignal` resolves natively via `sync`/`nodeForFn`
+  (TC-SB-09 verifies bidirectionally + disposal + no false guard).
+- **Deferred (the actual debt, D-sync-cond-1):** the *authoring sugar* for a conditional write
+  target inline in a template — `:value={() => cond() ? a : b}`. Both front-ends currently
+  restrict the bind target to a **bare signal identifier** (.nv enforces via the G-SB-8
+  enumerability diagnostic; tagged simply doesn't derive the read side for a thunk). Blocker is
+  the **read-direction derivation** (double-call `()()` + re-track on `cond`), not the write
+  side. The runtime substrate is done; only front-end derivation is missing.
+
+**Single-source-of-truth confirmed.** `:PROP` is sugar over two one-way flows — read
+(`effect: el[prop] = sig()`) and write (`sync(pubsub, sig, extract)`) — with the signal as the
+sole store. This is Solid's model, not Angular's bidirectional-digest model. Cursor stability
+on `:value` depends on the target signal's default `equals` (no-op round-trip writes are
+suppressed); setting `equals: false` on a `:`-bound signal would break it (user note).
+
+**Soundness caveat carried forward (unchanged, restated at correct severity):** the
+cross-boundary write-graph is an **unsolved design problem**, not "one increment of checker
+wiring." The §8.5.4 runtime cascade cap (`MAX_CASCADE=100`) is the **sole** cycle protection
+for SyncBinding. Part 3 is design-gated to an architecture session.
+
+**Contract impact.** None (v0.4.2). `template-ir.md` §3.8 correction + consistency pass landed
+(PK synced).
+
+**Status.** SyncBinding Parts 1+2 LANDED, ACCEPTED. Debts: D-sync-cond-1 (conditional-target
+authoring sugar — recommend folding into Part 3, see below). Open: Part 3 (cross-boundary
+write-graph), design-gated.
+
+---
+
+### 2026-06-24 — Conditional-target authoring sugar (D-sync-cond-1): recommend folding into Part 3
+
+**Type:** small debt with the runtime substrate already in place (TC-SB-09). **Recommendation:
+do not schedule standalone — fold into Part 3.**
+
+**Rationale.** A conditional write target makes the SyncBinding write *edge dynamic* (A or B by
+condition), which is strictly harder for the §8.5.2 cross-boundary write-graph cycle check to
+reason about than a static target. Building the conditional sugar before Part 3 resolves how
+SyncBinding edges enter the cycle graph would mean building it twice (naive, then post-design).
+Same design space → resolve together. Demand is low (Solid has no first-class equivalent; the
+single-accessor form covers essentially all real `:value`/`:checked` use). Standalone pickup
+remains cheap if a concrete use case pulls on it (a self-contained front-end increment: both
+parsers gain conditional-target read-direction derivation).
+
+**Status.** OPEN, recommend-folded-into-Part-3. Substrate done; only front-end derivation
+pending.
