@@ -206,6 +206,17 @@ question is "the answer depends on a measured number or real-browser behavior," 
 "feels hairy." A sandbox perf number is noise; never ship a specialization as "faster"
 on the strength of one.
 
+**Measurement-semantics discipline.** A change to *what a measurement isolates* is a
+measurement-semantics change — surface it explicitly, even when it improves the
+instrument. Examples: redefining "floor" (e.g. switching from "binding-effects no-op'd"
+to "effects write to a pre-allocated sink"), changing what is included in the timed
+region, or switching the denominator. These changes alter what the number means, not
+just its value. An improvement that goes unreported looks like compliance with the
+original spec when it isn't — and the architect cannot audit a deviation they don't
+know exists. Flag the deviation; let the architect accept it. (Precedent: 2026-06-24
+wide-graph harness, where the floor was silently re-defined to the more useful
+`sink[i] = finalDerived()` form. Accepted as an improvement; the silence was the miss.)
+
 ## Working style
 
 Direct and concise. Steelman a proposal, then state where it holds and where it leaks.
