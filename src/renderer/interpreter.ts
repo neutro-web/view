@@ -331,7 +331,34 @@ function wireSync(binding: SyncBinding, el: Node): void {
 
   // Pass writeTarget straight to sync(). sync() handles both the direct-accessor
   // and conditional-thunk forms internally via nodeForFn (core.ts:1075-1077).
-  const compute = binding.transform ?? defaultExtractorForProp(binding.propName)
+  const extractor = defaultExtractorForProp(binding.propName)
+  let compute: ((ev: unknown) => unknown) | ((ev: unknown, cur: unknown) => unknown)
+  if (binding.transform) {
+    const t = binding.transform
+    if (t.length >= 2) {
+      // reduce mode: transform(extractedValue, currentSignalValue)
+      compute = (ev: unknown, cur: unknown) => t(extractor(ev), cur)
+    } else {
+      // map mode: transform(extractedValue)
+      compute = (ev: unknown) => (t as (v: unknown) => unknown)(extractor(ev))
+    }
+  } else {
+    compute = extractor
+  }
+
+  // Dev-mode guard: warn if writeTarget is a derived() (non-writable) signal.
+  // signal() accessors have a .set method; derived() accessors do not.
+  if (import.meta.env?.DEV !== false) {
+    const wt = binding.writeTarget
+    if (
+      typeof wt === 'function' &&
+      typeof (wt as unknown as { set?: unknown }).set !== 'function'
+    ) {
+      console.error(
+        '[nv] sync: write target is not a writable signal. Use signal(), not derived(), as a :PROP sync target.',
+      )
+    }
+  }
 
   sync(
     ps,

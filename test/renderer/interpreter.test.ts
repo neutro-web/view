@@ -26,6 +26,7 @@ import { emitMount } from '../../src/compiler/emitted-mount.js'
 import {
   __test,
   createRoot as coreCreateRoot,
+  derived,
   errorBoundary,
   flushSync,
   signal,
@@ -2308,4 +2309,127 @@ test('TC-SB-05  SyncBinding: custom transform (map arity)', () => {
   flushSync()
   expect(num()).toBe(42)
   dispose()
+})
+
+test('TC-SB-06  SyncBinding: 1-arg transform receives extracted value (string), NOT raw Event', () => {
+  const jsdom = new JSDOM('<!DOCTYPE html><html><body></body></html>')
+  const doc = jsdom.window.document as unknown as Document
+  const body = doc.querySelector('body') as Element
+  const val = signal('')
+  const transformArgs: unknown[] = []
+  const dispose = mount(
+    {
+      id: 'sb-06',
+      shape: { html: '<input />', bindingPaths: [[0]] },
+      bindings: [
+        {
+          kind: 'sync',
+          pathIndex: 0,
+          propName: 'value',
+          readExpr: () => val(),
+          eventName: 'input',
+          writeTarget: val,
+          transform: (v: unknown) => {
+            transformArgs.push(v)
+            return v
+          },
+        } satisfies SyncBinding,
+      ],
+    },
+    body,
+    doc,
+  )
+  flushSync()
+  const input = body.querySelector('input') as Element
+  dispatchInputEvent(input, 'hello')
+  flushSync()
+  // transform should have been called with the extracted string value, not an Event object
+  expect(transformArgs.length, 'transform called').toBeGreaterThan(0)
+  const arg = transformArgs[0]
+  expect(typeof arg, 'argument should be a string, not an Event').toBe('string')
+  expect(arg).toBe('hello')
+  dispose()
+})
+
+test('TC-SB-07  SyncBinding: 2-arg (reduce) transform receives (extractedValue, currentSignalValue)', () => {
+  const jsdom = new JSDOM('<!DOCTYPE html><html><body></body></html>')
+  const doc = jsdom.window.document as unknown as Document
+  const body = doc.querySelector('body') as Element
+  const val = signal('initial')
+  const transformCalls: [unknown, unknown][] = []
+  const dispose = mount(
+    {
+      id: 'sb-07',
+      shape: { html: '<input />', bindingPaths: [[0]] },
+      bindings: [
+        {
+          kind: 'sync',
+          pathIndex: 0,
+          propName: 'value',
+          readExpr: () => val(),
+          eventName: 'input',
+          writeTarget: val,
+          transform: (extracted: unknown, current: unknown) => {
+            transformCalls.push([extracted, current])
+            return extracted
+          },
+        } satisfies SyncBinding,
+      ],
+    },
+    body,
+    doc,
+  )
+  flushSync()
+  const input = body.querySelector('input') as Element
+  dispatchInputEvent(input, 'typed')
+  flushSync()
+  expect(transformCalls.length, 'transform called').toBeGreaterThan(0)
+  const [extracted, current] = transformCalls[0]!
+  expect(typeof extracted, 'first arg should be extracted string').toBe('string')
+  expect(extracted).toBe('typed')
+  expect(current).toBe('initial') // current signal value at time of event
+  dispose()
+})
+
+test('TC-SB-08  SyncBinding: derived() as write target triggers console.error', () => {
+  const jsdom = new JSDOM('<!DOCTYPE html><html><body></body></html>')
+  const doc = jsdom.window.document as unknown as Document
+  const body = doc.querySelector('body') as Element
+  const base = signal('base')
+  const derivedSig = derived(() => base())
+  const errors: string[] = []
+  const origConsoleError = console.error
+  console.error = (...args: unknown[]) => {
+    errors.push(args.map(String).join(' '))
+  }
+  try {
+    // Wire sync binding with derived() as write target — should trigger dev-mode warning
+    const dispose = mount(
+      {
+        id: 'sb-08',
+        shape: { html: '<input />', bindingPaths: [[0]] },
+        bindings: [
+          {
+            kind: 'sync',
+            pathIndex: 0,
+            propName: 'value',
+            readExpr: () => derivedSig(),
+            eventName: 'input',
+            writeTarget: derivedSig as unknown as WritableSignal<unknown>,
+          } satisfies SyncBinding,
+        ],
+      },
+      body,
+      doc,
+    )
+    flushSync()
+    dispose()
+  } finally {
+    console.error = origConsoleError
+  }
+  const match = errors.find((e) => e.includes('[nv] sync: write target is not a writable signal'))
+  expect(
+    match !== undefined,
+    `Expected dev-mode error about non-writable signal. Got: ${JSON.stringify(errors)}`,
+  ).toBe(true)
 })
