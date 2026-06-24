@@ -14,7 +14,7 @@ it disagrees with the source, the source wins and this file is stale → fix it.
 **Maintenance.** Update in the same pass that lands code, as a ready-to-commit edit (same
 discipline as log entries). Keep it to roughly this length; detail belongs in the code.
 
-Last verified against source: **2026-06-23.** Contract **v0.4.2**, Template IR **v0.4.2**.
+Last verified against source: **2026-06-23 (Increment SS).** Contract **v0.4.2**, Template IR **v0.4.2**.
 
 ---
 
@@ -42,7 +42,7 @@ Legend: **REAL** = production-complete & verified · **PARTIAL** = works for a s
 | `ir.ts` | REAL | IR types, matches Template-IR **v0.4.2**. 12 binding kinds (6 PoC + List + ComponentBinding + SlotOutletBinding + ClassListBinding + **StyleVarBinding** landed; Sync deferred). `ClassListBinding` = `{ kind:'classlist', pathIndex, entries: readonly ClassListEntry[] }` where entry is `{ kind:'static'; token } \| { kind:'toggle'; key; expr }` — additive union member (v0.4.1). `StyleVarBinding` = `{ kind:'style-var', pathIndex, varName: string, expr }` (v0.4.2). `ComponentBinding` adds `component: ComponentRef`, `props: PropEntry[]`, `propNames`, `slots: SlotEntry[]`. `SlotEntry.content` is now a factory `(props: SlotProps) => TemplateIR` (hard-cut, v0.4). `SlotOutletBinding` = `{ kind:'slot-outlet', pathIndex, name, fallback?: TemplateIR, props?: readonly PropEntry[] }`. `TemplateIR` root carries optional `styleArtifact` ({staticCss, scopeHash, varBindingDescs?}) + `classRewrites` (v0.4.2, .nv-FE-only). `SlotContent` exported. All types local-structural (no DOM/core imports). |
 | `interpreter.ts` | REAL | Back-end / **semantic ground truth**. Exports `mount(ir, parent, doc): () => void` and `walkPath`. `mount` **creates its own `createRoot`**; effects enqueued, run on first flush. `mountFragment` internal. Handles all 6 PoC kinds + list + component + slot-outlet + **classlist** (`wireClassList`); sync throws. `wireClassList`: statics added once at mount via `classList.add`; toggles wired as per-key `effect` for ≤6, one looping `effect` for >6 (T=6; `TODO(threshold)` comment). `wireSlotOutlet` calls `content(slotProps)` factory (v0.4). Slot content rendered via `runWithOwner(capturedParentOwner, () => createRoot(...))` — parent-lexical ownership (D-slot-1). Nested roots bridged via `onCleanup`. |
 | `html-tag.ts` | REAL | Tagged-template front-end (`createHtmlTag(doc)`). Handles `text`, `attr`, `prop` (`.name=`), `event` (`@name=`), `component`, **slot-outlet** (`${slots('name')}` sentinel), and **classlist** (`${classes(...)}` sentinel). `classes(...args)` returns a `ClassesSentinel` (`__nvClasses` brand); detected in `buildHtmlHoleBinding`'s attr branch when `name === 'class'`. **`cx(...args): string`** — pure string builder (no reactivity); handles string/object/array/falsy args recursively. A bare object literal at a `class` hole still throws (validator allowlist). Named slot capture, fallback sentinel, `slot(name, factory)` fill sentinel. Exports `slots`, `slot`, `cx`, `classes`, `ClassesSentinel` from renderer barrel. |
-| `nv-parser.ts` | PARTIAL → **REAL for the build path** | `parseNvFile` (structural-only, stub thunks) + `parseNvFileForEmit` (real emit payload). **`<each>` authoring LANDED (2026-06-22):** both `walkNvNodeList` and `parseNvFileForEmit`'s thunk builder handle `<each .of=... key=... let={...}>` → `ListBinding`. Variant-A adapter at construction in both FEs. **Classlist LANDED (Increment C, 2026-06-22):** `buildNvHoleBinding` attr branch routes `class` + object/array literal → `ClassListBinding`; computed/shorthand keys → `AttrBinding` fallback. Structural path emits `stubExpr` for toggle `expr` (structural-only — by design). `parseNvFileForEmit` classlist branch (~L2188–2257) extracts real `boolSrc: string` per toggle entry. **D-cl-3 (known defect):** key extraction uses `prop.name.getText()` at four sites (L367/L399/L2205/L2237); returns source text with surrounding quotes for string-literal keys (e.g. `'is-active'` → key `"'is-active'"`). Identifier keys unaffected. Fix deferred to S0 (`propertyKeyText` helper; `p.name.text` for Identifier/StringLiteral). `eraseSignalReadsInNode` PropertyAccess guard: always skip property-name position; skip object position only when `accessor === undefined`. JSDOM `let={item, index}` comma-split reassembly added. `ThunkSource` includes `slot-outlet`, `list`, and `classlist` variants. |
+| `nv-parser.ts` | PARTIAL → **REAL for the build path** | `parseNvFile` (structural-only, stub thunks) + `parseNvFileForEmit` (real emit payload). **`<each>` authoring LANDED (2026-06-22):** both `walkNvNodeList` and `parseNvFileForEmit`'s thunk builder handle `<each .of=... key=... let={...}>` → `ListBinding`. Variant-A adapter at construction in both FEs. **`<each>`-in-slot + static-class structural collapse LANDED (Increment SS, 2026-06-23):** `pushListBinding` module-level helper shared by `processHtmlTemplate` and `buildNvSlotContentIR`; `walkNvNodeList` gains `diagnostics` param; `buildNvSlotContentIR` wires `lists: slotLists`. `liftStaticClassBindings(root: ParentNode, allPaths, bindings)` module-level helper strips `class=` attrs into `ClassListBinding` entries; called on `frag` (main) and `fragWrapper` (slot) before shape serialization; `patchClasslistTokens` component-case regex rewrite REMOVED. Main-path static-class live bug CLOSED. `html-tag.ts` `buildSlotContentIR` now wires `lists` from `walkNodeList`. **Classlist LANDED (Increment C, 2026-06-22):** `buildNvHoleBinding` attr branch routes `class` + object/array literal → `ClassListBinding`; computed/shorthand keys → `AttrBinding` fallback. Structural path emits `stubExpr` for toggle `expr` (structural-only — by design). `parseNvFileForEmit` classlist branch (~L2188–2257) extracts real `boolSrc: string` per toggle entry. **D-cl-3 (known defect):** key extraction uses `prop.name.getText()` at four sites (L367/L399/L2205/L2237); returns source text with surrounding quotes for string-literal keys (e.g. `'is-active'` → key `"'is-active'"`). Identifier keys unaffected. Fix deferred to S0 (`propertyKeyText` helper; `p.name.text` for Identifier/StringLiteral). `eraseSignalReadsInNode` PropertyAccess guard: always skip property-name position; skip object position only when `accessor === undefined`. JSDOM `let={item, index}` comma-split reassembly added. `ThunkSource` includes `slot-outlet`, `list`, and `classlist` variants. |
 | `nv-emitter.ts` | **REAL** | `emitModule(results) → ES module text`. A2 shape + `Name.mount` sugar. **`classlist` case LANDED:** `emitBindingLiteral` case `'classlist'` emits `{ kind: 'classlist', pathIndex, entries: [...] }` with per-toggle `expr: () => (${boolSrc})` — real reactive thunks, not stubs (D-cl-1 closed). Arrow-body paren fix: `((slotProps) => (${bodyLiteral}))` to prevent esbuild block-vs-object parse failure. `emitThunkSource` leaf-only (`LeafThunkSource`); structural kinds handled by `emitBindingLiteral`. Slot thunks fully erased. Imports: only $script-referenced primitives + `mount`. |
 | `nv-esbuild-plugin.ts` | **REAL** | `nvPlugin()`: `onLoad(/\.nv$/)` → jsdom doc → `parseNvFileForEmit` → `emitModule` → `{ contents, loader: 'js' }`. Thin I/O glue. |
 | build pipeline (overall) | **REAL** | Transform + erasure layer verified. Executable-module gate CLOSED (EX-01..03). Multi-root dispose fixed. |
@@ -52,7 +52,7 @@ Legend: **REAL** = production-complete & verified · **PARTIAL** = works for a s
 
 ### `test/`, `integration/`
 Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Playwright gate
-(Chromium + cross-engine Blink/Gecko/WebKit), PoC integration. **599/599 green (2026-06-22).**
+(Chromium + cross-engine Blink/Gecko/WebKit), PoC integration. **659/659 green (2026-06-23, Increment SS).**
 `nv-emitter-exec.test.ts` includes:
 - EX-01..03: Counter/Conditional/Multi-component emit-exec.
 - EX-EACH-01..05: `.nv` `<each>` behavioral e2e — initial render, item reactivity (Variant-A
@@ -110,13 +110,14 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
 - **Equality hook inert; step 4 shelved** — neither specialization saves work.
 - **SyncBinding** throws at both back-ends.
 - **Multi-root list items not supported** — single-root guard; wrap in a container element.
-- **`$style` × slots** — LANDED 2026-06-23. `patchClasslistTokens` (nv-parser.ts) has a
-  `component` case that rewrites slot-content classlist tokens with the parent's scopeHash.
-  `scopeHash` is now `simpleHash(\`${shapeHtml}\0${styleInfo?.source ?? ''}\`)` (not `ir.id`;
-  style source folded in to prevent CSS collision between same-template/different-style components).
-  Injection in interpreter.ts and emitted-mount.ts keys on `scopeHash`. G5 (`<each>`-in-slot)
-  deferred; G1–G4, G3', G6, G7 green. Known parser limitation: purely static slot content (no
-  interpolation holes) produces no ComponentBinding → static class attrs unrewritten.
+- **`$style` × slots** — LANDED 2026-06-23 (Increment SS). `patchClasslistTokens` component
+  case recurses into slot IR classlist entries. **D-slot-style-1 CLOSED (Increment SS):**
+  `liftStaticClassBindings` replaces shape.html regex — static class= attrs lifted to
+  ClassListBinding entries at IR build time (both main and slot paths). Main-path static-class
+  live bug CLOSED (was: shape.html kept bare class=, CSS scoped but element unscoped). **G5
+  CLOSED:** `<each>`-in-slot wired in both FEs; `pushListBinding` shared helper (D-SS-2).
+  G1–G5, G3', G6, G7 green. 659 pass / 1 skip.
+  Playwright gate (G-SS-browser ×3) deferred to follow-up increment.
 - **`extractModuleScope` edge:** non-`$component` top-level statements pass through verbatim.
 
 ---

@@ -1869,3 +1869,46 @@ change (reuses classlist static entry). Renderer-layer; not a §1 touch.
 
 **Status:** fix folded into Increment SS (Gate-P, awaiting CC plan revision). Bug closes
 when SS lands.
+
+### 2026-06-23 — Increment SS LANDED (2026-06-23; commits b8be335..a071b1b)
+
+**Tasks completed.**
+
+- **Task 2:** `pushListBinding` module-level helper shared by `processHtmlTemplate` and
+  `buildNvSlotContentIR`. `walkNvNodeList` gains `diagnostics` param (threaded from
+  `processHtmlTemplate` through `buildNvSlotContentIR` call sites). `buildNvSlotContentIR`
+  destructures `lists: slotLists` from walk; adds list loop after component loop.
+  `html-tag.ts` `buildSlotContentIR` wires `lists` from `walkNodeList`. G5 re-enabled and
+  passing. Baseline 647→648 pass (G5 active). Commit: `b8be335`.
+
+- **Task 3 / D-SS-1:** `liftStaticClassBindings(root: ParentNode, allPaths, bindings)` —
+  module-level helper walks `root.querySelectorAll('[class]')`, strips `class=`, appends
+  `ClassListBinding` with `{kind:'static', token}` entries. Called in:
+  (a) `buildNvSlotContentIR` on `fragWrapper` BEFORE `rawHtml` serialization (slot path);
+  (b) `processHtmlTemplate` on `frag` BEFORE shapeDiv clone+serialize (main path, per
+      G-SS-mainpath-root ruling — wrong root = path-root mismatch at mount).
+  `patchClasslistTokens` component case: regex rewrite REMOVED; recursion retained.
+  `patchClasslistTokens` still rewrites classlist entry tokens with scopeHash.
+
+- **Task 4 (gate suite):** `test/renderer/slot-ss.test.ts` added (11 gates): G-SS-mainbug
+  (parse + behavioral), D-SS-1 (slot + all-static-content), G-SS-symmetry, G-SS-emit
+  (parse assert + IR oracle), G-SS-bothFE, G-SS-depth2 (parse + behavioral ×2 back-ends),
+  G2 by-ref. `test/renderer/slot-style-scope.test.ts` updated: regex test → classlist test.
+
+- **Gate-P correction applied:** liftStaticClassBindings runs on `frag` (DocumentFragment)
+  not `shapeDiv` (throwaway clone). Param widened to `ParentNode`.
+
+**Baseline:** 648 pass / 1 skip → 659 pass / 1 skip (11 new slot-ss gates). Commit: `a071b1b`.
+
+**Known limitations (unchanged):**
+- `NoSubstitutionTemplateLiteral` (no holes at all) returns early before DOM walk — static
+  class lift does not run. Purely static templates with no expressions are an edge case
+  (real-world $style usage always has expressions).
+- `wireList` captures `parent = anchorNode.parentNode` before fragment insertion. If the list
+  anchor is a DIRECT DocumentFragment child (no wrapping element), this breaks after insert.
+  `buildNvSlotContentIR` uses `fragWrapper div`, so slot content is always wrapped. Mirror
+  this invariant in hand-constructed test IRs.
+
+**Status: LANDED.** D-slot-style-1 closed. Main-path static-class live bug CLOSED.
+`<each>`-in-slot wired in both FEs (.nv + html-tag). Closes `$style × slots` for the
+structural surface (Playwright gate deferred to Task 5 in a follow-up increment).
