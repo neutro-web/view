@@ -97,10 +97,10 @@ export type ThunkSource =
   | { kind: 'event'; handlerSrc: string }
   | {
       kind: 'sync'
-      readExprSrc: string    // read-erased expression: val()
+      readExprSrc: string // read-erased expression: val()
       writeTargetSrc: string // bare identifier: val (NOT erased)
-      eventName: string      // defaultEventForProp(propName)
-      transformSrc?: string  // optional transform source (for future explicit transform support)
+      eventName: string // defaultEventForProp(propName)
+      transformSrc?: string // optional transform source (for future explicit transform support)
     }
   | {
       kind: 'slot-outlet'
@@ -192,6 +192,11 @@ interface ScriptSymbols {
   /** writable ∪ readonly — for bare-read erasure and ACCEPT/PLAIN verdicts. */
   all: ReadonlySet<string>
 }
+
+// ── Sentinel kind alternation ─────────────────────────────────────────────────
+
+/** Complete set of nv sentinel attribute kinds — used in sentinel-strip regexes. */
+const NV_SENTINEL_KINDS = '(?:attr|prop|sync|event|component)'
 
 // ── Compound assignment operator map ─────────────────────────────────────────
 
@@ -887,7 +892,7 @@ function buildNvSlotContentIR(
   liftStaticClassBindings(fragWrapper, allPaths, preLiftBindings)
 
   const rawHtml = fragWrapper.innerHTML.replace(
-    /\s+data-nv-(?:attr|prop|sync|event|component)-\d+="[^"]*"/g,
+    new RegExp(`\\s+data-nv-${NV_SENTINEL_KINDS}-\\d+="[^"]*"`, 'g'),
     '',
   )
   const bindings: Binding[] = [
@@ -1004,7 +1009,7 @@ function buildNvHtmlStrings(
   )
 
   const shapeHtml = sentinelHtml.replace(
-    /\s+data-nv-(?:attr|prop|sync|event)-\d+="[^"]*"|\s+data-nv-component="[^"]*"/g,
+    new RegExp(`\\s+data-nv-${NV_SENTINEL_KINDS}-\\d+="[^"]*"`, 'g'),
     '',
   )
   return { sentinelHtml, shapeHtml }
@@ -1203,7 +1208,7 @@ function processHtmlTemplate(
   const shapeDiv = doc.createElement('div')
   shapeDiv.appendChild(frag.cloneNode(true))
   const reserializedShape = shapeDiv.innerHTML.replace(
-    /\s+data-nv-(?:attr|prop|sync|event)-\d+="[^"]*"/g,
+    new RegExp(`\\s+data-nv-${NV_SENTINEL_KINDS}-\\d+="[^"]*"`, 'g'),
     '',
   ) // strip hole attr sentinels only
 

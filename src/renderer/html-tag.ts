@@ -49,6 +49,11 @@ import type {
   WritableSignal,
 } from './ir.js'
 
+// ── Sentinel kind alternation ─────────────────────────────────────────────────
+
+/** Complete set of nv sentinel attribute kinds — used in sentinel-strip regexes. */
+const NV_SENTINEL_KINDS = '(?:attr|prop|sync|event|component)'
+
 // ── Slot outlet sentinel (B2 fix) ─────────────────────────────────────────────
 
 /** Opaque sentinel returned by `slots(name)` — the tagged-template outlet form. */
@@ -703,7 +708,7 @@ function buildSlotContentIR(
   // shape.html: serialize post-walk subtree (components now replaced by anchors),
   // strip remaining hole sentinels.
   const rawHtml = fragWrapper.innerHTML.replace(
-    /\s+data-nv-(?:attr|prop|event|sync|component)-\d+="[^"]*"/g,
+    new RegExp(`\\s+data-nv-${NV_SENTINEL_KINDS}-\\d+="[^"]*"`, 'g'),
     '',
   )
 
@@ -854,7 +859,7 @@ function buildHtmlStrings(
 
   // shapeHtml: remove data-nv-attr-N sentinel attributes.
   const shapeHtml = sentinelHtml.replace(
-    /\s+data-nv-(?:attr|event|prop|sync|component)-\d+="[^"]*"|\s+data-nv-component="[^"]*"/g,
+    new RegExp(`\\s+data-nv-${NV_SENTINEL_KINDS}-\\d+="[^"]*"`, 'g'),
     '',
   )
 
