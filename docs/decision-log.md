@@ -104,13 +104,13 @@ _Last updated: 2026-06-23. Contract **v0.4.2** · Template-IR **v0.4.2**._
 - Beating the alien-signals-class baseline: nv wins/ties 5 of 7 cases; two wide-graph
   cases (~1.5x/~1.7x) and createSignals (~5–7x) are proven **structural**, both trace to
   `ReactiveNode` width, both gated behind the **kind-split tripwire** (real-app evidence
-  only — noted, not approved). **[2026-06-24] Evidence harness COMMISSIONED**
-  (`cc-handoff-wide-graph-realapp-harness.md`): app-shaped grid (1000×10), steady-state
-  updates, ~5% edge churn, full-frame through the renderer under Playwright real-browser.
-  Pre-committed **2-of-2 gate**: fires the kind-split spike iff propagation breaches the
-  reactive share of a 60fps frame (absolute) AND exceeds 30% of the update frame (relative);
-  else CLEAR (gap stays accepted). CC returns the verdict to architecture; does not open the
-  spike. Awaiting CC harness + verdict.
+  only — noted, not approved). **[2026-06-24] Tripwire EVIDENCE-TESTED → CLEAR.** The
+  commissioned wide-graph steady-state harness (`1e59fe1`, full-frame, Chromium real-browser,
+  1000×10, 5% churn) showed the realistic update frame at ~0.005ms/tick — budget-irrelevant
+  by ~3,000× against a 60fps frame. Condition A (absolute breach) unflippable at this scale;
+  2-of-2 gate → CLEAR. The synthetic gap is confirmed **launch-irrelevant at realistic
+  scale**, not merely deferred. Tripwire stays set — reopens only on a materially different
+  real-app shape (far larger/deeper graph) in real profiling.
 - **FALSE-heavy row-churn** watch-item (reopen on real-app evidence with a
   steady-state-update harness). **[2026-06-24] The commissioned wide-graph steady-state
   harness is that instrument** — it can serve the FALSE-heavy read-tax measurement as a
@@ -2025,3 +2025,74 @@ kind-split entry with its own version bump — gated on this harness, not decide
 
 **Status.** Harness commissioned with pre-committed 2-of-2 gate. WS1 reopened in the
 tripwire-honoring mode (door 1). Awaiting CC harness + verdict. No `src/` change authorized.
+
+### 2026-06-24 — Kind-split tripwire: wide-graph steady-state harness RESULT — CLEAR (verdict accepted)
+
+**Resolves** the harness commissioned earlier today (`cc-handoff-wide-graph-realapp-harness.md`).
+Landed at `1e59fe1`, `test/browser/wide-graph-steady-state.spec.ts`. Architect verified by
+reading the placed harness in full (not the report); SHA confirmed via `git ls-remote`.
+
+**VERDICT: CLEAR.** Wide-graph reactive propagation is NOT a top user-facing cost at the
+on-point scale (1000 rows × 10 cells, 5% dynamic-edge churn/tick, full-frame through the
+renderer, Chromium real-browser, M2 Max). The kind-split tripwire does **not** fire. The
+structural gap stays accepted; kind-split stays gated. Complete, valid terminal result per
+the pre-committed 2-of-2 gate.
+
+**Measurement (Chromium, M2 Max, 80 samples × 20 ticks/sample):**
+- t_frame (live: propagation + binding + DOM) ≈ 0.005ms/tick
+- t_propagate (floor: propagation + effect invocation, no DOM) ≈ 0.005ms/tick
+- t_dom (live − floor) ≈ 0.000ms/tick (sub-resolution at this scale)
+- Condition A (absolute): propagation 0.005ms vs ~16.7ms reactive budget → NO BREACH.
+- Condition B (relative): aliased to ~100% (see degeneracy note) → not decisive.
+- 2-of-2 gate: A clearly fails → CLEAR.
+
+**Why the CLEAR is firm (architect framing, stronger than the raw "noise-robust" report).**
+At 1000×10 = 10,000 cells with 5% churn (~500 value writes + ~500 edge flips per tick), the
+*entire* update frame is ~0.005ms. Even granting perfect timer resolution and charging the
+full frame to propagation, Condition A misses a 60fps (16.7ms) budget by **3+ orders of
+magnitude**. The CLEAR is not "a small number near the timer floor" — it is "the realistic
+wide-graph update frame is budget-irrelevant by ~3,000×, a gap no plausible measurement error
+spans." Condition A is unflippable at this scale.
+
+**Scope of the CLEAR (honest boundary).** Valid at the tested scale and churn — the
+dimensions derived from the synthetic gap case (`4-1000x12-dyn5%`). This decisively answers
+the tripwire's question ("is wide-graph propagation a top user-facing cost") with *no* at the
+on-point real-app-shaped scale. It does **not** claim no app scale ever makes propagation a
+top cost; a pathological graph (e.g. 100× larger, or far deeper derived chains) is not the
+tripwire's bar. If such a shape appears in real profiling, the tripwire reopens on *that*
+evidence — the gate is "real-app evidence," and this is the real-app-shaped evidence.
+
+**Harness-discipline notes (recorded; neither flips the verdict).**
+1. **Floor run re-defined vs. commission — improvement, but unflagged.** The commission (§4)
+   specified the floor as "signals written, binding-effects no-op'd" (floor = render/DOM cost;
+   budget = frame − floor). CC instead built the floor as "propagation + effect invocation
+   with DOM mutation removed" (`sink[i] = finalDerived()`), making `t_propagate = floor.med`
+   directly. This is the *more useful* decomposition — it measures propagation directly rather
+   than backing it out — and is accepted as an improvement. The discipline miss is that CC
+   silently re-specified the floor rather than flagging the deviation. Carried as a note: a
+   floor-definition change is a measurement-semantics change and should be surfaced, even when
+   it improves the instrument.
+2. **Condition B was degenerate this run.** `t_propagate/t_frame = floor.med/live.med`, and
+   with both timer-aliased to 0.005ms the ratio reads ~100% ("dominant"). B carried **zero
+   information** — it measured timer resolution, not relative dominance. The verdict was
+   correct only because Condition A failed clearly under the 2-of-2 gate.
+
+**Retroactive validation of the 2-of-2 gate design.** Condition B mis-read as 100% dominant
+due to aliasing. A 1-of-N rule that could fire on relative dominance alone would have
+**mis-fired FIRE here** on a timer artifact. The conservative 2-of-2 gate (require BOTH
+absolute breach AND relative dominance) correctly suppressed the artifact and yielded CLEAR.
+The gate design is validated by a case it was built to resist.
+
+**Gates.** G-WG-1..8 + G0 verified on read of the placed file (steady-state timed region;
+separate live/floor evaluate calls with independent warmups; pre-allocated arrays, no
+hot-path allocation; churnFlag flip genuinely re-resolves derived source-sets per tick;
+Playwright real-browser, no JSDOM; floor reported; `src/` untouched; no `ReactiveNode`/
+`makeNode` edit). G-WG-5 specifically confirmed real — the churn flips edges, not just values.
+
+**Contract impact.** None. Contract stays v0.4.2. The kind-split, if ever triggered by a
+future pathological-scale real-app profile, would carry a §9 entry with its own version bump.
+
+**Status.** Kind-split tripwire EVIDENCE-TESTED and CLEAR at on-point scale. Tripwire stays
+set (reopens only on a materially different real-app shape). No `src/` change. WS1 returns to
+its characterized, defensible stopping point — now with the synthetic gap confirmed
+launch-irrelevant at realistic scale, not merely deferred.
