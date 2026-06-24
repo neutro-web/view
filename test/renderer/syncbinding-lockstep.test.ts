@@ -15,7 +15,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import * as esbuild from 'esbuild'
 import { JSDOM } from 'jsdom'
-import { afterEach, describe, expect, test } from 'vitest'
+import { afterEach, expect, test } from 'vitest'
 import { flushSync, signal } from '../../src/core/core.js'
 import { createHtmlTag } from '../../src/renderer/html-tag.js'
 import { mount } from '../../src/renderer/interpreter.js'
@@ -153,8 +153,17 @@ const SyncInput = $component(() => {
   tempDirs.push(tmpDir)
   const entryPath = path.join(tmpDir, 'SyncInput.js')
   const bundlePath = path.join(tmpDir, 'bundle.js')
+  // Hoist `val` to module scope so it can be exported and tested externally.
+  // The emitter places `const val = signal('initial')` inside the component
+  // function body; we lift it out so callers can call val.set() directly.
+  const jsHoisted = js.replace(
+    /(\bexport function SyncInput\b[\s\S]*?)\bconst val = signal\('initial'\)\s*\n/,
+    (_, before) => {
+      return `export const val = signal('initial')\n${before}`
+    },
+  )
   // Re-export flushSync so callers share one scheduler instance with the bundle.
-  fs.writeFileSync(entryPath, `${js}\nexport { flushSync } from '@neutro/view/core'\n`)
+  fs.writeFileSync(entryPath, `${jsHoisted}\nexport { flushSync } from '@neutro/view/core'\n`)
   tempFiles.push(entryPath, bundlePath)
 
   await esbuild.build({
@@ -181,27 +190,37 @@ const SyncInput = $component(() => {
   const mod = (await import(bundlePath)) as {
     SyncInput: { mount: (p: Element, d: Document) => () => void }
     flushSync: () => void
+    val: { (): string; set: (v: string) => void }
   }
   const bundleFlush = mod.flushSync
+  const bundleVal = mod.val
   const parent = doc.createElement('div')
   doc.body.appendChild(parent)
   mod.SyncInput.mount(parent, doc)
   bundleFlush()
 
-  // For the compiled path, we cannot easily introspect the internal signal.
-  // We test DOM behavior only: initial render, then verify the component reacts
-  // to DOM events by checking DOM state after round-trip.
-  // A full signal-state oracle requires exporting the signal from the component,
-  // which is outside this increment's scope. DOM-level oracle is sufficient for G-SB-9.
   const input = parent.querySelector('input') as HTMLInputElement
-  expect(input).toBeTruthy()
-  expect(input.value).toBe('initial')
+  const steps: Step[] = []
 
-  // Fire input → the component's internal signal should update → DOM reflects it
-  // (requires the read effect to be reactive to the internal signal)
+  // Step 0: after mount
+  steps.push({ domAfter: input.value, sigAfter: bundleVal() })
+
+  // Step 1: programmatic write
+  bundleVal.set('hello')
+  bundleFlush()
+  steps.push({ domAfter: input.value, sigAfter: bundleVal() })
+
+  // Step 2: DOM event → signal
   fireInput(input, 'typed')
   bundleFlush()
-  expect(input.value).toBe('typed') // write-back → signal → DOM
+  steps.push({ domAfter: input.value, sigAfter: bundleVal() })
+
+  // Step 3: programmatic write again
+  bundleVal.set('reset')
+  bundleFlush()
+  steps.push({ domAfter: input.value, sigAfter: bundleVal() })
+
+  verifyOracle(steps, 'compiled')
 }, 30000)
 
 // ── G-SB-9 cross-path DOM parity ──────────────────────────────────────────────
