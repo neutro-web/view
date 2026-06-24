@@ -2439,6 +2439,14 @@ test('TC-SB-09  SyncBinding: thunk form writeTarget (() => WritableSignal) works
   const doc = jsdom.window.document as unknown as Document
   const body = doc.querySelector('body') as Element
   const val = signal('hello')
+
+  // TC-SB-09 also verifies no false-positive console.error from the dev-mode guard.
+  const errors: string[] = []
+  const origConsoleError = console.error
+  console.error = (...args: unknown[]) => {
+    errors.push(args.map(String).join(' '))
+  }
+
   const dispose = mount(
     {
       id: 'sb-09',
@@ -2472,4 +2480,14 @@ test('TC-SB-09  SyncBinding: thunk form writeTarget (() => WritableSignal) works
 
   dispose()
   expect(__test.observerCount(val)).toBe(0)
+
+  // Restore console.error and assert no false-positive dev-mode warning was fired.
+  console.error = origConsoleError
+  const falsePositive = errors.find((e) =>
+    e.includes('[nv] sync: write target is not a writable signal'),
+  )
+  expect(
+    falsePositive,
+    `Thunk form should NOT trigger dev-mode guard. Got: ${JSON.stringify(errors)}`,
+  ).toBeUndefined()
 })
