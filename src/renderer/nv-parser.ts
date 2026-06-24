@@ -68,9 +68,11 @@ import type {
   SlotEntry,
   SlotOutletBinding,
   StyleVarBinding,
+  SyncBinding,
   TemplateIR,
   TemplateShape,
   TextBinding,
+  WritableSignal,
 } from './ir.js'
 import { classifyStyleKey } from './style-classify.js'
 
@@ -93,6 +95,13 @@ export interface NvDiagnostic {
 export type ThunkSource =
   | { kind: 'text' | 'attr' | 'prop'; exprSrc: string }
   | { kind: 'event'; handlerSrc: string }
+  | {
+      kind: 'sync'
+      readExprSrc: string    // read-erased expression: val()
+      writeTargetSrc: string // bare identifier: val (NOT erased)
+      eventName: string      // defaultEventForProp(propName)
+      transformSrc?: string  // optional transform source (for future explicit transform support)
+    }
   | {
       kind: 'slot-outlet'
       name: string
@@ -215,6 +224,7 @@ type PosKind =
   | { kind: 'attr'; name: string }
   | { kind: 'prop'; name: string }
   | { kind: 'event'; eventName: string }
+  | { kind: 'sync'; propName: string }
 
 function classifyPosition(prevString: string, nextString: string): PosKind {
   const isClosingQuote = nextString.startsWith('"') || nextString.startsWith("'")
@@ -222,6 +232,9 @@ function classifyPosition(prevString: string, nextString: string): PosKind {
   if (em !== null && isClosingQuote) return { kind: 'event', eventName: em[1] as string }
   const pm = prevString.match(/\s\.([\w-]+)=["']$/)
   if (pm !== null && isClosingQuote) return { kind: 'prop', name: pm[1] as string }
+  // SYNC: must come before bare-attr — /\s([\w:-]+)=["']$/ tolerates colons
+  const sm = prevString.match(/\s:([\w-]+)=["']$/)
+  if (sm !== null && isClosingQuote) return { kind: 'sync', propName: sm[1] as string }
   const am = prevString.match(/\s([\w:-]+)=["']$/)
   if (am !== null && isClosingQuote) return { kind: 'attr', name: am[1] as string }
   return { kind: 'text' }
@@ -253,6 +266,13 @@ type NvSlotHoleInfo =
   | { kind: 'attr'; origIdx: number; name: string }
   | { kind: 'prop'; origIdx: number; name: string }
   | { kind: 'event'; origIdx: number; name: string }
+  | { kind: 'sync'; origIdx: number; propName: string }
+
+/** Per-prop default event name for sync directives. */
+function defaultEventForProp(prop: string): string {
+  if (prop === 'checked') return 'change'
+  return 'input'
+}
 
 /**
  * Shared per-hole binding constructor for the .nv front-end.
@@ -435,6 +455,17 @@ function buildNvHoleBinding(
   if (info.kind === 'prop') {
     return { kind: 'prop', pathIndex, name: info.name, expr: stubExpr }
   }
+  if (info.kind === 'sync') {
+    const b: SyncBinding = {
+      kind: 'sync',
+      pathIndex,
+      propName: info.propName,
+      readExpr: stubExpr as ReactiveExpr<unknown>,
+      eventName: defaultEventForProp(info.propName),
+      writeTarget: stubExpr as unknown as WritableSignal<unknown>,
+    }
+    return b
+  }
   // event
   return {
     kind: 'event',
@@ -586,7 +617,7 @@ function walkNvNodeList(
         const reactiveHoles: Array<{ name: string; holeIndex: number }> = []
 
         for (let k = 0; k < holeExprs.length; k++) {
-          for (const atype of ['attr', 'prop', 'event'] as const) {
+          for (const atype of ['attr', 'prop', 'event', 'sync'] as const) {
             const v = el.getAttribute(`data-nv-${atype}-${k}`)
             if (v !== null) {
               el.removeAttribute(`data-nv-${atype}-${k}`)
@@ -704,7 +735,7 @@ function walkNvNodeList(
       }
 
       for (let k = 0; k < holeExprs.length; k++) {
-        for (const atype of ['attr', 'prop', 'event'] as const) {
+        for (const atype of ['attr', 'prop', 'event', 'sync'] as const) {
           const v = el.getAttribute(`data-nv-${atype}-${k}`)
           if (v !== null) {
             holeInfos.push(
@@ -712,7 +743,9 @@ function walkNvNodeList(
                 ? { kind: 'attr', origIdx: k, name: v }
                 : atype === 'prop'
                   ? { kind: 'prop', origIdx: k, name: v }
-                  : { kind: 'event', origIdx: k, name: v },
+                  : atype === 'sync'
+                    ? { kind: 'sync', origIdx: k, propName: v }
+                    : { kind: 'event', origIdx: k, name: v },
             )
             holePaths.push(computePath(el, root))
             el.removeAttribute(`data-nv-${atype}-${k}`)
@@ -854,7 +887,7 @@ function buildNvSlotContentIR(
   liftStaticClassBindings(fragWrapper, allPaths, preLiftBindings)
 
   const rawHtml = fragWrapper.innerHTML.replace(
-    /\s+data-nv-(?:attr|prop|event|component)-\d+="[^"]*"/g,
+    /\s+data-nv-(?:attr|prop|sync|event|component)-\d+="[^"]*"/g,
     '',
   )
   const bindings: Binding[] = [
@@ -943,6 +976,9 @@ function buildNvHtmlStrings(
         } else if (pos.kind === 'prop') {
           stripRe = /(\s+)\.([\w-]+)=["']$/
           sentinelAttr = `data-nv-prop-${i}="${pos.name}"`
+        } else if (pos.kind === 'sync') {
+          stripRe = /(\s+):([\w-]+)=["']$/
+          sentinelAttr = `data-nv-sync-${i}="${pos.propName}"`
         } else {
           stripRe = /(\s+)@([\w:-]+)=["']$/
           sentinelAttr = `data-nv-event-${i}="${pos.eventName}"`
@@ -968,7 +1004,7 @@ function buildNvHtmlStrings(
   )
 
   const shapeHtml = sentinelHtml.replace(
-    /\s+data-nv-(?:attr|prop|event)-\d+="[^"]*"|\s+data-nv-component="[^"]*"/g,
+    /\s+data-nv-(?:attr|prop|sync|event)-\d+="[^"]*"|\s+data-nv-component="[^"]*"/g,
     '',
   )
   return { sentinelHtml, shapeHtml }
@@ -1149,7 +1185,9 @@ function processHtmlTemplate(
         ? { kind: 'event', origIdx: i, name: pos.eventName }
         : pos.kind === 'text'
           ? { kind: 'text', origIdx: i }
-          : { kind: pos.kind, origIdx: i, name: pos.name }
+          : pos.kind === 'sync'
+            ? { kind: 'sync', origIdx: i, propName: pos.propName }
+            : { kind: pos.kind, origIdx: i, name: pos.name }
 
     bindings.push(
       buildNvHoleBinding(info, pathIndex, holeExpr, doc, signals, stubExpr, stubHandler),
@@ -1165,7 +1203,7 @@ function processHtmlTemplate(
   const shapeDiv = doc.createElement('div')
   shapeDiv.appendChild(frag.cloneNode(true))
   const reserializedShape = shapeDiv.innerHTML.replace(
-    /\s+data-nv-(?:attr|prop|event)-\d+="[^"]*"/g,
+    /\s+data-nv-(?:attr|prop|sync|event)-\d+="[^"]*"/g,
     '',
   ) // strip hole attr sentinels only
 
@@ -2603,6 +2641,33 @@ function computeThunkSource(
   }
   if (pos.kind === 'prop') {
     return { kind: 'prop', exprSrc: eraseSignalReadsInNode(holeExpr, symbols.all, propsAccessors) }
+  }
+  if (pos.kind === 'sync') {
+    // writeTarget must be a bare enumerable signal identifier.
+    if (!ts.isIdentifier(holeExpr)) {
+      diagnostics.push({
+        kind: 'error',
+        message:
+          '[nv] :PROP sync binding requires a bare signal accessor (e.g. :value="${val}"). ' +
+          'Non-enumerable expressions cannot be used as sync targets. ' +
+          'Use effect() for dynamic targets (§8.5.3).',
+        start: holeExpr.getStart(),
+        end: holeExpr.getEnd(),
+      })
+      return {
+        kind: 'sync',
+        readExprSrc: eraseSignalReadsInNode(holeExpr, symbols.all, propsAccessors),
+        writeTargetSrc: holeExpr.getText(),
+        eventName: defaultEventForProp(pos.propName),
+      }
+    }
+    const identName = (holeExpr as ts.Identifier).text
+    return {
+      kind: 'sync',
+      readExprSrc: eraseSignalReadsInNode(holeExpr, symbols.all, propsAccessors),
+      writeTargetSrc: identName,
+      eventName: defaultEventForProp(pos.propName),
+    }
   }
   // event
   return {
