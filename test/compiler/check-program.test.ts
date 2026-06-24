@@ -160,10 +160,20 @@ const a = signal(0)
 const getSignal = (): typeof a => a
 sync(() => 0, () => getSignal())
 `
+  const REJECT_DIAGNOSTIC =
+    'sync target is not statically resolvable. ' +
+    'Use effect (accepting the cascade-cap tradeoff, §8.5.4) or refactor ' +
+    'so the target is an enumerable signal reference (§8.5.3).'
+
   const { program, nvCorePath } = makeTestProgram(src)
   const result = checkProgram(program, { nvCorePath })
+
+  // Exactly one REJECT verdict from this single-sync fixture
+  expect(result.verdicts.filter((v) => v.kind === 'REJECT').length).toBe(1)
+  // Exactly one error diagnostic carrying the canonical REJECT message
   const errors = result.diagnostics.filter((d) => d.severity === 'error')
-  expect(errors.length).toBeGreaterThan(0)
+  expect(errors.length).toBe(1)
+  expect(errors[0]!.message).toBe(REJECT_DIAGNOSTIC)
 })
 
 test('UNDECIDABLE verdict produces warn diagnostic', () => {
@@ -176,8 +186,13 @@ sync(() => a(), maybeSignal)
 `
   const { program, nvCorePath } = makeTestProgram(src)
   const result = checkProgram(program, { nvCorePath })
+
+  // Exactly one UNDECIDABLE verdict from this single-sync fixture
+  expect(result.verdicts.filter((v) => v.kind === 'UNDECIDABLE').length).toBe(1)
+  // Exactly one warn diagnostic; message derives from verdict.reason
   const warns = result.diagnostics.filter((d) => d.severity === 'warn')
-  expect(warns.length).toBeGreaterThan(0)
+  expect(warns.length).toBe(1)
+  expect(warns[0]!.message).toContain("target type is 'any'")
 })
 
 test('cycle produces error diagnostics with cycle path on involvedSyncs', () => {
