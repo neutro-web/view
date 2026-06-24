@@ -183,7 +183,7 @@ G2 as documented, accepted debt per prior ruling.
 - [ ] OP-3 resolution accepted (thread diagnostics sink through shared helper)
 - [ ] OP-4 resolution accepted (depth-2 falls out; gate row added)
 - [ ] OP-5 resolution accepted (stacked G2 documented + by-ref invariant tested)
-- [ ] G0 disqualifiers confirmed: no core touch, no slot-local list, regex gone, no IR bump, FE lockstep
+- [ ] G0 disqualifiers confirmed: no core touch, no slot-local list, regex gone, no IR bump, FE lockstep (html-tag.ts `buildSlotContentIR` also wires `lists`)
 
 > **Once architect checks all boxes, execute Tasks 2–6 in order.**
 
@@ -193,12 +193,13 @@ G2 as documented, accepted debt per prior ruling.
 
 | File | Change |
 |---|---|
-| `src/renderer/nv-parser.ts` | Extract `pushListBinding` helper; `buildNvSlotContentIR` consumes `lists` + static-class scan; remove shape.html regex; `patchClasslistTokens` updated comment |
+| `src/renderer/nv-parser.ts` | Extract `pushListBinding` module-level helper; `buildNvSlotContentIR` consumes `lists` + static-class scan; remove shape.html regex; `patchClasslistTokens` updated comment |
+| `src/renderer/html-tag.ts` | `buildSlotContentIR` consumes `lists` from `walkNodeList` and pushes `ListBinding` (mirrors main `html` function L893-905); closes both-FE gap (G-SS-bothFE) |
 | `test/renderer/nv-parser.test.ts` | Re-enable `describe.skip` G5 at L1353 |
-| `test/renderer/slot-style-scope.test.ts` | Expand G5 `it.skip` to real test body |
-| `test/renderer/slot-ss.test.ts` | **NEW** — `<each>`-in-slot structural + emit-exec differential; static-class lift; depth-2; by-ref invariant; G-SS-* gates |
+| `test/renderer/slot-style-scope.test.ts` | Expand G5 `it.skip` to real test body; update describe block title (regex language removed) |
+| `test/renderer/slot-ss.test.ts` | **NEW** — `<each>`-in-slot structural + emit-exec differential; both-FE oracle (G-SS-bothFE); static-class lift; depth-2; by-ref invariant; G-SS-* gates |
 | `test/browser/slot-ss.spec.ts` | **NEW** — Playwright ×3 for `$style × <each>-in-slot` styled leg |
-| `docs/implementation-state.md` | Update slot builder row + known gaps; note regex gone |
+| `docs/implementation-state.md` | Update slot builder row + known gaps; note regex gone; html-tag.ts slot builder updated |
 | `docs/decision-log.md` | Landing entries for Items 1 + 2; close D-slot-style-1 + open-points as resolved |
 
 ---
@@ -311,17 +312,20 @@ architect for Gate-P approval.
 
 ---
 
-## Task 2 — Shared list-push helper + wire `<each>`-in-slot (Item 1)
+## Task 2 — Shared list-push helper + wire `<each>`-in-slot in both FEs (Item 1)
 
 **⛔ Do NOT begin until Gate-P is approved by the architect.**
 
 **Files:**
-- Modify: `src/renderer/nv-parser.ts` (extract `pushListBinding`, update
+- Modify: `src/renderer/nv-parser.ts` (extract module-level `pushListBinding`, update
   `buildNvSlotContentIR`, update the main list-push loop to call the shared helper)
+- Modify: `src/renderer/html-tag.ts` (`buildSlotContentIR` consumes `lists` from
+  `walkNodeList` — mirrors the main `html` function's list loop at L893-905)
 
 **Interfaces:**
-- Produces: `function pushListBinding(wl: NvWalkedEach, allPaths: NodePath[], bindings: Binding[], diagnostics: NvDiagnostic[]): void` (internal, not exported)
+- Produces: `function pushListBinding(wl: NvWalkedEach, allPaths: NodePath[], bindings: Binding[], diagnostics: NvDiagnostic[]): void` (module-level in nv-parser.ts, not exported)
 - Consumes: `NvWalkedEach` (L463), `NodePath`, `Binding`, `NvDiagnostic`, `ListBinding`, `signal` from core
+- html-tag.ts fix uses existing `WalkedList.sentinel` (`{items, key, factory}: EachSentinel`) — no new types
 
 - [ ] **Step 1: Write the failing G5 structural test in nv-parser.test.ts**
 
@@ -369,10 +373,13 @@ architect for Gate-P approval.
   Expected: FAIL — `slotIR.bindings` will be empty (no list binding), causing
   `listBinding` to be `undefined` and `listBinding.itemTemplate` to throw.
 
-- [ ] **Step 3: Extract `pushListBinding` shared helper in nv-parser.ts**
+- [ ] **Step 3: Extract `pushListBinding` as a module-level function in nv-parser.ts**
 
-  Find the main list-push loop (L1044–1068). Extract it into a local function just above
-  the main builder's list loop (around L1043). Insert after the `for (const wl of pendingComponents)` loop:
+  Find the main list-push loop (L1044–1068). Extract it into a **module-level** function
+  defined BEFORE `buildNvSlotContentIR` (which starts at L740). `buildNvSlotContentIR` is
+  defined before `processHtmlTemplate` (L942) — a function declared inside
+  `processHtmlTemplate` would be invisible to it. Place `pushListBinding` just above
+  `buildNvSlotContentIR` (~L739), after the `NvWalkedEach`/`NvWalkResult` interface block:
 
   ```typescript
   /**
@@ -469,7 +476,59 @@ architect for Gate-P approval.
   but `buildNvSlotContentIR` is a standalone function — would need the sink threaded as a
   parameter in that case).
 
-- [ ] **Step 6: Verify typecheck and tests pass**
+- [ ] **Step 6: Wire `<each>`-in-slot in `html-tag.ts` `buildSlotContentIR`**
+
+  Find `buildSlotContentIR` at L642. At L662, the destructure discards `lists`:
+
+  ```typescript
+  // BEFORE:
+  const { holeInfos, holePaths, components, consumed } = walkNodeList(
+    Array.from(fragWrapper.childNodes),
+    exprs,
+    fragWrapper,
+    doc,
+  )
+  ```
+
+  Change to:
+  ```typescript
+  const { holeInfos, holePaths, components, consumed, lists } = walkNodeList(
+    Array.from(fragWrapper.childNodes),
+    exprs,
+    fragWrapper,
+    doc,
+  )
+  ```
+
+  Then find the component loop (L685-688):
+  ```typescript
+  for (const c of components) {
+    const pathIndex = allPaths.length
+    allPaths.push(c.anchorPath)
+    bindings.push(makeUnresolvedComponentBinding(pathIndex, c))
+  }
+  ```
+
+  Add the list loop immediately after it — mirrors the main `html` function at L893-905:
+  ```typescript
+  // Wire <each>-in-slot: same pattern as the main html() function (L893-905).
+  // buildSlotContentIR previously discarded `lists` — this closes the both-FE gap (G-SS-bothFE).
+  for (const wl of lists) {
+    const pathIndex = allPaths.length
+    allPaths.push(wl.anchorPath)
+    const { items, key, factory } = wl.sentinel
+    bindings.push({
+      kind: 'list',
+      pathIndex,
+      items,
+      key,
+      itemTemplate: (valueSig, indexSig) =>
+        factory({ item: () => valueSig(), index: () => indexSig() }),
+    } satisfies ListBinding)
+  }
+  ```
+
+- [ ] **Step 7: Verify typecheck and tests pass**
 
   ```bash
   npx tsc --noEmit 2>&1 | head -20
@@ -478,7 +537,7 @@ architect for Gate-P approval.
 
   Expected: tsc clean; G5 test passes.
 
-- [ ] **Step 7: Run the full suite to check for regressions**
+- [ ] **Step 8: Run the full suite to check for regressions**
 
   ```bash
   npx vitest run 2>&1 | tail -5
@@ -486,19 +545,19 @@ architect for Gate-P approval.
 
   Expected: G5 now active (2 skip → 1 skip). All prior passing tests still pass.
 
-- [ ] **Step 8: Biome lint**
+- [ ] **Step 9: Biome lint**
 
   ```bash
-  npx biome check src/renderer/nv-parser.ts 2>&1 | tail -10
+  npx biome check src/renderer/nv-parser.ts src/renderer/html-tag.ts 2>&1 | tail -10
   ```
 
   Expected: no errors. Fix any template-literal-vs-string-literal warnings.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
   ```bash
-  git add src/renderer/nv-parser.ts test/renderer/nv-parser.test.ts
-  git commit -m "feat(slot): wire <each>-in-slot via shared pushListBinding helper (D-SS-2; re-enable G5)"
+  git add src/renderer/nv-parser.ts src/renderer/html-tag.ts test/renderer/nv-parser.test.ts
+  git commit -m "feat(slot): wire <each>-in-slot in both FEs via pushListBinding helper (D-SS-2; re-enable G5)"
   ```
 
 ---
@@ -713,11 +772,17 @@ architect for Gate-P approval.
 
 - [ ] **Step 1: Expand G5 in slot-style-scope.test.ts to a real body**
 
-  Find the `it.skip` at ~L324 in `slot-style-scope.test.ts` and replace with:
+  Find the `it.skip` at ~L324 in `slot-style-scope.test.ts`. Also change the enclosing
+  `describe.skip` to `describe` AND update the describe block title (the old title still
+  says "deferred" — change it to "G5: classlist token in `<each>`-inside-slot carries
+  parent scopeHash"). Use static imports at the top of the test file (already present for
+  `signal`, `JSDOM`, `parseNvFile`, `ClassListBinding`, `ComponentBinding`, `ListBinding`).
+
+  Replace `it.skip(...)` with:
 
   ```typescript
   it('class-form token in <each>-inside-slot-content is rewritten with parent scopeHash', () => {
-    // This was deferred until <each>-in-slot was wired (buildNvSlotContentIR now consumes lists).
+    // Deferred until <each>-in-slot was wired (buildNvSlotContentIR now consumes lists).
     // Parse-path structural: slotIR contains a list binding; itemIR's classlist key is scoped.
     const src = `const Parent = $component((_props) => {
       $style({ card: { color: 'red' } })
@@ -737,9 +802,9 @@ architect for Gate-P approval.
     const slotIR = comp.slots[0]!.content({})
     const listBinding = slotIR.bindings.find((b) => b.kind === 'list') as ListBinding
     expect(listBinding).toBeDefined()
-    const { signal: sig } = await import('../../src/core/core.js')
-    const stubVs = sig<unknown>(null)
-    const stubIs = sig<number>(0)
+    // signal is imported at the top of the test file (static import from core)
+    const stubVs = signal<unknown>(null)
+    const stubIs = signal<number>(0)
     const itemIR = listBinding.itemTemplate(stubVs, stubIs)
     const cl = itemIR.bindings.find((b) => b.kind === 'classlist') as ClassListBinding
     expect(cl).toBeDefined()
@@ -749,18 +814,28 @@ architect for Gate-P approval.
   })
   ```
 
-  Also remove the `describe.skip` wrapper (change to `describe`) for this G5 block.
+  Also verify `signal` is imported at the top of `slot-style-scope.test.ts`. If not, add:
+  ```typescript
+  import { signal } from '../../src/core/core.js'
+  ```
 
-- [ ] **Step 2: Add emit-exec differential leg to slot-ss.test.ts**
+- [ ] **Step 2: Add emit-exec differential leg + real both-FE gate to slot-ss.test.ts**
 
-  Add a new `describe` block for the behavioral emit-exec differential:
+  Add these imports at the top of the new `slot-ss.test.ts` file (in addition to imports
+  from Task 3 Step 1):
 
   ```typescript
   import { createRoot, flushSync, signal } from '../../src/core/core.js'
   import { emitMount } from '../../src/compiler/emitted-mount.js'
   import { mount } from '../../src/renderer/interpreter.js'
+  import { createHtmlTag, each } from '../../src/renderer/html-tag.js'
   import { irStructurallyEqual } from './ir-equivalence.js'
+  import { parseNvFileForEmit } from '../../src/renderer/nv-parser.js'
+  ```
 
+  Add two new `describe` blocks:
+
+  ```typescript
   describe('G-SS-emit: $style × <each>-in-slot emit-exec differential (interpreter vs emitted)', () => {
     it('both back-ends apply scoped classlist token to each list-item in slot content', () => {
       // Uses parseNvFileForEmit to get real itemTemplate factories (not stubs).
@@ -776,15 +851,11 @@ architect for Gate-P approval.
       const dom = new JSDOM('<!DOCTYPE html><body><div id="app"></div></body>')
       const doc = dom.window.document
       const items = signal(['a', 'b'])
-      // Parse + emit to get real IR with real itemTemplate factories
-      // NOTE: parseNvFileForEmit produces the real emit payload; emitMount executes it.
-      // The slot's <each> must be wired so slotIR.bindings contains a real ListBinding.
       const emitResults = parseNvFileForEmit(src, 'test.nv', doc)
       const parent = emitResults.find((r) => r.name === 'Parent')!
       expect(parent.ir.styleArtifact?.scopeHash).toBeDefined()
       const scopeHash = parent.ir.styleArtifact!.scopeHash
 
-      // Mount via emitMount (compiler back-end)
       const container = doc.getElementById('app')!
       createRoot((d) => {
         emitMount(parent.ir).mountFn(container, doc)
@@ -798,7 +869,8 @@ architect for Gate-P approval.
       }
     })
 
-    it('FE-equivalence: parse-path and emit-path agree on slot-list IR structure (oracle)', () => {
+    it('G-SS-differential: .nv parse-path and emit-path agree on slot-list IR structure (oracle)', () => {
+      // Compares parseNvFile vs parseNvFileForEmit — both .nv paths must agree.
       const src = `const Parent = $component((_props) => {
         $style({ card: { color: 'red' } })
         $render(() => html\`<ChildComp>
@@ -807,15 +879,58 @@ architect for Gate-P approval.
           </each>
         </ChildComp>\`)
       })`
-      const dom = new JSDOM('<!DOCTYPE html><body></body>')
-      const doc = dom.window.document
+      const doc = new JSDOM('<!DOCTYPE html><body></body>').window.document
       const parseResults = parseNvFile(src, 'test.nv', doc)
       const emitResults = parseNvFileForEmit(src, 'test.nv', doc)
       const parseParent = parseResults.find((r) => r.name === 'Parent')!
       const emitParent = emitResults.find((r) => r.name === 'Parent')!
-      // Route through the Action-2 oracle (D-SS-4): slot content IS compared (doc passed)
       const result = irStructurallyEqual(doc, parseParent.ir, emitParent.ir)
-      expect(result.equal).toBe(true)
+      expect(result.equal, result.reason).toBe(true)
+    })
+  })
+
+  describe('G-SS-bothFE: html-tag and .nv FEs agree on slot-list IR structure (both-FE oracle)', () => {
+    it('G-SS-bothFE: both FEs produce a ListBinding in slot content (structural oracle)', () => {
+      // G0-5: <each> exists in BOTH FEs (html-tag.ts `each()` sentinel + .nv `<each>` element).
+      // After fixing html-tag.ts buildSlotContentIR to consume `lists`, both FEs produce
+      // a ListBinding in slot content. The oracle (irStructurallyEqual) verifies structural
+      // equivalence: same binding kinds, paths, item IR structure.
+      // doc=undefined: skip shape.html + styleArtifact comparison (they differ by design —
+      // .nv has styleArtifact, html-tag does not; shape.html anchor comments differ by FE).
+      const doc = new JSDOM('<!DOCTYPE html><body></body>').window.document
+      const html = createHtmlTag(doc)
+      const items = signal<string[]>([])
+
+      // html-tag FE: ${each(...)} in slot content of a component
+      const htmlParentIR = html`<ChildComp>${each(
+        () => items() as readonly unknown[],
+        (item: unknown) => String(item),
+        ({ item }: { item: () => unknown }) =>
+          html`<div>${() => item()}</div>`,
+      )}</ChildComp>`
+      const htmlComp = htmlParentIR.bindings.find((b) => b.kind === 'component') as ComponentBinding
+      expect(htmlComp).toBeDefined()
+      const htmlSlotIR = htmlComp.slots[0]!.content({})
+      expect(htmlSlotIR.bindings.find((b) => b.kind === 'list')).toBeDefined()
+
+      // .nv FE: <each> in slot content
+      const nvSrc = `const P = $component((_props) => {
+        $render(() => html\`<ChildComp>
+          <each .of=\${items} key="\${(item) => item}" let={item}>
+            <div>\${item}</div>
+          </each>
+        </ChildComp>\`)
+      })`
+      const nvResults = parseNvFile(nvSrc, 'test.nv', doc)
+      const nvComp = nvResults[0]!.ir.bindings.find((b) => b.kind === 'component') as ComponentBinding
+      expect(nvComp).toBeDefined()
+      const nvSlotIR = nvComp.slots[0]!.content({})
+      expect(nvSlotIR.bindings.find((b) => b.kind === 'list')).toBeDefined()
+
+      // Structural oracle: doc=undefined → only binding kinds, counts, paths, item IR structure compared.
+      // Both slot IRs must have: 1 ListBinding, same anchor path structure, same item IR binding kinds.
+      const result = irStructurallyEqual(undefined, nvSlotIR, htmlSlotIR)
+      expect(result.equal, result.reason).toBe(true)
     })
   })
 
@@ -919,56 +1034,136 @@ for these (standing policy; same reasoning as G6 in slot-style-scope).
 
 - [ ] **Step 2: Create `test/browser/slot-ss.spec.ts`**
 
+  Pattern: mirrors `slot-style-scope.spec.ts` exactly — `loadNv(page)` loads the
+  pre-built `dist/nv-bundle.js`, then `page.evaluate()` runs the test using `window.__nv`.
+  The bundle exposes `mount`, `flushSync`, `signal`, `createRoot` (see `nv-entry.ts`).
+  IRs are constructed manually (no `parseNvFile` in-browser).
+
   ```typescript
+  import { dirname, join } from 'node:path'
+  import { fileURLToPath } from 'node:url'
   /**
    * Increment SS — real-browser gate (Playwright ×3: Blink/Gecko/WebKit)
    * G-SS-browser: $style × <each>-in-slot: scoped class applied to each list item in slot.
    */
-  import { expect, test } from '@playwright/test'
+  import { type Page, expect, test } from '@playwright/test'
 
-  test.describe('Increment SS: $style × <each>-in-slot (real browser)', () => {
-    test('each item in slot content carries parent scopeHash class', async ({ page }) => {
-      // Inline HTML: manually constructed IR exercising the full stack.
-      await page.setContent(`
-        <!DOCTYPE html>
-        <html><body>
-        <div id="app"></div>
-        <script type="module">
-          import { signal, createRoot, flushSync } from '/src/core/core.js'
-          import { mount } from '/src/renderer/interpreter.js'
-          // Build a parent IR that has a styled slot with <each>
-          // scopeHash is pre-computed for the known input below.
-          // This test validates the full cascade stack end-to-end.
-          const scopeHash = 'PLACEHOLDER' // will be replaced by the test helper
+  const __dirname = dirname(fileURLToPath(import.meta.url))
+  const BUNDLE = join(__dirname, 'dist', 'nv-bundle.js')
 
-          // TODO: use the actual parseNvFile + mount stack once the dev server
-          // can serve .nv files through the esbuild plugin. For now, build IR
-          // manually with a known scopeHash.
+  async function loadNv(page: Page): Promise<void> {
+    await page.goto('about:blank')
+    await page.addScriptTag({ path: BUNDLE })
+  }
 
-          // Simpler approach: use parseNvFile directly in a module script.
-          // See slot-style-scope.spec.ts §6 for the pattern.
-        </script>
-        </body></html>
-      `)
-      // Placeholder — real implementation follows the slot-style-scope.spec.ts pattern.
-      // The test mounts a parent via parseNvFile + mount, asserts that each projected
-      // list-item element has the scoped class (card_<hash>), and that the injected
-      // stylesheet applies the correct color.
-      // If parseNvFile cannot run in the browser context, use a pre-built bundle.
-      // See slot-style-scope.spec.ts for the working implementation pattern.
-      expect(true).toBe(true) // replace with real assertions
+  test.describe('G-SS-browser: $style × <each>-in-slot (real browser)', () => {
+    test('each list item in slot content carries parent scopeHash class and CSS color', async ({
+      page,
+    }) => {
+      await loadNv(page)
+
+      const result = await page.evaluate(() => {
+        const { mount, flushSync } = window.__nv
+
+        const parentHash = 'parentss1'
+        const rewClass = `card_${parentHash}`
+        const parentCss = `.${rewClass} { color: rgb(255, 0, 0) }`
+
+        // Item IR: a <div> with a classlist toggle binding for the rewritten token.
+        // This is what the .nv parser produces for class="${{card: true}}" after
+        // patchClasslistTokens rewrites 'card' → 'card_<hash>'.
+        const makeItemIR = () => ({
+          id: 'item:ss-browser',
+          shape: { html: '<div data-ss-item></div>', bindingPaths: [[0]] as [number[]] },
+          bindings: [
+            {
+              kind: 'classlist' as const,
+              pathIndex: 0,
+              entries: [{ kind: 'toggle' as const, key: rewClass, expr: () => true }],
+            },
+          ],
+        })
+
+        // Slot content IR: a single list anchor (the <each> element becomes a comment).
+        const slotContentIR = {
+          id: 'slot:ss-browser',
+          shape: { html: '<!--nv-0-->', bindingPaths: [[0]] as [number[]] },
+          bindings: [
+            {
+              kind: 'list' as const,
+              pathIndex: 0,
+              items: () => ['a', 'b'] as readonly unknown[],
+              key: (item: unknown) => String(item),
+              itemTemplate: (_vs: unknown, _is: unknown) => makeItemIR(),
+            },
+          ],
+        }
+
+        // Child IR: renders a slot-outlet for the projected content.
+        const childIR = {
+          id: 'child:ss-browser',
+          shape: {
+            html: '<div class="child-host"><!--nv-0--></div>',
+            bindingPaths: [[0, 0]] as [number[]],
+          },
+          bindings: [{ kind: 'slot-outlet' as const, pathIndex: 0, name: 'default' }],
+        }
+
+        // Parent IR: mounts ChildComp with the <each>-in-slot content; injects scoped CSS.
+        const parentIR = {
+          id: 'parent:ss-browser',
+          shape: {
+            html: '<div data-ss-parent><!--nv-comp-0--></div>',
+            bindingPaths: [[0, 0]] as [number[]],
+          },
+          bindings: [
+            {
+              kind: 'component' as const,
+              pathIndex: 0,
+              component: () => childIR,
+              props: [],
+              propNames: [],
+              slots: [{ name: 'default', content: () => slotContentIR }],
+            },
+          ],
+          styleArtifact: { staticCss: parentCss, scopeHash: parentHash },
+        }
+
+        const container = document.createElement('div')
+        document.body.appendChild(container)
+        mount(parentIR, container, document)
+        flushSync()
+
+        const items = Array.from(container.querySelectorAll('[data-ss-item]')) as HTMLElement[]
+        const findings: string[] = []
+
+        if (items.length !== 2) {
+          findings.push(`expected 2 items, got ${items.length}`)
+        }
+        for (const el of items) {
+          if (!el.classList.contains(rewClass)) {
+            findings.push(`item missing class ${rewClass}: classList=${el.className}`)
+          }
+          const color = getComputedStyle(el).color
+          if (color !== 'rgb(255, 0, 0)') {
+            findings.push(`expected color rgb(255,0,0), got ${color}`)
+          }
+        }
+
+        container.remove()
+        return { ok: findings.length === 0, findings }
+      })
+
+      expect(result.ok, result.findings.join('\n')).toBe(true)
     })
   })
   ```
 
-  **Implementation note:** The exact structure of `slot-style-scope.spec.ts` should be
-  replicated. If that file uses a pre-built IR approach rather than running `parseNvFile`
-  in-browser, follow the same convention. The gate requires:
-  - Each `<each>` list item in slot content has `class="card_<hash>"` applied by
-    `classList.add` (from the `{kind:'static'}` entry OR from the `{kind:'toggle'}` reactive
-    entry — depends on whether the item binding is a static entry (D-SS-1) or toggle).
-  - The injected CSS sheet has a rule `.card_<hash> { color: rgb(255, 0, 0) }`.
-  - The rendered computed style of each item is `color: rgb(255, 0, 0)`.
+  **Gate requirements verified by this test:**
+  - 2 items rendered from the `<each>` binding in slot content
+  - Each carries `class="card_parentss1"` (the scoped token applied by `classList.add`)
+  - Each has `color: rgb(255, 0, 0)` from the injected stylesheet (real cascade in browser)
+  - Passes on Chromium, Firefox, and WebKit (Playwright ×3)
 
 - [ ] **Step 3: Run the browser tests (Playwright ×3)**
 
@@ -1058,13 +1253,13 @@ for these (standing policy; same reasoning as G6 in slot-style-scope).
 
 | Gate | Evidence command | Failure condition |
 |---|---|---|
-| G-SS-struct | `grep -n "pushListBinding" src/renderer/nv-parser.ts` | helper not extracted or one call site doesn't use it |
+| G-SS-struct | `grep -n "pushListBinding" src/renderer/nv-parser.ts && grep -n "lists.*wl\|wl.*lists\|for.*lists" src/renderer/html-tag.ts` | helper not module-level, or html-tag.ts fix missing |
 | G-SS-regex-gone | `grep -n "shape\.html\.replace\|shape\.html.*replace" src/renderer/nv-parser.ts` | any output from the slot path |
 | G-SS-G5 | `grep -n "describe.skip\|it.skip" test/renderer/nv-parser.test.ts test/renderer/slot-style-scope.test.ts` | G5 still appears as skip |
 | G-SS-emit | `npx vitest run test/renderer/slot-ss.test.ts -t "emit-exec"` | test fails or uses parse-path stubs |
 | G-SS-static | `npx vitest run test/renderer/slot-ss.test.ts -t "static"` | classList differs from baseline or `class=` still in shape.html |
-| G-SS-oracle | `grep -n "irStructurallyEqual" test/renderer/slot-ss.test.ts` | oracle not used in FE-equivalence test |
-| G-SS-bothFE | `npx vitest run test/renderer/slot-ss.test.ts -t "FE-equivalence"` | FE divergence via oracle |
+| G-SS-oracle | `grep -n "irStructurallyEqual" test/renderer/slot-ss.test.ts` | oracle not used in differential or both-FE test |
+| G-SS-bothFE | `npx vitest run test/renderer/slot-ss.test.ts -t "G-SS-bothFE"` | html-tag FE slot content has no ListBinding OR oracle diverges |
 | G-SS-depth2 | `npx vitest run test/renderer/slot-ss.test.ts -t "depth-2"` | token not scoped at depth-2 |
 | G-SS-browser | `npx playwright test test/browser/slot-ss.spec.ts --project=chromium --project=firefox --project=webkit` | any browser fails |
 | G0-1 | `git diff HEAD src/core/` | any core file changed |
@@ -1079,18 +1274,20 @@ for these (standing policy; same reasoning as G6 in slot-style-scope).
 
 **Spec coverage:**
 - ✅ D-SS-1 (static-class structural collapse + regex removal): Tasks 2–3
-- ✅ D-SS-2 (shared list-push helper): Task 2
+- ✅ D-SS-2 (shared list-push helper): Task 2 (`pushListBinding` module-level in nv-parser.ts)
 - ✅ D-SS-3 (G5 re-enable + emit-exec differential): Task 4
-- ✅ D-SS-4 (Action-2 oracle as structural gate): Task 4 FE-equivalence test
+- ✅ D-SS-4 (Action-2 oracle as structural gate): Task 4 G-SS-differential + G-SS-bothFE tests
 - ✅ OP-1 (all-static limitation): Task 3 + OP-1 proposal
 - ✅ OP-2 (lift location): Task 3 Step 3 (Option A)
 - ✅ OP-3 (diagnostics threading): Task 2 Step 5 (local sink)
 - ✅ OP-4 (depth-2): Task 4 G-SS-depth2 test
 - ✅ OP-5 (stacked G2): Task 4 by-ref invariant test + comment in Task 3 Step 4
 - ✅ G0 disqualifiers: gate table
-- ✅ Playwright ×3: Task 5
+- ✅ G0-5 / both-FE: Task 2 Step 6 (html-tag.ts fix) + Task 4 G-SS-bothFE test
+- ✅ Playwright ×3: Task 5 (real assertions, no placeholder)
 - ✅ Landing docs: Task 6
+- ⬜ D-cl-2 real-path-G5 bonus (optional, not a blocker per handoff) — not covered. If cheap during Task 4, add as an optional step targeting the real-path G5 skipped test for the classlist emit differential.
 
-**Placeholder scan:** Task 5 `slot-ss.spec.ts` Step 2 has a deliberate `expect(true).toBe(true)` placeholder. The implementer MUST replace this with real assertions following the `slot-style-scope.spec.ts` pattern. This is the only placeholder — it's flagged explicitly and the replacement path is described.
+**Placeholder scan:** No placeholders. Task 5 was re-written with a concrete `page.evaluate()` body matching the `slot-style-scope.spec.ts` pattern (manual IR, `window.__nv.mount`, `flushSync`, `getComputedStyle` color assertion).
 
-**Type consistency:** `pushListBinding` signature uses `NvWalkedEach`, `NodePath`, `Binding`, `NvDiagnostic` — all already present in the module. `ClassListEntry` used in Task 3 Step 3 — already imported. `computePath` used — already internal at L232.
+**Type consistency:** `pushListBinding` signature uses `NvWalkedEach`, `NodePath`, `Binding`, `NvDiagnostic` — all present in nv-parser.ts module scope. `ClassListEntry` used in Task 3 Step 3 — already imported. `computePath` — internal at L232. html-tag.ts fix uses `WalkedList`, `EachSentinel`, `ListBinding`, `SlotContentFactory` — all already imported in html-tag.ts. `createHtmlTag` and `each` used in G-SS-bothFE test — exported from html-tag.ts barrel.
