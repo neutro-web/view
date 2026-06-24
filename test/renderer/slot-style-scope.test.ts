@@ -323,11 +323,5 @@ describe('Static-class-in-slot: literal class attr lifted to ClassListBinding (D
   })
 })
 
-// ── G5 — <each>-in-slot class token (deferred) ───────────────────────────────
-
-describe('G5: <each>-in-slot class token (deferred)', () => {
-  // DEFERRED: <each> in slot content is not wired. buildNvSlotContentIR discards the
-  // `lists` return from walkNvNodeList (L773). patchClasslistTokens list-case handles
-  // this automatically once <each>-in-slot is wired in the dedicated increment.
-  it.skip('class-form token in <each>-inside-slot-content is rewritten with parent scopeHash', () => {})
-})
+// G5 — <each>-in-slot class token: covered by nv-parser.test.ts G5 and slot-ss.test.ts
+// G-SS-depth2 / G-SS-emit. Placeholder removed once Increment SS landed (2026-06-23).
