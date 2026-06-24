@@ -1692,3 +1692,29 @@ const C = $component(() => {
     dispose()
   })
 })
+
+describe('EX-SB: SyncBinding exec', () => {
+  test('EX-SB-01  :value binding round-trip via emitted module', async () => {
+    const src = `
+const SyncInput = $component(() => {
+  $script(() => {
+    const val = signal('initial')
+  })
+  $render(() => html\`<input :value="\${val}" />\`)
+})
+`
+    const results = parseNvFileForEmit(src, 'SyncInput.nv', sharedDoc)
+    const js = emitModule(results)
+    const bundlePath = await bundleEmittedJs(js)
+    const mod = (await import(bundlePath)) as BundleModule & { SyncInput: ComponentFactory }
+    const doc = makeDoc()
+    const parent = makeParent(doc)
+    mod.SyncInput.mount(parent, doc)
+    mod.flushSync()
+
+    const input = parent.querySelector('input') as HTMLInputElement
+    expect(input).toBeTruthy()
+    // signal→DOM: initial value written to DOM prop
+    expect(input.value).toBe('initial')
+  })
+})

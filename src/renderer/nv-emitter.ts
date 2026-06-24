@@ -29,6 +29,7 @@ import type {
   PropBinding,
   SlotOutletBinding,
   StyleVarBinding,
+  SyncBinding,
   TemplateIR,
 } from './ir.js'
 import type { NvComponentResult, ThunkSource } from './nv-parser.js'
@@ -206,6 +207,26 @@ function emitBindingLiteral(
         throw new Error('[nv/emitter] StyleVarBinding thunk kind mismatch')
       const svb = binding as StyleVarBinding
       return `{ kind: 'style-var', ${pathEntry}, varName: ${JSON.stringify(svb.varName)}, expr: () => (${thunk.exprSrc}) }`
+    }
+    case 'sync': {
+      if (thunk.kind !== 'sync') throw new Error('[nv/emitter] SyncBinding thunk kind mismatch')
+      const sb = binding as SyncBinding
+      const parts: string[] = [
+        `kind: 'sync'`,
+        pathEntry,
+        `propName: ${JSON.stringify(sb.propName)}`,
+        `readExpr: () => (${thunk.readExprSrc})`,
+        `eventName: ${JSON.stringify(thunk.eventName)}`,
+        // writeTarget: emit the BARE signal identifier (live accessor in scriptBody scope).
+        // NOT a thunk-over-value — sync() needs the accessor object for nodeForFn lookup.
+        `writeTarget: ${thunk.writeTargetSrc}`,
+        // writeTargetId intentionally NOT emitted — cross-boundary symbol space problem;
+        // see decision-log 2026-06-24 retraction entry. Field stays in ir.ts as placeholder.
+      ]
+      if (thunk.transformSrc !== undefined) {
+        parts.push(`transform: ${thunk.transformSrc}`)
+      }
+      return `{ ${parts.join(', ')} }`
     }
     default:
       throw new Error(

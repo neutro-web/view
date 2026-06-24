@@ -950,3 +950,32 @@ describe('§inc1.5 — component-in-conditional-branch', () => {
 })
 
 // TC-C16 moved to nv-emitter-exec.test.ts (uses esbuild bundling; new Function cannot eval ESM imports)
+
+describe('emitBindingLiteral sync', () => {
+  test('emits SyncBinding literal with readExpr/writeTarget asymmetry (G-SB-5)', () => {
+    const src = `
+const Foo = $component(() => {
+  $script(() => {
+    const formField = signal('')
+  })
+  $render(() => html\`<input :value="\${formField}" />\`)
+})
+`
+    const dom = new JSDOM('<!DOCTYPE html>')
+    const doc = dom.window.document as unknown as Document
+    const results = parseNvFileForEmit(src, 'Foo.nv', doc)
+    const emitted = emitModule(results)
+    // readExpr must be erased: formField()
+    expect(emitted).toContain('readExpr: () => (formField())')
+    // writeTarget must be bare: formField (NOT formField())
+    expect(emitted).toContain('writeTarget: formField')
+    // kind must be 'sync'
+    expect(emitted).toContain("kind: 'sync'")
+    // eventName
+    expect(emitted).toMatch(/eventName: ['"]input['"]/) // accepts single or double quotes
+    // writeTarget must NOT appear as writeTarget: formField() (erased)
+    expect(emitted).not.toMatch(/writeTarget:\s*formField\(\)/)
+    // writeTargetId must NOT be emitted (cross-boundary symbol space problem)
+    expect(emitted).not.toContain('writeTargetId')
+  })
+})
