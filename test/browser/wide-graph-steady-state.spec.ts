@@ -246,19 +246,24 @@ test.describe('Wide-Graph Steady-State Harness — kind-split tripwire evidence'
     const condition_b = propagation_share > 0.3
 
     // ── Verdict ───────────────────────────────────────────────────────────────
-    // Noise bands: if a condition straddles, classify AMBIGUOUS.
+    // Noise bands: a straddle escalates to AMBIGUOUS only when decision-relevant.
+    // Under the AND gate (FIRE ⟺ A ∧ B), a straddling condition can change the
+    // outcome only if the OTHER condition clearly holds — otherwise CLEAR regardless.
+    // B-straddle is relevant iff A clearly holds; A-straddle is relevant iff B clearly holds.
     const noise_ms = 0.5 // ±0.5ms absolute noise band
     const noise_share = 0.04 // ±4pp relative noise band
 
     const a_straddles = Math.abs(t_propagate - reactive_budget_ms) < noise_ms
     const b_straddles = Math.abs(propagation_share - 0.3) < noise_share
 
+    const a_clear_hold = condition_a && !a_straddles
+    const b_clear_hold = condition_b && !b_straddles
+    const decisive_straddle = (b_straddles && a_clear_hold) || (a_straddles && b_clear_hold)
+
     let verdict: 'FIRE' | 'CLEAR' | 'AMBIGUOUS'
     if (condition_a && condition_b) {
       verdict = 'FIRE'
-    } else if (!condition_a && !condition_b) {
-      verdict = 'CLEAR'
-    } else if (a_straddles || b_straddles) {
+    } else if (decisive_straddle) {
       verdict = 'AMBIGUOUS'
     } else {
       // One clearly holds, one clearly fails → CLEAR (conservative gate: need BOTH)
