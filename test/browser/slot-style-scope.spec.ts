@@ -283,8 +283,8 @@ test.describe('G5-E: $style × <each>-in-slot applied style cross-engine', () =>
             kind: 'list' as const,
             pathIndex: 0,
             items: () => ['a', 'b', 'c'],
-            key: (item) => item,
-            itemTemplate: (_valueSig, _indexSig) => ({
+            key: (item: unknown) => String(item),
+            itemTemplate: (_valueSig: unknown, _indexSig: unknown) => ({
               id: 'row:g5e',
               shape: { html: '<div data-test-row></div>', bindingPaths: [[0]] },
               bindings: [
