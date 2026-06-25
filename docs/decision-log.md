@@ -43,9 +43,11 @@ _Last updated: 2026-06-24. Contract **v0.4.2** · Template-IR **v0.4.2**._
   (no benefit path). Steps 1–2 (sync classify + cycle check) are the correctness layer.
   - **§8.5.2 has a production entry point** `checkProgram(program, config)` (Unit 1,
     `482425f→0b62d77`): runs classifier→checker→diagnostics over a caller-supplied
-    `ts.Program`. Covers hand-written `sync()` (reactive-source syncs). NOT auto-wired into
-    any build yet. SyncBindings are external-source syncs and correctly contribute no edge
-    (Part 3 CLOSED [2026-06-24]).
+    `ts.Program`. Covers hand-written `sync()` (reactive-source syncs). `checkProgram` is a
+    callable entry, not auto-wired into any build. Wiring DEFERRED with a falsifiable trigger
+    [2026-06-24]: wire when a production flow constructs a `ts.Program` over user source
+    (gated on the Mode-A consumer pipeline). Not a debt. SyncBindings are external-source
+    syncs and correctly contribute no edge (Part 3 CLOSED [2026-06-24]).
 - **Renderer:** interpreter + compiler back-ends at parity for all binding kinds.
   Both front-ends (tagged-template + `.nv`) produce one IR, FE-equivalence-gated.
   Template-IR doc reconciled to v0.4.2 (2026-06-23) — now matches `ir.ts`
@@ -2541,69 +2543,11 @@ cycle now.
 
 ---
 
-### SyncBinding Part 3 RESOLVED — A2 accepted; §8.5.2 contract bump v0.4.2 → v0.4.3 [2026-06-24]
-
-**Workstream:** WS4 (architect ruling) → WS2 (commission). **Type:** design ruling +
-contract bump + implementation commission. **Probe verified at `9172e5a`**;
-architect re-verified the load-bearing seams at the same SHA (did not rely on probe
-summary alone).
-
-**Resolves** the deferral in *SyncBinding Part 3* [2026-06-24]. That entry deferred the
-write-back edge mechanism with a lean toward Approach A and named the §8.5.2
-build-integration driver as prerequisite. The driver landed (*Unit 1* [2026-06-24]); the
-Unit 2 probe then tested A's viability empirically.
-
-**Decision: Approach A2 accepted** — the classifier learns to recognize the emitted
-SyncBinding IR-literal shape (`{ kind: 'sync', writeTarget, readExpr }`) and contributes
-its write-graph edge through the **existing** `signalSymbolId` derivation. One symbol
-space, one ID scheme, no second representation.
-
-**Empirical basis (probe + architect re-verification at `9172e5a`).**
-- **Resolution axis CONFIRMED:** emitted `writeTarget: val` and hand-written
-  `sync(..., val)` both resolve via `signalSymbolId` to `signals.ts#val@46`. Alias
-  resolution is context-independent (property value vs. call argument is irrelevant).
-- **Premise CONFIRMED:** `checkProgram` over an emitted module yields zero verdicts today
-  — the IR literal is invisible to the classifier. A2 closes exactly this.
-- **A1 rejected:** a checker-visible `sync()` anchor is a second representation (structural
-  drift — the degraded-copy pattern Part 3 forbade) AND a live anchor double-executes the
-  binding, corrupting the reactive graph with a spurious second node. (Architect confirmed
-  the double-execution hazard.)
-- **A3 rejected:** no TypeChecker at plugin time (settled in Unit 1), so the plugin cannot
-  compute `signalSymbolId`; any raw-edge channel collapses to A2 with added IO complexity.
-
-**Two corrections to the probe's cost estimate (architect re-verification).**
-1. The shared-type change is **two** types, not one: both `TargetVerdict.callNode` AND
-   `SyncEdge.callNode` are `ts.CallExpression`.
-2. The checker derives an ACCEPT edge's `reads` from `verdict.callNode.arguments[0]`
-   (`write-graph-cycle-checker.ts:68`). A SyncBinding verdict has no `.arguments`. So A2 is
-   **not** a blanket widen of `callNode` to `ts.Node` (that would compile but break the
-   `.arguments[0]` access at runtime). **Ruling: model the verdict/edge as a discriminated
-   convergence** — `sync-call` source carries the CallExpression and extracts reads from
-   `arguments[0]`; `sync-binding` source carries `reads: ∅, writes: {target}` directly and
-   never reaches `.arguments`. The type system must make `.arguments`-on-SyncBinding
-   unreachable, not merely untested.
-
-**SyncBinding edge shape (realizes Part 3 §6 static-target ruling):** `reads: ∅, writes:
-{target}`. The write-back is DOM-event-triggered (no reactive read). The `readExpr` is the
-signal→DOM render direction and contributes NO write-graph edge — it must not be routed
-through `analyzeSourceReads`.
-
-**Contract bump v0.4.2 → v0.4.3.** §8.5.2's edge definition widens: renderer-synthesized
-SyncBindings now contribute edges on the same footing as source `sync(...)` calls, and the
-global check explicitly spans the `.nv`/`.ts` front-end boundary. Edits in
-`contract-bump-v0.4.3.md` (title version; §8.5.2 opening paragraph; cross-boundary bullet;
-dynamic-target exclusion note). The Part 3 entry anticipated this bump "at the
-driver-implementation session, against real integration code" — this is that bump, now
-against verified seams. Dynamic-target exclusion (D-sync-cond-1) carried into the contract
-as an explicit scope note, preserving never-false-positive.
-
-**Commissioned:** Unit 2 implementation to WS2/CC (`handoff-unit2-impl-CC.md`), plan-first,
-gates G0–G6. The §2.3 type-convergence shape is pre-decided (this ruling); a blanket-widen
-plan is a G0 re-surface. **Commission authorized to proceed now** — A2-confirmed-on-both-
-axes is a verified fact, not an open gate (architect + Kofi, this session).
-
-**Supersedes:** the deferral in *Part 3* [2026-06-24] (cites it). **Cites:** *Unit 1
-LANDED* [2026-06-24], *D-sync-cond-1* [2026-06-24], probe `unit2-probe-results.md`.
+### SyncBinding Part 3 RESOLVED — A2 accepted [2026-06-24] → ARCHIVED
+**Relocated to `decision-log-archive.md`.** This ruling was REVERSED the same day (see *A2
+ruling REVERSED* [2026-06-24], directly below) — A2 was built on a false premise (the
+`reads: ∅` edge is a no-op in `buildGraph`). Full superseded entry preserved in the archive
+for the record. The reversal is the standing conclusion.
 
 ---
 
@@ -2674,3 +2618,40 @@ LANDED* [2026-06-24], contract §8.5 / §8.5.4, CC plan self-review C1/C2.
 this reversal; the reversal commit (`50bf521`) updated only the decision log. The contract
 file was reverted to v0.4.2 in a follow-up commit. End state matches this entry's ruling:
 contract v0.4.2, §8.5.2 admits no SyncBinding edges.
+
+---
+
+### §8.5.2 `checkProgram` build-wiring DEFERRED — trigger defined (not indefinite) [2026-06-24]
+
+**Workstream:** WS4 (architect) / WS2. **Type:** scoping decision (close-out). Verified at
+`d02b3a3`.
+
+`checkProgram` (Unit 1, `0b62d77`) is exported and tested but called by nothing outside its
+own tests; the esbuild plugin invokes no analysis. So §8.5.2 runs in no build today. The
+follow-up "wire it into a build" was assessed and **deferred** — not from avoidance, but
+because there is no build to wire into and no integration contract to bind to:
+- The repo has no application build (`build` = `tsc` over the library), no `bin`, and ships
+  no `.nv` app to check. The plugin is a per-file `onLoad` with no project-level pass.
+- `checkProgram` needs a caller-constructed `ts.Program` over user source; today only
+  `makeTestProgram` builds one. No production flow constructs a Program.
+- The diagnostic-surfacing contract (build-fail vs. CLI exit vs. editor LSP vs. esbuild
+  `onLoad` error) is undecided because the surfaces it would report to don't exist.
+
+Building the caller now (a CLI, or a self-check CI gate) means inventing all three contracts
+and risking rework when the real Mode-A consumer pipeline contradicts the guesses.
+
+**Falsifiable trigger (the maturity measure).** Wire `checkProgram` when **a production
+(non-test) flow constructs a `ts.Program` over user source for any reason.** At that moment
+the Program exists, an invocation point exists, and wiring is additive rather than
+speculative. The test is mechanical: a future session greps for a non-test
+`createProgram`/`getTypeChecker`; found → trigger met, wire it; not found → still deferred.
+No "feels mature" judgment.
+
+**Current protection unchanged:** reactive `sync()` cycle hazards are caught when the check is
+*run* (the analysis is correct and complete for hand-written `sync()`); until wired, running it
+is a manual/consumer action. SyncBindings are external-source syncs needing no §8.5.2 edge
+(*A2 REVERSED* [2026-06-24]), bounded by the §8.5.4 external-event budget — so nothing about
+SyncBinding is gated on this wiring.
+
+**Status:** DEFERRED with trigger. Not a debt (nothing is broken or unsound); a sequenced
+future unit gated on the Mode-A pipeline producing a user-source Program.
