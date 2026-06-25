@@ -465,12 +465,13 @@ function emitSetup(
                       const itemIR = makeItemTemplate(valueSig, indexSig)
                       const { setup } = emitSetup(itemIR, listEmptyVerdicts)
                       const { roots } = setup(parent, doc, anchorNode)
-                      if (roots.length !== 1) {
+                      const [root] = roots
+                      if (root === undefined || roots.length !== 1) {
                         throw new Error(
                           '[nv] Multi-root list items are not supported in v1. Wrap the item template in a single root element.',
                         )
                       }
-                      mountedRoot = roots[0] as Node
+                      mountedRoot = root
                       onCleanup(() => {
                         if (mountedRoot.parentNode !== null)
                           mountedRoot.parentNode.removeChild(mountedRoot)
