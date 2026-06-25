@@ -2544,7 +2544,7 @@ cycle now.
 ---
 
 ### SyncBinding Part 3 RESOLVED — A2 accepted [2026-06-24] → ARCHIVED
-**Relocated to `decision-log-archive.md`.** This ruling was REVERSED the same day (see *A2
+**Relocated to `nv-decision-log-archive.md`.** This ruling was REVERSED the same day (see *A2
 ruling REVERSED* [2026-06-24], directly below) — A2 was built on a false premise (the
 `reads: ∅` edge is a no-op in `buildGraph`). Full superseded entry preserved in the archive
 for the record. The reversal is the standing conclusion.
