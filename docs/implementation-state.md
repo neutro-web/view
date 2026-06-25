@@ -96,7 +96,8 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
   feat/class-emit-exec).** `ClassListBinding` in IR (v0.4.1); `cx`, `classes()`,
   `ClassesSentinel` in `html-tag.ts`; `wireClassList` in both back-ends; G1 per-key isolation
   proven (TC-CL-04 call-count, both back-ends); D-cl-1 CLOSED (EX-CL-01..04, emitted JS
-  shows real `boolSrc`). **D-cl-3 open:** hyphenated keys silently broken — deferred to S0.
+  shows real `boolSrc`). **D-cl-3 CLOSED (2026-06-22, `6baa64e`):** hyphenated/quoted/numeric
+  classlist keys fixed via `propertyKeyText` helper (live at all call sites in `nv-parser.ts`).
 - **Handler destructuring-write — DIAGNOSED (2026-06-21).** `eraseHandlerExpr` emits
   diagnostic; reads of props-destructured locals erased via `buildPropsAccessorMap`.
 - **`parseNvFile` thunks are stubs** — structural form is real; thunks are `(() => undefined)`.
@@ -108,7 +109,10 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
   Slot consumption increments 1 + 1.5 + 2 LANDED (2026-06-22). D-slot-1 RETAINED;
   **D-slot-2 CLOSED 2026-06-24 (premise dissolved — no implementation).**
 - **Equality hook inert; step 4 shelved** — neither specialization saves work.
-- **SyncBinding** throws at both back-ends.
+- **SyncBinding — LANDED (Parts 1+2 + emitMount parity).** Wired both back-ends:
+  `wireSync` (interpreter L313, dispatched L168) and emitted-mount `case 'sync'` (L661).
+  External-source sync (`reads: ∅`, no §8.5.2 write-graph edge); bounded by §8.5.4
+  external-event budget. Part 3 CLOSED 2026-06-24.
 - **Multi-root list items not supported** — single-root guard; wrap in a container element.
 - **`$style` × slots** — LANDED 2026-06-23 (Increment SS). `patchClasslistTokens` component
   case recurses into slot IR classlist entries. **D-slot-style-1 CLOSED (Increment SS):**
@@ -116,14 +120,28 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
   ClassListBinding entries at IR build time (both main and slot paths). Main-path static-class
   live bug CLOSED (was: shape.html kept bare class=, CSS scoped but element unscoped). **G5
   CLOSED:** `<each>`-in-slot wired in both FEs; `pushListBinding` shared helper (D-SS-2).
-  G1–G5, G3', G6, G7 green. 659 pass / 0 skip.
-  Playwright gate (G-SS-browser ×3) deferred to follow-up increment.
+  G1–G5, G3', G6, G7 green. 694 pass / 0 skip (HEAD `e40fec6`).
+  **Real-browser gate LANDED 2026-06-25:** G5-E (`$style × <each>`-in-slot applied style) +
+  G7 (child `$style` via `wireComponent`) green 9/9 across Blink/Gecko/WebKit. A production
+  fix landed with it — `wireComponent` was dropping child `styleArtifact` injection
+  (interpreter L691, fix `a6cafbd`); now mirrors `mount()`, transitive through
+  conditional/list. `<each>`-in-slot styling CONFIRMED & CLOSED.
+- **Injected-style teardown — NONE (deliberate, OPEN-6 trigger-gated).** `style-inject.ts`
+  is inject-once: `adoptedStyleSheets`-first with `<style>` fallback, dedup'd per
+  `(doc, identityHash)` in a `WeakMap`. No `removeComponentStyle`/refcount/eviction —
+  injected style persists for the document's lifetime; the `WeakMap` reclaims only on
+  whole-document GC, not component unmount. Not a leak in the common case (dedup by identity;
+  re-mount reuses). Eviction policy deferred until a workload measures distinct-identity
+  accretion as a real cost (decision log 2026-06-25). `$style` OPEN-1/2/3/4/5/7 CLOSED.
 - **`extractModuleScope` edge:** non-`$component` top-level statements pass through verbatim.
 
 ---
 
 ## Not built at all (forward queue)
-`$style` scoping (S0 handoff written; D-cl-3 fix folded in), SyncBinding, LIS list
-move-minimization (parked), kind-split (parked behind real-app evidence), `roots[0] as Node`
-biome-laundering cleanup. **D-cl-3 fix** (`propertyKeyText` helper,
-four sites) queued as part of S0 (`feat/style-s0-parser-seam`).
+LIS list move-minimization (parked, gated on row-churn reorder-cost measurement), kind-split
+(`ReactiveNode` struct split — parked behind real-app evidence), `roots[0] as Node`
+biome-laundering cleanup, **emitter factory-shape convergence** (emitted component factories
+return `{ mount }`, not `ComponentRef`-compatible `TemplateIR`; blocks cross-file
+emitted-component composition), `checkProgram` build-wiring (trigger-gated: a production flow
+constructing a `ts.Program` over user source). **Landed since this list last edited:**
+`$style` scoping (S0→S1+S2→SS), SyncBinding, D-cl-3 — all removed from queue.
