@@ -108,6 +108,12 @@ _Last updated: 2026-06-24. Contract **v0.4.2** · Template-IR **v0.4.2**._
   name (OPEN-2); classlist recursion total over conditional/list (OPEN-7). nv-does-not-
   invent-CSS. Renderer-layer; not a contract concern. Confirm residual OPEN-1/3/4/5/6
   chosen-at-build vs. open against spec §7.
+  `<each>`-in-slot styling CONFIRMED & CLOSED [2026-06-25]: covered for free by the scope-carry
+  mechanism; real-browser gate (G5-E + G7) green 9/9 cross-engine. G5 deferral closed.
+- **Renderer:** **wireComponent now injects child `styleArtifact`** (interpreter L691,
+  fix [2026-06-25] / a6cafbd): nested styled components stamp `data-nv-s-<hash>` + inject
+  CSS on mount through a parent binding; transitive through conditionals/lists. Regression-gated
+  by G7 (browser).
 
 ### Genuine research / deferred-on-evidence
 - Beating the alien-signals-class baseline: nv wins/ties 5 of 7 cases; two wide-graph
@@ -2734,3 +2740,43 @@ about D-slot-1's ownership that the code never satisfied. Reading the chain (wir
 `getOwner()`) before commissioning — and probing the leak empirically rather than scoping the
 fix on the queue's say-so — is what caught it. Pattern: a queue item is a hypothesis until the
 code is read; "named next" ≠ "needed next."
+
+---
+
+## `$style × <each>`-in-slot — CONFIRMED & CLOSED [2026-06-25]
+
+**Workstream:** WS3 (renderer). **Contract:** v0.4.2 unchanged (renderer-layer).
+**SHAs:** commission base `c0d265d` → gate landing `a6cafbd` → G7 test fix `85d8064`.
+
+**Outcome.** The scope-carry mechanism (RULED+LANDED 2026-06-23) styles `<each>`-in-slot
+tokens with no new IR/parse logic: `patchClasslistTokens` component-case recursion descends
+into the slot's `list` binding and rewrites the scoped token through the shared `classlist`
+case — one path, no degraded copy (verified `nv-parser.ts` L2034→L2005→L2013 at `c0d265d`).
+G5 (`nv-parser.test.ts:1353`) is live + green; its stale SKIPPED comment was corrected. This
+closes the G5 deferral named verbatim in the 2026-06-23 scope-carry landing ("Styling handles
+it for free once the capability lands").
+
+**Real-browser gate (the owed piece).** `test/browser/slot-style-scope.spec.ts` gained
+**G5-E** (`<each>` rows in slot content: count===3, per-row `getComputedStyle === rgb(0,128,0)`,
+parent scope class present, child hash absent) and **G7** (child `$style` applies when mounted
+via `wireComponent`). Run on real hardware (Playwright 1.61.0), **9/9 green** across
+Blink/Gecko/WebKit.
+
+**Production bug found and fixed [a6cafbd].** Verifying the gate surfaced a latent runtime
+defect: `wireComponent` (interpreter L691) called `mountFragment` for a child component IR but
+never injected its `styleArtifact` — child-component CSS was silently dropped whenever a styled
+component mounted through a parent binding. Fix mirrors the `mount()` block verbatim
+(`injectComponentStyle` + `data-nv-s-<hash>` stamp on `roots[0]`, single-root guard). Transitive
+via `wireConditional`/`wireList` → `wireComponent`, so styled children in conditionals and lists
+are also covered. Architect-verified: faithful mirror of an existing sanctioned pattern, not a
+second path. The existing G6 suite missed this because it tests *absence* of the child hash on
+projected nodes (a negative assertion that passes whether or not injection runs); G7 is the
+positive regression gate.
+
+**Process note.** The bug was fixed in-run inside a "no-src expected" commission. Acceptable
+here because the fix is a verbatim mirror of `mount()` (no novel logic, no degraded-copy risk);
+standing rule reaffirmed — a found-at-review production fix on a renderer correctness seam still
+warrants surface-before-landing even when obviously right.
+
+**Out of scope, noted:** `wide-graph-steady-state.spec.ts` (G-WG) flaked on chromium/webkit —
+performance-harness timer flakiness, unrelated; WS1, not this unit.
