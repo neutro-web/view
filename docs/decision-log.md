@@ -2655,3 +2655,13 @@ SyncBinding is gated on this wiring.
 
 **Status:** DEFERRED with trigger. Not a debt (nothing is broken or unsound); a sequenced
 future unit gated on the Mode-A pipeline producing a user-source Program.
+
+**Correction note [2026-06-24]:** the sweep scope said "create `decision-log-archive.md`", but
+a pre-existing archive `nv-decision-log-archive.md` (63 entries, from 2026-06-21) already
+existed under a different name — the scope was written against a wrong fact (the architect
+checked for the un-prefixed name and found none). CC caught the redundancy, consolidated the
+A2-accepted entry into the existing archive rather than creating a second one, and renamed it
+to `decision-log-archive.md` to match the live-log pointer (commits `4b1e9d3`, `9f49e44`).
+**Canonical archive is now `decision-log-archive.md`** (formerly `nv-decision-log-archive.md`).
+Future sweeps target that file. End state: one archive, A2-accepted relocated once, live pointer
+correct.
