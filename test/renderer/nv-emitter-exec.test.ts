@@ -484,8 +484,9 @@ const Counter = $component((props) => {
     // app.nv: imports Counter (cross-file bundle proves .nv plugin chains) and renders
     // its own reactive state. Counter is referenced to prevent tree-shaking; it is parsed
     // by nvPlugin when app.nv is bundled, proving the two-file pipeline.
-    // Note: mounting Counter as a child element requires the emitter factory shape to match
-    // ComponentRef — deferred to a later milestone.
+    // Note: mounting Counter as a child element is covered end-to-end by TC-C15/16/17 below
+    // (cross-file child render, reactive prop threading, dispose-no-leak, ComponentRef parity).
+    // TC-C14f intentionally only proves the two-file bundle/plugin chain (void Counter).
     const appSource = `
 import { Counter } from './counter.nv'
 const App = $component(() => {

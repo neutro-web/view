@@ -2856,3 +2856,48 @@ batching) remains separate OPEN research, unaffected.
 
 **Net:** `$style` OPEN set is now OPEN-1/2/3/4/5/7 CLOSED, **OPEN-6 open (trigger-gated)**. No
 code, contract, or IR change. The `$style` axis carries no remaining build-blocking open points.
+
+---
+
+### 2026-06-25 — Emitter factory-shape convergence: CLOSED, premise dissolved (already covered by TC-C15/16/17)
+
+**Workstream:** WS4 (architect) read. **No `src/` change. No commission issued.** Contract
+**v0.4.2** / Template-IR **v0.4.2** unchanged. Verified by reading seams + running tests at HEAD
+`7fece12`.
+
+The forward-queue item "emitter factory-shape convergence — emitted factories return `{ mount }`,
+not `ComponentRef`-compatible `TemplateIR`; blocks cross-file emitted-component composition"
+(carried from session handoffs, added to `implementation-state.md` forward queue 2026-06-25) is
+**false on two counts** and **already closed by existing green coverage**.
+
+**Finding 1 — the factory is already `ComponentRef`-shaped.** `emitComponentFactory`
+(`nv-emitter.ts` L295–302) emits `export function Name(props, slots) { ...; return <IR literal> }`
+— the factory **returns `TemplateIR`**, matching `ComponentRef = (props, slots) => TemplateIR`
+(`ir.ts` L208). `Name.mount` is a **static-method sugar** hung beside the function for top-level
+entry, NOT the factory's return value. There was never a shape to converge.
+
+**Finding 2 — cross-file child composition is already proven end-to-end.** The emit path puts a
+bare reference `component: <tagName>` into the `ComponentBinding` (`nv-parser.ts` L2729,
+`componentSrc: pc.tagName`); cross-file `.nv→.js` import specifier rewrite is handled by
+`rewriteNvSpecifiers` in the esbuild plugin (TC-C14a–e). Existing tests prove the full child
+render across files:
+- **TC-C16** — *titled* "emitted factory returns ComponentRef, not `{ mount }`": TC-C16a asserts
+  `Counter(props, slots)` returns `{ shape, bindings }` with no `.mount` on the return; TC-C16b
+  confirms `.mount` is sugar on the function. (Directly refutes the queue item's wording.)
+- **TC-C15-exec** — `App` imports `Counter` from `./counter.nv`, renders `<Counter .count="${n}"/>`
+  as a child, bundled via `nvPlugin`, mounted, asserts `<span>0`.
+- **TC-C15-exec-reactive** — external signal threaded as a prop across the file boundary →
+  child DOM updates 0→42.
+- **TC-C15-dispose** — dispose parent → child DOM removed, no reactive leak.
+- **TC-C15-parity** — emitted `ComponentRef` produces `structurallyEqual` DOM across two
+  independent interpreter mounts.
+All green at `7fece12` (8/8 in the TC-C14f + TC-C15/16/17 set).
+
+**Why the queue carried it:** a stale deferral note in TC-C14f (`nv-emitter-exec.test.ts`
+L487–488: "mounting Counter as a child element requires the emitter factory shape to match
+ComponentRef — deferred to a later milestone") was written before TC-C15/16/17 landed and never
+updated to point at them. Session handoffs propagated the note's framing as an open item. Third
+"named next ≠ needed next" catch — the queue label was a hypothesis the code falsifies.
+
+**Action:** removed from the forward queue (implementation-state correction). Test-comment
+hygiene fix applied to TC-C14f (points at TC-C15/16/17). No other work.

@@ -108,6 +108,11 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
   Both FEs detect capitalized elements → `ComponentBinding`. Both back-ends consume it.
   Slot consumption increments 1 + 1.5 + 2 LANDED (2026-06-22). D-slot-1 RETAINED;
   **D-slot-2 CLOSED 2026-06-24 (premise dissolved — no implementation).**
+- **Cross-file emitted-component composition — DONE + VERIFIED (TC-C15/16/17, 7fece12).**
+  Emitted factory `Name(props, slots)` returns `TemplateIR` (ComponentRef-shaped); `.mount`
+  is sugar beside it (TC-C16). `App` importing + child-rendering `Counter` across `.nv` files
+  works end-to-end incl. reactive prop threading (0→42) and dispose-no-leak. The "factory-shape
+  convergence" forward item was a stale-handoff artifact, not a real gap — closed 2026-06-25.
 - **Equality hook inert; step 4 shelved** — neither specialization saves work.
 - **SyncBinding — LANDED (Parts 1+2 + emitMount parity).** Wired both back-ends:
   `wireSync` (interpreter L313, dispatched L168) and emitted-mount `case 'sync'` (L661).
@@ -140,8 +145,6 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
 ## Not built at all (forward queue)
 LIS list move-minimization (parked, gated on row-churn reorder-cost measurement), kind-split
 (`ReactiveNode` struct split — parked behind real-app evidence), `roots[0] as Node`
-biome-laundering cleanup, **emitter factory-shape convergence** (emitted component factories
-return `{ mount }`, not `ComponentRef`-compatible `TemplateIR`; blocks cross-file
-emitted-component composition), `checkProgram` build-wiring (trigger-gated: a production flow
+biome-laundering cleanup, `checkProgram` build-wiring (trigger-gated: a production flow
 constructing a `ts.Program` over user source). **Landed since this list last edited:**
 `$style` scoping (S0→S1+S2→SS), SyncBinding, D-cl-3 — all removed from queue.
