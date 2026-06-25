@@ -107,15 +107,18 @@ _Last updated: 2026-06-24. Contract **v0.4.2** · Template-IR **v0.4.2**._
   Two-way class/selector routing; `StyleVarBinding` IR member; declHash folds property
   name (OPEN-2 CLOSED); classlist recursion total over conditional/list (OPEN-7 CLOSED).
   nv-does-not-invent-CSS. Renderer-layer; not a contract concern.
-  **OPEN-1/2/3/4/5/7 CLOSED [2026-06-25]** (chosen-at-build, verified at HEAD `e40fec6`):
-  zero-specificity `:where()` qualification (OPEN-1); stringify-and-write coercion (OPEN-3);
-  per-document WeakMap dedup registry (OPEN-4); adopted-first + `<style>` fallback (OPEN-5).
-  **OPEN-6 open, trigger-gated:** inject-once-never-remove is the accepted shipped behavior;
-  build teardown/eviction only when real workload shows injected-style accretion as a measured
-  cost (distinct styled-component identities per document growing without bound). No
-  build-blocking `$style` open points remain.
-  `<each>`-in-slot styling CONFIRMED & CLOSED [2026-06-25]: covered for free by the scope-carry
-  mechanism; real-browser gate (G5-E + G7) green 9/9 cross-engine. G5 deferral closed.
+  OPEN-1/3/4/5 CLOSED [2026-06-25] (chosen-at-build, verified at e40fec6): OPEN-1
+  zero-specificity `:where([data-nv-s-<hash>])` qualification; OPEN-3 reactive value →
+  `var(--nv-<hash>)`, `setProperty(_, String(v))`, FE-parity (no coercion); OPEN-4
+  per-doc `WeakMap` identity-keyed dedup registry; OPEN-5 adopted-first + `<style>`
+  fallback. OPEN-6 (teardown) RE-SCOPED open + trigger-gated: no teardown shipped
+  (inject-once-never-remove, deliberate); build eviction only when a workload measures
+  distinct-identity style accretion as a real cost. `$style` axis carries no
+  build-blocking opens. `<each>`-in-slot styling CONFIRMED & CLOSED [2026-06-25]
+  (browser gate G5-E/G7 green 9/9).
+- **`$style` opens:** OPEN-1/2/3/4/5/7 CLOSED. OPEN-6 (injected-style teardown) OPEN,
+  trigger-gated — inject-once-never-remove shipped; eviction deferred until measured
+  accretion. Not a debt.
 - **Renderer:** **wireComponent now injects child `styleArtifact`** (interpreter L691,
   fix [2026-06-25] / a6cafbd): nested styled components stamp `data-nv-s-<hash>` + inject
   CSS on mount through a parent binding; transitive through conditionals/lists. Regression-gated
