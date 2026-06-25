@@ -58,10 +58,11 @@ const CHURN_FRACTION = 0.05
 
 const HARNESS_FN = /* js */ `
 (async function runHarness({ nRows, nCols, warmupTicks, measureTicks, batchSize, churnFraction, floorRun }) {
-  const { signal, derived, createRoot, flushSync } = window.__nv
+  const { signal, derived, effect, createRoot, flushSync } = window.__nv
 
   const totalCells = nRows * nCols
   const churnPerTick = Math.round(totalCells * churnFraction)
+  let effectRuns = 0  // G-WG-9: counts effect invocations; must exceed totalCells after churn
 
   // ── Build graph + DOM ──────────────────────────────────────────────────────
   // All allocation before timed region (G-WG-4).
@@ -104,12 +105,12 @@ const HARNESS_FN = /* js */ `
         // Floor run: effect reads finalDerived → writes to pre-allocated sink.
         // Propagation + effect invocation cost is present; DOM mutation is absent.
         const i = idx  // capture for closure
-        createRoot(() => { sink[i] = finalDerived() })
+        effect(() => { effectRuns++; sink[i] = finalDerived() })
       } else {
         // Live run: effect writes to real DOM span.
         const span = document.createElement('span')
         container.appendChild(span)
-        createRoot(() => { span.textContent = String(finalDerived()) })
+        effect(() => { span.textContent = String(finalDerived()) })
       }
     }
     flushSync()
@@ -130,13 +131,13 @@ const HARNESS_FN = /* js */ `
     // Write primary values for first churnPerTick cells.
     for (let i = 0; i < churnPerTick; i++) {
       const idx = (cStart + i) % totalCells
-      primaries[idx](primaries[idx]() + 1)
+      primaries[idx].set(primaries[idx]() + 1)
     }
     // Flip churnFlag for a separate batch (dynamic-edge churn, G-WG-5).
     const cStart2 = (cStart + churnPerTick) % totalCells
     for (let i = 0; i < churnPerTick; i++) {
       const idx = (cStart2 + i) % totalCells
-      churnFlags[idx](!churnFlags[idx]())
+      churnFlags[idx].set(!churnFlags[idx]())
     }
     flushSync()
   }
@@ -172,7 +173,7 @@ const HARNESS_FN = /* js */ `
   const p90 = sorted[Math.floor(n * 0.9)]
   const mean = sorted.reduce((a, b) => a + b, 0) / n
 
-  return { med, p10, p90, mean, n }
+  return { med, p10, p90, mean, n, effectRuns }
 })
 `
 
@@ -196,7 +197,14 @@ test.describe('Wide-Graph Steady-State Harness — kind-split tripwire evidence'
     const live = await page.evaluate(
       new Function('args', `return (${HARNESS_FN})(Object.assign({floorRun: false}, args))`) as (
         args: unknown,
-      ) => Promise<{ med: number; p10: number; p90: number; mean: number; n: number }>,
+      ) => Promise<{
+        med: number
+        p10: number
+        p90: number
+        mean: number
+        n: number
+        effectRuns: number
+      }>,
       args,
     )
 
@@ -204,7 +212,14 @@ test.describe('Wide-Graph Steady-State Harness — kind-split tripwire evidence'
     const floor = await page.evaluate(
       new Function('args', `return (${HARNESS_FN})(Object.assign({floorRun: true}, args))`) as (
         args: unknown,
-      ) => Promise<{ med: number; p10: number; p90: number; mean: number; n: number }>,
+      ) => Promise<{
+        med: number
+        p10: number
+        p90: number
+        mean: number
+        n: number
+        effectRuns: number
+      }>,
       args,
     )
 
@@ -310,6 +325,13 @@ test.describe('Wide-Graph Steady-State Harness — kind-split tripwire evidence'
       floor.med,
       'floor.med > 0 — effects subscribe to deriveds; propagation must occur',
     ).toBeGreaterThan(0)
+    // G-WG-9: effect-run counter confirms subscription is live (effects re-ran after build).
+    // effectRuns > totalCells ⟺ at least one cell's effect ran more than once.
+    // Fails closed: if createRoot is re-introduced the counter stays at totalCells.
+    expect(
+      floor.effectRuns,
+      'G-WG-9: effectRuns > totalCells — floor effects must re-run under churn, not just build once',
+    ).toBeGreaterThan(N_ROWS * N_COLS)
     expect(live.n, 'live sample count').toBe(MEASURE_TICKS)
     expect(floor.n, 'floor sample count').toBe(MEASURE_TICKS)
 
@@ -373,6 +395,13 @@ test.describe('Wide-Graph Steady-State Harness — kind-split tripwire evidence'
 //
 // G-WG-8 src/ untouched:
 //   This file is test/browser/wide-graph-steady-state.spec.ts. No src/ changes.
+//   → PASS.
+//
+// G-WG-9 effect-subscription guard (permanent):
+//   floor.effectRuns > N_ROWS * N_COLS asserted. effectRuns increments inside the floor
+//   binding effect on every invocation. At build time effectRuns = totalCells (each effect
+//   runs once). After warmup + churn, effectRuns >> totalCells. If a future edit replaces
+//   effect with createRoot the counter stays at totalCells and this gate fails closed.
 //   → PASS.
 //
 // G0 hard stop:

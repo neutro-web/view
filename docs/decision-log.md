@@ -128,17 +128,20 @@ _Last updated: 2026-06-24. Contract **v0.4.2** · Template-IR **v0.4.2**._
 - Beating the alien-signals-class baseline: nv wins/ties 5 of 7 cases; two wide-graph
   cases (~1.5x/~1.7x) and createSignals (~5–7x) are proven **structural**, both trace to
   `ReactiveNode` width, both gated behind the **kind-split tripwire** (real-app evidence
-  only — noted, not approved). **[2026-06-24] Tripwire EVIDENCE-TESTED → CLEAR.** The
-  commissioned wide-graph steady-state harness (`1e59fe1`, full-frame, Chromium real-browser,
-  1000×10, 5% churn) showed the realistic update frame at ~0.005ms/tick — budget-irrelevant
-  by ~3,000× against a 60fps frame. Condition A (absolute breach) unflippable at this scale;
-  2-of-2 gate → CLEAR. The synthetic gap is confirmed **launch-irrelevant at realistic
-  scale**, not merely deferred. Tripwire stays set — reopens only on a materially different
-  real-app shape (far larger/deeper graph) in real profiling.
+  only — noted, not approved). **[2026-06-25] Tripwire status: EVIDENCE-PENDING. The
+  2026-06-24 "tested → CLEAR" finding (~0.005ms/tick) is REVERSED** — it was produced by a
+  defective harness instrument whose binding "effects" used `createRoot` (run-once, no
+  subscription) instead of `effect`, so no effect ever re-ran and the number measured
+  `flushSync` over a graph with zero live consumers, not a frame-share. Defect-fix +
+  clean re-run commissioned (`cc-handoff-wide-graph-effect-fix.md`); verdict awaited.
+  Kind-split + LIS stay gated on the *re-run* verdict. No contract change (test-instrument
+  defect; v0.4.2 holds).
 - **FALSE-heavy row-churn** watch-item (reopen on real-app evidence with a
   steady-state-update harness). **[2026-06-24] The commissioned wide-graph steady-state
   harness is that instrument** — it can serve the FALSE-heavy read-tax measurement as a
-  secondary read if FALSE density is varied; not the harness's primary verdict.
+  secondary read if FALSE density is varied; not the harness's primary verdict. *(Note
+  2026-06-25: this instrument carried the effect-subscription defect reversed above; it
+  serves the FALSE-heavy read only after the `createRoot→effect` fix lands.)*
 - **Per-key class-toggle node-width** — object-form `class={{...}}` emits one effect per
   key (fine-grained). For wide objects this trades N graph nodes against 1 looping effect.
   Same `ReactiveNode`-width structural cost as the kind-split tripwire; per-key default
@@ -2901,3 +2904,50 @@ updated to point at them. Session handoffs propagated the note's framing as an o
 
 **Action:** removed from the forward queue (implementation-state correction). Test-comment
 hygiene fix applied to TC-C14f (points at TC-C15/16/17). No other work.
+
+### 2026-06-25 — Kind-split tripwire: 2026-06-24 CLEAR verdict REVERSED — produced by a defective instrument (effects never subscribed)
+
+**Reverses** the finding in `2026-06-24 — Kind-split tripwire: real-app evidence harness
+COMMISSIONED ...` Current-State CLEAR ("~0.005ms/tick, budget-irrelevant by ~3,000×"). That number
+does not support a CLEAR and the tripwire returns to **EVIDENCE-PENDING**.
+
+**Finding (verified at HEAD `3315a28`; harness blob `b5a962e`, identical at `1e59fe1` and HEAD —
+the file has exactly one commit and has never been modified).**
+The harness `test/browser/wide-graph-steady-state.spec.ts` builds each cell's binding with
+`createRoot(() => {...})`, not `effect(() => {...})`:
+
+- `createRoot` (core.ts:1201) makes a scope node whose compute is null and is **never scheduled**;
+  it runs its body **once** for ownership and creates **no reactive subscription**.
+- Therefore, in the timed region, signal writes dirty the derived graph but **no binding effect
+  ever re-runs**. There is no propagation-to-effect and, in the live run, no steady-state DOM
+  mutation. `live.med` and `floor.med` both collapse toward sub-resolution noise; `t_dom ≈ 0`;
+  `propagation_share` = tiny/tiny (numerically unstable).
+
+**Consequences.**
+1. The ~0.005ms/tick measured at `1e59fe1` is the cost of `flushSync` over a graph with **zero live
+   consumers** — not a frame-share. It cannot support Condition A or B, so it cannot support CLEAR.
+2. The "chromium/webkit flake" reported in the browser-gate session is the downstream symptom of
+   this defect (sub-resolution noise tripping `floor.med > 0` / share-band assertions
+   nondeterministically), **not** timer-instability and **not** a real propagation signal. The
+   handoff's instinct ("the verdict has never been cleanly recorded") was correct; the
+   2026-06-24 Current State overclaimed a tested terminal result.
+3. The harness's own G-WG-5 / line-311 assertion text ("effects subscribe to deriveds") contradicts
+   its code. The instrument never measured what the 2-of-2 gate requires.
+
+**Decision.** Tripwire status → **EVIDENCE-PENDING** (was tested-CLEAR). Locked design parameters
+(1000×10, 5% churn, steady-state, full-frame, nv-alone) are **unaffected and remain locked** — the
+defect is the binding primitive, not the design. Fix is site-local: import `effect` (already exported
+by `nv-entry.ts`) and replace the two `createRoot(() => {...})` binding wrappers with
+`effect(() => {...})`; the surrounding app-root `createRoot((dispose) => ...)` already owns and
+disposes them, so no per-cell scope is needed (the removed `createRoot` was redundant as well as
+non-subscribing). A permanent **G-WG-9** guard is added: a FLOOR-run effect-run counter asserting
+`effectRuns > totalCells` (built once **and** re-ran under churn), which fails closed if a future
+edit reintroduces a non-subscribing binding.
+
+**Commissioned:** `cc-handoff-wide-graph-effect-fix.md` (CC, real-hardware; one commit). CC returns
+the verdict with numbers to architecture; CC does **not** open the kind-split spike on FIRE
+(cross-stream, §9 contract-adjacent).
+
+**Downstream gating unchanged in shape, only in basis:** kind-split + LIS remain gated on this
+harness's verdict — but the verdict is now **pending a trustworthy run**, not recorded. No contract
+change (v0.4.2 holds; this is a test-instrument defect, not a core-semantics change).
