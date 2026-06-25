@@ -399,11 +399,17 @@ test.describe('G7: child component $style injected via wireComponent', () => {
 
       const childHash = 'childhashG'
       const childScopeAttr = `data-nv-s-${childHash}`
+      // Selector targets .child-box as a DESCENDANT of the scope-attr root —
+      // the root carries data-nv-s-<hash>; the styled element must be inside it.
       const childCss = `:where([${childScopeAttr}]) .child-box { color: rgb(0, 0, 255) }`
 
       const childIR = {
         id: 'child:g7',
-        shape: { html: '<div class="child-box" data-test-child></div>', bindingPaths: [] },
+        // Root carries the scope attr; .child-box is a descendant so the selector matches.
+        shape: {
+          html: '<div data-test-child-root><div class="child-box" data-test-child></div></div>',
+          bindingPaths: [],
+        },
         bindings: [],
         styleArtifact: { staticCss: childCss, scopeHash: childHash },
       }
@@ -428,18 +434,20 @@ test.describe('G7: child component $style injected via wireComponent', () => {
       mount(parentIR, host, document)
       flushSync()
 
+      const childRoot = host.querySelector('[data-test-child-root]') as HTMLElement | null
       const childEl = host.querySelector('[data-test-child]') as HTMLElement | null
       const findings: string[] = []
 
-      if (!childEl) {
-        findings.push('child element not found in DOM')
+      if (!childRoot || !childEl) {
+        findings.push('child elements not found in DOM')
       } else {
-        // Child root must carry the child scope attr (wireComponent stamps it)
-        if (!childEl.hasAttribute(childScopeAttr)) {
+        // Child ROOT must carry the scope attr (wireComponent stamps it on roots[0])
+        if (!childRoot.hasAttribute(childScopeAttr)) {
           findings.push(`child root missing scope attr: ${childScopeAttr}`)
         }
 
-        // Child CSS must actually apply (requires wireComponent to call injectComponentStyle)
+        // Child CSS must actually apply to the descendant .child-box
+        // (requires wireComponent to call injectComponentStyle)
         const color = getComputedStyle(childEl).color
         if (color !== 'rgb(0, 0, 255)') {
           findings.push(`child color: expected rgb(0, 0, 255), got ${color}`)
