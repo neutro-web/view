@@ -29,7 +29,7 @@
  *   - DECLINE verdict: diagnostic collected + binding still wired (correctness preserved).
  *   - PLAIN verdict: wired identically to ACCEPT (effect always created, no skip).
  *   - No core.ts change. Emitted code calls createRoot/effect/onCleanup only.
- *   - List/Sync bindings: throw at emit time.
+ *   - All binding kinds implemented; `default` case is unreachable (exhaustiveness guard only).
  */
 
 import {
@@ -691,12 +691,13 @@ function emitSetup(
             const extractor = defaultExtractorForProp(propName)
             let compute: ((ev: unknown) => unknown) | ((ev: unknown, cur: unknown) => unknown)
             if (transform) {
-              if (transform.length >= 2) {
+              const t = transform
+              if (t.length >= 2) {
                 // reduce: transform(extractedValue, currentSignalValue)
-                compute = (ev: unknown, cur: unknown) => transform(extractor(ev), cur)
+                compute = (ev: unknown, cur: unknown) => t(extractor(ev), cur)
               } else {
                 // map: transform(extractedValue)
-                compute = (ev: unknown) => (transform as (v: unknown) => unknown)(extractor(ev))
+                compute = (ev: unknown) => (t as (v: unknown) => unknown)(extractor(ev))
               }
             } else {
               compute = extractor
