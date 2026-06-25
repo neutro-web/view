@@ -127,21 +127,25 @@ _Last updated: 2026-06-24. Contract **v0.4.2** · Template-IR **v0.4.2**._
 ### Genuine research / deferred-on-evidence
 - Beating the alien-signals-class baseline: nv wins/ties 5 of 7 cases; two wide-graph
   cases (~1.5x/~1.7x) and createSignals (~5–7x) are proven **structural**, both trace to
-  `ReactiveNode` width, both gated behind the **kind-split tripwire** (real-app evidence
-  only — noted, not approved). **[2026-06-25] Tripwire status: EVIDENCE-PENDING. The
-  2026-06-24 "tested → CLEAR" finding (~0.005ms/tick) is REVERSED** — it was produced by a
-  defective harness instrument whose binding "effects" used `createRoot` (run-once, no
-  subscription) instead of `effect`, so no effect ever re-ran and the number measured
-  `flushSync` over a graph with zero live consumers, not a frame-share. Defect-fix +
-  clean re-run commissioned (`cc-handoff-wide-graph-effect-fix.md`); verdict awaited.
-  Kind-split + LIS stay gated on the *re-run* verdict. No contract change (test-instrument
-  defect; v0.4.2 holds).
+  `ReactiveNode` width, both gated behind the **kind-split tripwire**. **[2026-06-25]
+  Tripwire EVIDENCE-TESTED → CLEAR (both engines), verified at `387990f`.** After fixing two
+  harness defects (`createRoot→effect` subscription; getter-call `(v)` → `.set(v)` so writes
+  actually occur — both caught by the permanent G-WG-9 effect-run counter), the corrected
+  harness reports propagation self-time ~0.15–0.17ms/tick vs a 16.7ms frame — Condition A
+  (absolute breach) fails by ~100× and is unflippable at 1000×10. Chromium CLEAR clean;
+  WebKit reported AMBIGUOUS via a gate-logic false positive (straddle of a decision-irrelevant
+  B when A fails by ~100×) — architect-resolved to CLEAR. **Kind-split + LIS are accepted
+  structural gaps (evidence-tested, not deferred).** The earlier "~0.005ms / ~3,000×" framing
+  is withdrawn — it was a dead-graph artifact; CLEAR holds on the corrected ~100× number.
+  Reopens only on a materially larger/deeper real-app graph in real profiling. A verdict-logic
+  fix is commissioned (`cc-handoff-wide-graph-verdict-logic-fix.md`) so the straddle
+  false-positive cannot recur. No contract change (v0.4.2).
 - **FALSE-heavy row-churn** watch-item (reopen on real-app evidence with a
   steady-state-update harness). **[2026-06-24] The commissioned wide-graph steady-state
   harness is that instrument** — it can serve the FALSE-heavy read-tax measurement as a
   secondary read if FALSE density is varied; not the harness's primary verdict. *(Note
   2026-06-25: this instrument carried the effect-subscription defect reversed above; it
-  serves the FALSE-heavy read only after the `createRoot→effect` fix lands.)*
+  the fix landed at `387990f`; the instrument now serves the FALSE-heavy read.)*
 - **Per-key class-toggle node-width** — object-form `class={{...}}` emits one effect per
   key (fine-grained). For wide objects this trades N graph nodes against 1 looping effect.
   Same `ReactiveNode`-width structural cost as the kind-split tripwire; per-key default
@@ -2072,6 +2076,17 @@ tripwire-honoring mode (door 1). Awaiting CC harness + verdict. No `src/` change
 
 ### 2026-06-24 — Kind-split tripwire: wide-graph steady-state harness RESULT — CLEAR (verdict accepted)
 
+> **⚠ SUPERSEDED — numbers and reasoning invalid.** This verdict was produced by a defective harness
+> (bindings used `createRoot`, not `effect`, so no effect subscribed; and the tick driver used the
+> signal *getter* `(v)` instead of `.set(v)`, so zero writes occurred). The ~0.005ms/tick frame,
+> the "t_dom ≈ 0 / Condition B aliased to ~100%" degeneracy, the "~3,000× budget-irrelevant"
+> framing, the "retroactive validation of the 2-of-2 gate," and the "G-WG-5 confirmed real" claim
+> are all artifacts of measuring a graph with zero live consumers. **Do not cite this entry's
+> numbers.** See `2026-06-25 — ... CLEAR verdict REVERSED` (the reversal) and
+> `2026-06-25 — ... verdict CLEAR (both engines)` (the corrected re-run, ~0.15–0.17ms/tick, ~100×
+> under budget). The *conclusion* (CLEAR) survives on corrected evidence; this entry's *evidence*
+> does not.
+
 **Resolves** the harness commissioned earlier today (`cc-handoff-wide-graph-realapp-harness.md`).
 Landed at `1e59fe1`, `test/browser/wide-graph-steady-state.spec.ts`. Architect verified by
 reading the placed harness in full (not the report); SHA confirmed via `git ls-remote`.
@@ -2951,3 +2966,47 @@ the verdict with numbers to architecture; CC does **not** open the kind-split sp
 **Downstream gating unchanged in shape, only in basis:** kind-split + LIS remain gated on this
 harness's verdict — but the verdict is now **pending a trustworthy run**, not recorded. No contract
 change (v0.4.2 holds; this is a test-instrument defect, not a core-semantics change).
+
+### 2026-06-25 — Kind-split tripwire: verdict CLEAR (both engines) — resolves EVIDENCE-PENDING; gate-logic false-positive identified
+
+**Resolves** the EVIDENCE-PENDING state from `2026-06-25 — Kind-split tripwire: 2026-06-24 CLEAR
+verdict REVERSED ...`. Verified at `387990f` on `main` (harness diff read at SHA; signal/createRoot
+semantics confirmed in `core.ts`).
+
+**Harness fix verified (harness-only; no src/, no design-param change).** `createRoot→effect` at both
+binding sites; `(v)`→`.set(v)` so writes actually occur (nv signal API is call-to-read,
+`.set`-to-write — the getter-call form did zero writes, a *second* defect beneath the subscription
+one). Permanent **G-WG-9** counter (`floor.effectRuns > N_ROWS*N_COLS`) caught both defects in
+sequence and fails closed on regression.
+
+**Verdict (2-of-2 conservative gate; FIRE ⟺ A ∧ B).**
+- **Chromium — CLEAR (clean, no retry).** t_propagate 0.17ms/tick vs reactive budget 16.49ms →
+  Condition A fails by ~97×. Condition B 44.74% > 30% (holds). A fails ⇒ CLEAR.
+- **WebKit — CLEAR (architect override of a harness-reported AMBIGUOUS).** t_propagate 0.15ms vs
+  budget 16.40ms → Condition A fails by ~109×. Condition B 33.33% straddles 30% (±4pp band). The
+  harness reported AMBIGUOUS because its verdict branch escalates on `a_straddles || b_straddles`
+  **without checking outcome-relevance.** Under the AND gate, a B-straddle can flip the verdict only
+  if A clearly holds; here A fails by ~100×, so no movement of B within noise can produce FIRE. The
+  straddle is decision-irrelevant ⇒ correct verdict CLEAR. CC routed correctly (surfaced, did not
+  self-resolve).
+
+**Decision.** Kind-split tripwire → **CLEAR, terminal** on both engines. Wide-graph propagation is
+**not a top user-facing cost** at locked realistic scale (1000×10, 5% churn, steady-state,
+full-frame, real-browser): propagation self-time ~0.15–0.17ms/tick vs a 16.7ms frame —
+budget-irrelevant by ~100×, absolute-breach condition unflippable at this scale. **Kind-split and LIS
+are accepted structural gaps — evidence-tested-clear, not deferred.** Reopen only on a materially
+larger/deeper real-app graph in real profiling.
+
+**Correction to the magnitude claim.** The reversed 2026-06-24 entry's "~0.005ms/tick,
+budget-irrelevant by ~3,000×" was an artifact of the dead-graph instrument. The *real* corrected
+number is ~0.15–0.17ms/tick, ~100× under budget. CLEAR holds on the corrected number; the ~3,000×
+figure and the reasoning built on it (see supersession pointer on the 2026-06-24 dated entry) are
+withdrawn.
+
+**Gate-logic false positive (recorded; fix commissioned).** The harness AMBIGUOUS branch fires on
+any straddle, not a decision-relevant one. A straddle matters under the AND gate only when the other
+condition clearly holds. Fix commissioned: `cc-handoff-wide-graph-verdict-logic-fix.md` (escalate
+AMBIGUOUS only on outcome-determinative straddle). Until it lands, read any AMBIGUOUS where one
+condition clearly fails as CLEAR and surface.
+
+No contract change (v0.4.2 holds — test-instrument behavior, not core semantics).
