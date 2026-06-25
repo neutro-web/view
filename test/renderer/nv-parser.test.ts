@@ -1346,10 +1346,10 @@ describe('G1: classlist token in slot content carries parent scopeHash', () => {
   })
 })
 
-// G5 SKIPPED: <each> inside slot content is not yet supported at parse time.
-// The slot content builder (buildNvSlotContentIR) calls walkNvNodeList but intentionally
-// ignores the `lists` return — so <each> elements inside slots throw a parse error.
-// G5 would require wiring `lists` into slot IR first (a separate fix).
+// G5 (LIVE): <each>-in-slot is wired — buildNvSlotContentIR threads `lists` into slot
+// bindings via pushListBinding (nv-parser.ts L919–921). patchClasslistTokens' component-case
+// recursion descends into the slot's `list` binding and rewrites the scoped token through the
+// shared `classlist` case (one path, no parallel rewrite). This test asserts that chain.
 describe('G5: classlist token in <each>-inside-slot carries parent scopeHash', () => {
   it('G5: classlist token in <each>-inside-slot carries parent scopeHash', () => {
     const items = signal<unknown[]>([])
