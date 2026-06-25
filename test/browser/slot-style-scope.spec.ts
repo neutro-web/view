@@ -275,8 +275,8 @@ test.describe('G5-E: $style × <each>-in-slot applied style cross-engine', () =>
       const slotContentIR = {
         id: 'slot:g5e',
         shape: {
-          html: '<div data-test-row></div>',
-          bindingPaths: [[0]],
+          html: '<div><!--nv-0--></div>',
+          bindingPaths: [[0, 0]],
         },
         bindings: [
           {
