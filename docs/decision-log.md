@@ -15,7 +15,7 @@
 > entries that explicitly supersede the old one (cite its date).
 >
 > **Maintenance.** When the Log grows unwieldy, move superseded/stale entries to
-> `nv-decision-log-archive.md` and leave a one-line pointer here — do **not**
+> `decision-log-archive.md` and leave a one-line pointer here — do **not**
 > delete, because a superseded decision's rationale is often what prevents
 > re-making the mistake. Editing the Current State header is the light-touch
 > consolidation; archiving is the heavier one.
@@ -32,7 +32,7 @@
 _Last updated: 2026-06-24. Contract **v0.4.2** · Template-IR **v0.4.2**._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
-> `nv-decision-log-archive.md` (moved 2026-06-21). This snapshot is the resolved
+> `decision-log-archive.md` (moved 2026-06-21). This snapshot is the resolved
 > picture; the Log below holds the active arc (Component API → slot consumption).
 
 ### Status at a glance
@@ -266,7 +266,7 @@ _Last updated: 2026-06-24. Contract **v0.4.2** · Template-IR **v0.4.2**._
 
 ## Log (append-only, oldest → newest)
 
-> Entries before "Component API spec APPROVED" (2026-06-20) moved to nv-decision-log-archive.md [2026-06-21].
+> Entries before "Component API spec APPROVED" (2026-06-20) moved to decision-log-archive.md [2026-06-21].
 
 ### 2026-06-20 — Component API spec APPROVED; template-ir → v0.3 (pending implementation)
 
@@ -2544,7 +2544,7 @@ cycle now.
 ---
 
 ### SyncBinding Part 3 RESOLVED — A2 accepted [2026-06-24] → ARCHIVED
-**Relocated to `nv-decision-log-archive.md`.** This ruling was REVERSED the same day (see *A2
+**Relocated to `decision-log-archive.md`.** This ruling was REVERSED the same day (see *A2
 ruling REVERSED* [2026-06-24], directly below) — A2 was built on a false premise (the
 `reads: ∅` edge is a no-op in `buildGraph`). Full superseded entry preserved in the archive
 for the record. The reversal is the standing conclusion.
