@@ -62,8 +62,10 @@ _Last updated: 2026-06-24. Contract **v0.4.2** · Template-IR **v0.4.2**._
   path (A2 factory-shape convergence).
 - **Slot consumption — increments 1 + 1.5 + 2 LANDED (2026-06-22):** inc 2 = scoped-slot
   IR shape (`SlotEntry.content` → factory; `SlotOutletBinding.props?`); `let={...}` authoring
-  both FEs; D-slot-1 RETAINED. Template-IR → v0.4. reactive-core v0.4.2 unchanged. D-slot-2
-  re-phased to `each`.
+  both FEs; D-slot-1 RETAINED. Template-IR → v0.4. reactive-core v0.4.2 unchanged.
+  **D-slot-2 CLOSED 2026-06-24 (premise dissolved — no implementation).** Wire-time
+  `getOwner()` already yields invocation (row) root; D-slot-1 is the correct, sufficient
+  mechanism. See Log 2026-06-24.
 - **Real-browser gate:** PASSED across Blink/Gecko/WebKit (36/36). Phase 0 closed.
 - **Perf-validation phase:** COMPLETE. All three tripwires resolved (createSignals
   cleared structural-accepted; FALSE-heavy characterized watch-item; cross-engine
@@ -131,9 +133,12 @@ _Last updated: 2026-06-24. Contract **v0.4.2** · Template-IR **v0.4.2**._
 - **Slots — design APPROVED (2026-06-22), Path B phasing:** Increments 1 + 1.5 LANDED
   (2026-06-22). Increment 2 (queued, `cc-handoff-scoped-slots.md`) = scoped-slot IR shape
   (`SlotEntry.content` → factory + `SlotOutletBinding.props?`) + `let={...}` authoring;
-  **retains D-slot-1**; Template-IR → v0.4. **D-slot-2 invocation-scoped ownership flip
-  re-phased (2026-06-22) to land WITH `each`** — its leak gate requires real per-row
-  invocations to be failable; flipping it earlier is an unfalsifiable §6 gate.
+  **retains D-slot-1**; Template-IR → v0.4. **D-slot-2 ownership flip CLOSED 2026-06-24
+  — premise dissolved (no implementation).** The leak it would fix does not exist:
+  D-slot-1's wire-time `getOwner()` capture already yields the invocation (row) root when
+  a component-with-slot is wired inside an `each` row; slot content disposes with the row
+  (WS3 probe: removed-row effect 0 fires, sibling live). D-slot-1 is the correct, sufficient
+  mechanism — not retired. reactive-core v0.4.2 unchanged. See Log 2026-06-24.
 - **`$style` scoping — design APPROVED 2026-06-22, spec APPROVED (`spec-style-scoping-and-class-selection.md`).**
   Hybrid per-entry routing (key→class-rewrite, selector→attribute-hash);
   `factory` form → CSS-custom-property lowering (values reactive, factory NOT re-run);
@@ -260,7 +265,7 @@ _Last updated: 2026-06-24. Contract **v0.4.2** · Template-IR **v0.4.2**._
   string builder; carries the toggle map. Mirrors `each`/`slot` FE-split.
 
 ### Superseded
-- **D-slot-2 in increment 2** — superseded 2026-06-22; flip re-phased to land with `each` (see log entry).
+- **D-slot-2** — CLOSED 2026-06-24; premise dissolved (see Log 2026-06-24). Slot-content ownership is invocation-scoped by construction via D-slot-1's wire-time `getOwner()`; no flip needed or possible.
 
 ---
 
@@ -2665,3 +2670,67 @@ to `decision-log-archive.md` to match the live-log pointer (commits `4b1e9d3`, `
 **Canonical archive is now `decision-log-archive.md`** (formerly `nv-decision-log-archive.md`).
 Future sweeps target that file. End state: one archive, A2-accepted relocated once, live pointer
 correct.
+
+---
+
+### D-slot-2 CLOSED — premise dissolved; D-slot-1 already produces invocation-scoped ownership [2026-06-24]
+
+**Workstream:** WS4 (architect) ← WS3 probe. **Type:** close-out (no implementation).
+**Probe verified at `997dbc2`.** Resolves the D-slot-2 item re-phased "to land with `each`"
+(2026-06-22).
+
+**Question.** D-slot-2 (GATE-1) ruled slot-content ownership should flip from parent-lexical
+(D-slot-1) to invocation-scoped, on the argument that "strict parent-lexical would strand a
+dangling observer when an invocation disposes." With `<each>`-in-slot landed (Increment SS), the
+per-row-invocation scenario that loads this gate now exists — so a leak-reproduction probe was
+commissioned to test whether the flip is needed.
+
+**Finding: NO LEAK.** The probe built the exact scenario (component-with-slot inside an `each`,
+slot content running an effect on a row-outliving signal, remove one row while a sibling stays
+live) and measured effect invocations:
+- Removed row's slot effect after disposal: **0 fires** (no dangling observer).
+- Surviving sibling row's slot effect: **fires correctly** (not over-disposed).
+- Both back-ends identical (interpreter L680 chain; emitted-mount L550 chain).
+
+**Why the premise dissolved.** D-slot-2 assumed D-slot-1 meant slot content is owned by a
+**static outer (component/parent) scope** that outlives a single invocation. It is not.
+D-slot-1 is implemented as `capturedParentOwner = getOwner()` captured **at wire time**
+(`interpreter.ts:680`). When the component-with-slot is wired **inside an `each` row**, wire
+time *is* the row's `createRoot` callback, so `getOwner()` returns the **row root**. Slot
+content mounts under the row root and is disposed by `rec.dispose()` when the row is removed.
+D-slot-1's "parent" is **dynamically the nearest enclosing owner**, which is the invocation root
+in the only scenario with a per-invocation lifecycle. **D-slot-1 and D-slot-2 coincide in every
+loadable case:**
+- *Top-level component with a slot (no `each`):* `capturedParentOwner` = mount root; disposes
+  with the mount; no per-invocation lifecycle exists, so nothing to leak. (GATE-1 itself noted
+  increment 1 "retains D-slot-1 because it has no per-invocation dependency.")
+- *Component-with-slot inside an `each` row:* `capturedParentOwner` = row root; disposes with
+  the row; probe-proven no leak.
+There is **no scenario** where the two designs differ. The scoped-slot value-read case GATE-1
+worried about (`content(slotProps)` reading child-exposed `p.expr`, `interpreter.ts:641`) is
+handled by observation-≠-ownership (§6 / §12.24b): the cross-scope read stays correct
+(sibling reads fine) while the content's *effect owner* is already the invocation root.
+
+**Ruling.**
+1. **D-slot-2 is CLOSED as premise-dissolved.** No implementation unit, no ownership flip, no
+   `src/` change. The "flip from D-slot-1 to D-slot-2" describes a transition between two states
+   that are the same state in the landed code.
+2. **D-slot-1 is NOT "retired" — it is the correct, sufficient mechanism.** The wire-time
+   `getOwner()` capture *is* invocation-scoping wherever an invocation scope exists. GATE-1's
+   "retire D-slot-1 when scoped slots land (increment 2)" is superseded: nothing to retire.
+3. **No contract change.** §6 / §12.24b unchanged; reactive-core stays **v0.4.2**. The
+   "escalation rule: surface any §6 gap before landing" (GATE-1) is discharged — the probe is
+   that verification, and it found no gap.
+4. **GATE-1's ownership *intent* is recorded as already-met:** all slot content is
+   invocation-scoped via wire-time owner capture; parent-signal reads stay correct cross-scope.
+
+**Supersedes:** the D-slot-2 flip obligation in *GATE-1 / Scoped slots design APPROVED*
+[2026-06-22] and its re-phasing [2026-06-22] (the flip is moot, not merely deferred). **Cites:**
+WS3 leak-reproduction probe [2026-06-24], Increment SS LANDED [2026-06-23].
+
+**Architect note.** The forward queue carried D-slot-2 as the assumed next unit on the strength
+of a 2026-06-22 *prediction* ("flip lands with `each`"). The prediction encoded an assumption
+about D-slot-1's ownership that the code never satisfied. Reading the chain (wire-time
+`getOwner()`) before commissioning — and probing the leak empirically rather than scoping the
+fix on the queue's say-so — is what caught it. Pattern: a queue item is a hypothesis until the
+code is read; "named next" ≠ "needed next."
