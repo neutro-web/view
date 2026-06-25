@@ -347,6 +347,10 @@ test.describe('G5-E: $style × <each>-in-slot applied style cross-engine', () =>
         findings.push(`row count: expected 3, got ${rows.length}`)
       }
 
+      // Constants for negative-control checks — invariants of the parent/child pairing, not per-row
+      const childScopeAttr = `data-nv-s-${childHash}`
+      const childScopeClass = `card_${childHash}`
+
       // 2–4. Per-row assertions
       rows.forEach((row, idx) => {
         const rowEl = row as HTMLElement
@@ -363,18 +367,86 @@ test.describe('G5-E: $style × <each>-in-slot applied style cross-engine', () =>
         }
 
         // 4. Child hash absent per row
-        const childScopeAttr = `data-nv-s-${childHash}`
         if (rowEl.hasAttribute(childScopeAttr)) {
           findings.push(`row[${idx}] has forbidden child-scope attr: ${childScopeAttr}`)
         }
-
-        const childScopeClass = `card_${childHash}`
         if (rowEl.classList.contains(childScopeClass)) {
           findings.push(`row[${idx}] has forbidden child-scope class: ${childScopeClass}`)
         }
       })
 
       parent.remove()
+      return { ok: findings.length === 0, findings }
+    })
+
+    expect(result.ok, result.findings.join('\n')).toBe(true)
+  })
+})
+
+test.describe('G7: child component $style injected via wireComponent', () => {
+  // G7: when a parent mounts a child component via a `component` binding (wireComponent),
+  // the child's styleArtifact CSS must be injected and its scope attr must appear on the
+  // child's own root element. This was previously silently dropped (wireComponent only
+  // called mountFragment, never injectComponentStyle).
+
+  test('G7: child styleArtifact CSS applies to child root when mounted through parent', async ({
+    page,
+  }) => {
+    await loadNv(page)
+
+    const result = await page.evaluate(() => {
+      const { mount, flushSync } = window.__nv
+
+      const childHash = 'childhashG'
+      const childScopeAttr = `data-nv-s-${childHash}`
+      const childCss = `:where([${childScopeAttr}]) .child-box { color: rgb(0, 0, 255) }`
+
+      const childIR = {
+        id: 'child:g7',
+        shape: { html: '<div class="child-box" data-test-child></div>', bindingPaths: [] },
+        bindings: [],
+        styleArtifact: { staticCss: childCss, scopeHash: childHash },
+      }
+
+      const parentIR = {
+        id: 'parent:g7',
+        shape: { html: '<div data-test-parent><!--nv-comp-0--></div>', bindingPaths: [[0, 0]] },
+        bindings: [
+          {
+            kind: 'component' as const,
+            pathIndex: 0,
+            component: () => childIR,
+            props: [],
+            propNames: [],
+            slots: [],
+          },
+        ],
+      }
+
+      const host = document.createElement('div')
+      document.body.appendChild(host)
+      mount(parentIR, host, document)
+      flushSync()
+
+      const childEl = host.querySelector('[data-test-child]') as HTMLElement | null
+      const findings: string[] = []
+
+      if (!childEl) {
+        findings.push('child element not found in DOM')
+      } else {
+        // Child root must carry the child scope attr (wireComponent stamps it)
+        if (!childEl.hasAttribute(childScopeAttr)) {
+          findings.push(`child root missing scope attr: ${childScopeAttr}`)
+        }
+
+        // Child CSS must actually apply (requires wireComponent to call injectComponentStyle)
+        const color = getComputedStyle(childEl).color
+        if (color !== 'rgb(0, 0, 255)') {
+          findings.push(`child color: expected rgb(0, 0, 255), got ${color}`)
+        }
+      }
+
+      host.remove()
       return { ok: findings.length === 0, findings }
     })
 

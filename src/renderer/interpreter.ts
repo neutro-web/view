@@ -688,6 +688,17 @@ function wireComponent(binding: ComponentBinding, anchorNode: Node, doc: Documen
       slotsObj,
       capturedParentOwner,
     })
+    if (childIR.styleArtifact) {
+      if (roots.length > 1) {
+        throw new Error('[nv/interpreter] $style on multi-root component is not supported')
+      }
+      if (childIR.styleArtifact.staticCss) {
+        injectComponentStyle(doc, childIR.styleArtifact.scopeHash, childIR.styleArtifact.staticCss)
+      }
+      const scopeAttr = `data-nv-s-${childIR.styleArtifact.scopeHash}`
+      const root = roots[0]
+      if (root instanceof Element) root.setAttribute(scopeAttr, '')
+    }
     onCleanup(() => {
       for (const n of roots) {
         if (n.parentNode !== null) n.parentNode.removeChild(n)
