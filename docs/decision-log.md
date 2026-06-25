@@ -105,9 +105,15 @@ _Last updated: 2026-06-24. Contract **v0.4.2** · Template-IR **v0.4.2**._
   routing; not a contract concern.
 - **`$style` scoping + dynamic lowering — LANDED 2026-06-23 (Template-IR v0.4.2).**
   Two-way class/selector routing; `StyleVarBinding` IR member; declHash folds property
-  name (OPEN-2); classlist recursion total over conditional/list (OPEN-7). nv-does-not-
-  invent-CSS. Renderer-layer; not a contract concern. Confirm residual OPEN-1/3/4/5/6
-  chosen-at-build vs. open against spec §7.
+  name (OPEN-2 CLOSED); classlist recursion total over conditional/list (OPEN-7 CLOSED).
+  nv-does-not-invent-CSS. Renderer-layer; not a contract concern.
+  **OPEN-1/2/3/4/5/7 CLOSED [2026-06-25]** (chosen-at-build, verified at HEAD `e40fec6`):
+  zero-specificity `:where()` qualification (OPEN-1); stringify-and-write coercion (OPEN-3);
+  per-document WeakMap dedup registry (OPEN-4); adopted-first + `<style>` fallback (OPEN-5).
+  **OPEN-6 open, trigger-gated:** inject-once-never-remove is the accepted shipped behavior;
+  build teardown/eviction only when real workload shows injected-style accretion as a measured
+  cost (distinct styled-component identities per document growing without bound). No
+  build-blocking `$style` open points remain.
   `<each>`-in-slot styling CONFIRMED & CLOSED [2026-06-25]: covered for free by the scope-carry
   mechanism; real-browser gate (G5-E + G7) green 9/9 cross-engine. G5 deferral closed.
 - **Renderer:** **wireComponent now injects child `styleArtifact`** (interpreter L691,
@@ -2780,3 +2786,70 @@ warrants surface-before-landing even when obviously right.
 
 **Out of scope, noted:** `wide-graph-steady-state.spec.ts` (G-WG) flaked on chromium/webkit —
 performance-harness timer flakiness, unrelated; WS1, not this unit.
+
+---
+
+### 2026-06-25 — `$style` OPEN-1/3/4/5 CLOSED (chosen-at-build, verified); OPEN-6 RE-SCOPED to trigger-gated
+
+**Workstream:** WS4 (architect) confirmation pass. **No `src/` change.** Contract **v0.4.2**
+unchanged; Template-IR **v0.4.2** unchanged. Verified by reading shipped seams at HEAD
+`e40fec6`.
+
+Confirms the residual OPEN points from the S1+S2 increment (logged 2026-06-22, "Seven OPEN spec
+points deferred to build") against the shipped code. OPEN-2 and OPEN-7 were already CLOSED
+(2026-06-23). This entry resolves the remaining five. The standing instruction was "confirm
+chosen-at-build vs. genuinely-open before treating any as live" — done.
+
+**OPEN-1 (selector qualification form) — CLOSED, chosen.**
+Selector-form `$style` rules emit `:where([data-nv-s-<scopeHash>]) <selector>`
+(`nv-parser.ts` L1905, L1916); class-form emits the `.<token>_<scopeHash>` rewrite
+(L1902, L1913). The `:where()` wrapper contributes **zero specificity**, so authored selectors
+keep their natural specificity and scoping never silently wins a cascade fight. Browser-gated
+green (style-scoping + slot-style-scope specs). The alternative (bare `[attr] selector`) was
+rejected implicitly by the shipped choice; recording it as the decision: **zero-specificity
+`:where()` qualification is the chosen form.**
+
+**OPEN-3 (dynamic value coercion) — CLOSED, chosen.**
+Reactive `$style` values lower to a CSS custom property `var(--nv-<hash>)`; the value is written
+by `StyleVarBinding` via `element.style.setProperty(varName, String(v))`, with
+`removeProperty(varName)` on nullish (interpreter L278–280; emitted-mount L651–653 — **at
+parity**). The only coercion is `String(v)`: nv does not parse, validate, unit-correct, or invent
+CSS. Consistent with the locked **nv-does-not-invent-CSS** principle. **Chosen:
+stringify-and-write, no coercion beyond `String(v)`; FE-parity is the gate.**
+
+**OPEN-4 (injection registry shape/lifetime) — CLOSED, chosen.**
+`docStyleRegistries: WeakMap<Document, Map<identityHash, StyleEntry>>` (`style-inject.ts` L9).
+Idempotent per `(doc, identityHash)` via `registry.has` early-return; keyed through the passed
+`doc`, never global `document` — required by the locked renderer-agnostic / multi-doc decision.
+`StyleEntry` is a discriminated union (`'adopted'` | `'style-el'`) carrying the live handle.
+**Chosen: per-document WeakMap, identity-hash-keyed, dedup-on-insert.**
+
+**OPEN-5 (`<style>` vs `adoptedStyleSheets`) — CLOSED, chosen.**
+`adoptedStyleSheets`-first: construct `CSSStyleSheet` + `replaceSync`, append to
+`doc.adoptedStyleSheets`; on throw (cross-document / unsupported env) fall back to a `<style>`
+element appended to `doc.head ?? doc.body` (`style-inject.ts` L27–46). Browser-gated green across
+Blink/Gecko/WebKit (S1+S2 run). **Chosen: adopted-first with graceful `<style>` fallback.**
+
+**OPEN-6 (teardown policy) — RE-SCOPED: genuinely open, trigger-gated (not closed, no build now).**
+Read finding: **no teardown path exists.** There is no `removeComponentStyle`, no refcount, no
+`registry.delete`, and no unmount hook that removes an injected sheet/`<style>`. Injected style
+persists for the document's lifetime; the `WeakMap` only reclaims on whole-document GC, not on
+component unmount. This was never a *decision* — it is the absence of code (chosen-by-omission).
+
+It is a defensible default and **not a leak in the common case**: scoped CSS per component is
+small, dedup'd by identity hash, and re-mounting the same component reuses the existing entry
+(monotonic in *distinct* component identities, not in mount count). The two scenarios that could
+make it a real cost — (a) a long-lived document that mounts many *distinct* short-lived styled
+components over a session (router churn), (b) any workload where distinct-identity accretion
+within one document grows unbounded — are measure-before-deciding cases, governed by the
+performance-first principle (don't build refcounted teardown speculatively).
+
+**Ruling:** OPEN-6 stays **OPEN** with a falsifiable trigger. **Build a teardown/eviction policy
+when, and only when, a real workload shows injected-style accretion as a measured cost** (distinct
+styled-component identities per document growing without bound, or a measured memory/perf
+regression attributable to the style registry). Until then, inject-once-never-remove is the
+accepted shipped behavior, recorded as deliberate, not a debt. R-style-1 (`<style>` fallback AOT
+batching) remains separate OPEN research, unaffected.
+
+**Net:** `$style` OPEN set is now OPEN-1/2/3/4/5/7 CLOSED, **OPEN-6 open (trigger-gated)**. No
+code, contract, or IR change. The `$style` axis carries no remaining build-blocking open points.
