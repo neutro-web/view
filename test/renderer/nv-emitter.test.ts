@@ -975,7 +975,7 @@ const Foo = $component(() => {
     expect(emitted).toMatch(/eventName: ['"]input['"]/) // accepts single or double quotes
     // writeTarget must NOT appear as writeTarget: formField() (erased)
     expect(emitted).not.toMatch(/writeTarget:\s*formField\(\)/)
-    // writeTargetId must NOT be emitted (cross-boundary symbol space problem)
+    // writeTargetId field removed (A2 reversed 2026-06-24); external-source sync needs no write-graph ID
     expect(emitted).not.toContain('writeTargetId')
   })
 })

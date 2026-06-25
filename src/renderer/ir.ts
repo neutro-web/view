@@ -180,14 +180,7 @@ export type ListBinding = BaseBinding & {
   itemTemplate: (valueSig: WritableSignal<unknown>, indexSig: WritableSignal<number>) => TemplateIR
 }
 
-/**
- * Two-way binding: signal→DOM (read) + DOM event→signal (write-back via sync).
- * DESIGNED, NOT IN PoC SCOPE.
- *
- * writeTargetId: agreed deferred field (compiler path only).
- * Must use same signalSymbolId derivation as compiler steps 1–2/4 so the
- * §8.5.2 write-graph cycle check can connect the renderer's write-back edge.
- */
+// SyncBinding is an external-source sync (§8.5); contributes no §8.5.2 write-graph edge.
 export type SyncBinding = BaseBinding & {
   kind: 'sync'
   // signal→DOM (read direction) — like PropBinding
@@ -198,8 +191,6 @@ export type SyncBinding = BaseBinding & {
   // FIX: was `() => { set: (v) => void }` — stale vs v0.4.2 core.
   // sync() resolves the target via nodeForFn.get(target); needs the accessor itself.
   writeTarget: WritableSignal<unknown> | (() => WritableSignal<unknown>)
-  // Design placeholder; NOT populated — cross-boundary symbol space problem (see decision-log 2026-06-24).
-  writeTargetId?: string
   transform?: (eventValue: unknown, current: unknown) => unknown
 }
 

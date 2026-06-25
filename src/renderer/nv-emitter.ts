@@ -220,8 +220,6 @@ function emitBindingLiteral(
         // writeTarget: emit the BARE signal identifier (live accessor in scriptBody scope).
         // NOT a thunk-over-value — sync() needs the accessor object for nodeForFn lookup.
         `writeTarget: ${thunk.writeTargetSrc}`,
-        // writeTargetId intentionally NOT emitted — cross-boundary symbol space problem;
-        // see decision-log 2026-06-24 retraction entry. Field stays in ir.ts as placeholder.
       ]
       if (thunk.transformSrc !== undefined) {
         parts.push(`transform: ${thunk.transformSrc}`)
