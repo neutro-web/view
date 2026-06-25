@@ -32,7 +32,16 @@
  *   - List/Sync bindings: throw at emit time.
  */
 
-import { createRoot, effect, getOwner, onCleanup, runWithOwner, signal } from '../core/core.js'
+import {
+  createRoot,
+  effect,
+  getOwner,
+  onCleanup,
+  pubsub,
+  runWithOwner,
+  signal,
+  sync,
+} from '../core/core.js'
 import type {
   Binding,
   ClassListBinding,
@@ -43,10 +52,20 @@ import type {
   SlotContent,
   SlotOutletBinding,
   StyleVarBinding,
+  SyncBinding,
   TemplateIR,
+  WritableSignal,
 } from '../renderer/ir.js'
 import { injectComponentStyle } from '../renderer/style-inject.js'
 import type { BindingErasureVerdict } from './types.js'
+
+// Per-prop default DOM value extractor. Mirrors interpreter.ts:defaultExtractorForProp.
+function defaultExtractorForProp(prop: string): (ev: unknown) => unknown {
+  if (prop === 'checked') {
+    return (ev: unknown) => (ev as { target?: { checked?: unknown } } | null)?.target?.checked
+  }
+  return (ev: unknown) => (ev as { target?: { value?: unknown } } | null)?.target?.value
+}
 
 // ── Node accessor — path partially evaluated at emit time ─────────────────────
 
@@ -639,11 +658,78 @@ function emitSetup(
         break
       }
 
+      case 'sync': {
+        const propName = (binding as SyncBinding).propName
+        const eventName = (binding as SyncBinding).eventName
+        const writeTarget = (binding as SyncBinding).writeTarget
+        const readExpr = (binding as SyncBinding).readExpr
+        const transform = (binding as SyncBinding).transform
+
+        wireSpecs.push({
+          accessor,
+          wire(targetNode) {
+            // Part 1: element guard
+            if (targetNode.nodeType !== 1 /* ELEMENT_NODE */) {
+              throw new Error(
+                `[nv/emit] SyncBinding expects an Element node; got nodeType ${targetNode.nodeType}`,
+              )
+            }
+            const element = targetNode as Element
+
+            // Part 2: signal→DOM (read direction)
+            effect(() => {
+              ;(element as unknown as Record<string, unknown>)[propName] = readExpr()
+            })
+
+            // Part 3: DOM→signal (write-back) — external-source sync via pubsub
+            const ps = pubsub()
+            const listener = (e: Event): void => ps.publish(e)
+            element.addEventListener(eventName, listener)
+            onCleanup(() => element.removeEventListener(eventName, listener))
+
+            // Part 4: external-source sync with transform arity dispatch
+            const extractor = defaultExtractorForProp(propName)
+            let compute: ((ev: unknown) => unknown) | ((ev: unknown, cur: unknown) => unknown)
+            if (transform) {
+              if (transform.length >= 2) {
+                // reduce: transform(extractedValue, currentSignalValue)
+                compute = (ev: unknown, cur: unknown) => transform(extractor(ev), cur)
+              } else {
+                // map: transform(extractedValue)
+                compute = (ev: unknown) => (transform as (v: unknown) => unknown)(extractor(ev))
+              }
+            } else {
+              compute = extractor
+            }
+
+            // Derived-target guard: warn if writeTarget resolves to a non-writable signal
+            const wt = writeTarget
+            const resolvedForGuard =
+              typeof wt === 'function' &&
+              typeof (wt as unknown as { set?: unknown }).set !== 'function'
+                ? (wt as () => WritableSignal<unknown>)()
+                : (wt as WritableSignal<unknown>)
+            if (typeof resolvedForGuard?.set !== 'function') {
+              console.error(
+                '[nv] sync: write target is not a writable signal. Use signal(), not derived(), as a :PROP sync target.',
+              )
+            }
+
+            sync(
+              ps,
+              writeTarget as WritableSignal<unknown> | (() => WritableSignal<unknown>),
+              compute as (incoming: unknown) => unknown,
+            )
+            // sync's disposer intentionally discarded — sync owns its node via
+            // currentOwner and disposes with the enclosing createRoot.
+          },
+        })
+        break
+      }
+
       default: {
         const kind = (binding as Binding).kind
-        throw new Error(
-          `[nv/emit] Binding kind '${kind}' is not implemented. SyncBinding is deferred.`,
-        )
+        throw new Error(`[nv/emit] Binding kind '${kind}' is not implemented.`)
       }
     }
   }

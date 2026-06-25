@@ -21,7 +21,7 @@
  */
 
 import { JSDOM } from 'jsdom'
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import { emitMount } from '../../src/compiler/emitted-mount.js'
 import {
   type EqualityPolicy,
@@ -29,7 +29,7 @@ import {
   emitEqualityHooks,
 } from '../../src/compiler/equality-hook-emitter.js'
 import type { BindingErasureVerdict } from '../../src/compiler/types.js'
-import { __test, flushSync, signal, sync } from '../../src/core/core.js'
+import { __test, derived, flushSync, signal, sync } from '../../src/core/core.js'
 import { structurallyEqual } from '../../src/renderer/comparator.js'
 import { createHtmlTag } from '../../src/renderer/html-tag.js'
 import { mount } from '../../src/renderer/interpreter.js'
@@ -39,8 +39,11 @@ import type {
   ConditionalBinding,
   EventBinding,
   PropBinding,
+  ReactiveExpr,
+  SyncBinding,
   TemplateIR,
   TextBinding,
+  WritableSignal,
 } from '../../src/renderer/ir.js'
 
 // ── DOM helpers ────────────────────────────────────────────────────────────────
@@ -385,10 +388,162 @@ test('GATE 5: Multi-binding template — Text + Attr on same element, both back-
   disposeE()
 })
 
-test('GATE 5: SyncBinding (still deferred) throws at emit time', () => {
-  const ir: TemplateIR = {
-    id: 'test:sync-deferred',
+// ── SyncBinding gate tests (G1–G6) ───────────────────────────────────────────
+
+function makeSyncEvent(document: Document, type: string): Event {
+  return new (document as unknown as { defaultView: { Event: typeof Event } }).defaultView.Event(
+    type,
+  )
+}
+
+function makeSyncIR(overrides: {
+  propName?: string
+  eventName?: string
+  writeTarget?: WritableSignal<unknown> | (() => WritableSignal<unknown>)
+  readExpr?: ReactiveExpr<unknown>
+  transform?: (eventValue: unknown, current: unknown) => unknown
+}): TemplateIR {
+  const baseBinding: SyncBinding = {
+    kind: 'sync',
+    pathIndex: 0,
+    propName: overrides.propName ?? 'value',
+    readExpr: overrides.readExpr ?? (() => ''),
+    eventName: overrides.eventName ?? 'input',
+    writeTarget: overrides.writeTarget ?? (signal('') as WritableSignal<unknown>),
+    ...(overrides.transform !== undefined ? { transform: overrides.transform } : {}),
+  }
+  return {
+    id: 'test:sync',
     shape: { html: '<input />', bindingPaths: [[0]] },
+    bindings: [baseBinding],
+  }
+}
+
+test('G1 — SyncBinding: emit path observable parity with interpreter path', () => {
+  // The same three assertions run against BOTH paths with fresh signals each iteration.
+  // Any divergence between paths = test failure.
+  const { document } = makeDom()
+
+  for (const path of ['interpreter', 'emit'] as const) {
+    const val = signal('initial')
+    const ir = makeSyncIR({
+      writeTarget: val as WritableSignal<unknown>,
+      readExpr: val,
+    })
+    const parent = document.createElement('div')
+
+    // mount returns the disposer directly (not { dispose })
+    const dispose: () => void =
+      path === 'interpreter' ? mount(ir, parent, document) : emitMount(ir).mountFn(parent, document)
+
+    flushSync()
+    const input = parent.querySelector('input') as HTMLInputElement
+
+    // (a) Initial DOM prop reflects the signal
+    expect(input.value, `[${path}] initial DOM value`).toBe('initial')
+
+    // (b) Signal change re-fires the signal→DOM effect
+    val.set('updated')
+    flushSync()
+    expect(input.value, `[${path}] signal→DOM after set`).toBe('updated')
+
+    // (c) Input event writes the signal (JSDOM pattern: set input.value, dispatch event)
+    input.value = 'from-dom'
+    input.dispatchEvent(makeSyncEvent(document, 'input'))
+    flushSync()
+    expect(val(), `[${path}] DOM→signal after event`).toBe('from-dom')
+
+    dispose()
+  }
+})
+
+test('G2 — SyncBinding: map transform (arity-1) applied on emit path', () => {
+  const { document } = makeDom()
+  const val = signal(0) as unknown as WritableSignal<unknown>
+  const ir = makeSyncIR({
+    writeTarget: val,
+    readExpr: () => String((val as unknown as WritableSignal<number>)()),
+    transform: (ev: unknown) => Number(ev), // arity-1 = map; TS allows fewer params
+  })
+  const parent = document.createElement('div')
+  const dispose = emitMount(ir).mountFn(parent, document)
+  const input = parent.querySelector('input') as HTMLInputElement
+
+  input.value = '42'
+  input.dispatchEvent(makeSyncEvent(document, 'input'))
+  flushSync()
+
+  expect((val as unknown as WritableSignal<number>)()).toBe(42)
+  dispose()
+})
+
+test('G3 — SyncBinding: reduce transform (arity-2) applied on emit path', () => {
+  const { document } = makeDom()
+  const val = signal(10) as unknown as WritableSignal<unknown>
+  const ir = makeSyncIR({
+    writeTarget: val,
+    readExpr: () => String((val as unknown as WritableSignal<number>)()),
+    transform: (ev: unknown, cur: unknown) => (cur as number) + Number(ev), // arity-2 = reduce
+  })
+  const parent = document.createElement('div')
+  const dispose = emitMount(ir).mountFn(parent, document)
+  const input = parent.querySelector('input') as HTMLInputElement
+
+  input.value = '5'
+  input.dispatchEvent(makeSyncEvent(document, 'input'))
+  flushSync()
+
+  expect((val as unknown as WritableSignal<number>)()).toBe(15) // 10 + 5
+  dispose()
+})
+
+test('G4 — SyncBinding: console.error fired when writeTarget is derived (non-writable)', () => {
+  const { document } = makeDom()
+  const base = signal(0)
+  // derived() has no .set — triggers the guard in the case 'sync' wire closure
+  const readOnly = derived(() => base() * 2)
+
+  const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+  try {
+    const ir = makeSyncIR({ writeTarget: readOnly as unknown as WritableSignal<unknown> })
+    const parent = document.createElement('div')
+    const dispose = emitMount(ir).mountFn(parent, document)
+    // Guard fires synchronously inside wire() at mount time — spy must be set before mountFn
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('not a writable signal'))
+    dispose()
+  } finally {
+    errSpy.mockRestore()
+  }
+})
+
+test('G5 — SyncBinding: event listener removed on dispose (no leak)', () => {
+  const { document } = makeDom()
+  const val = signal('before')
+  const ir = makeSyncIR({
+    writeTarget: val as WritableSignal<unknown>,
+    readExpr: val,
+  })
+  const parent = document.createElement('div')
+  const dispose = emitMount(ir).mountFn(parent, document)
+  const input = parent.querySelector('input') as HTMLInputElement
+
+  dispose()
+
+  // After disposal: input event must NOT update the signal (listener removed)
+  input.value = 'after-dispose'
+  input.dispatchEvent(makeSyncEvent(document, 'input'))
+  flushSync()
+
+  expect(val()).toBe('before')
+})
+
+test('G6 — SyncBinding: throws [nv/emit] when target is not an Element', () => {
+  // shape: 'text only' → fragment's childNodes[0] is a Text node (nodeType 3)
+  // pathIndex [0] resolves to that Text node via the accessor
+  const { document } = makeDom()
+  const ir: TemplateIR = {
+    id: 'test:sync-guard',
+    shape: { html: 'text only', bindingPaths: [[0]] },
     bindings: [
       {
         kind: 'sync',
@@ -396,11 +551,12 @@ test('GATE 5: SyncBinding (still deferred) throws at emit time', () => {
         propName: 'value',
         readExpr: () => '',
         eventName: 'input',
-        writeTarget: () => ({ set: () => {} }),
-      } as unknown as ChildBinding,
+        writeTarget: signal('') as WritableSignal<unknown>,
+      } as SyncBinding,
     ],
   }
-  expect(() => emitMount(ir)).toThrow()
+  const parent = document.createElement('div')
+  expect(() => emitMount(ir).mountFn(parent, document)).toThrow('[nv/emit]')
 })
 
 // ── §7: Performance characterization ─────────────────────────────────────────
