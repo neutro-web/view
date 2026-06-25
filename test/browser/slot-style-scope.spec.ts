@@ -254,3 +254,130 @@ test.describe('G6: §5 guarantee — no child-hash attr on projected nodes', () 
     expect(result.ok, result.findings.join('\n')).toBe(true)
   })
 })
+
+test.describe('G5-E: $style × <each>-in-slot applied style cross-engine', () => {
+  // G5-E: verify that parent-authored slot content with list binding
+  // (each-in-slot) receives parent-scoped styles, and child scope is NOT applied.
+
+  test('G5-E: list-bound slot content receives parent style, not child scope', async ({ page }) => {
+    await loadNv(page)
+
+    const result = await page.evaluate(() => {
+      const { mount, flushSync } = window.__nv
+
+      // Parent hash (for rewritten classes on parent-authored nodes)
+      const parentHash = 'parenthashE'
+      const rewClass = `card_${parentHash}`
+      const parentCss = `.${rewClass} { color: rgb(0, 128, 0) }`
+
+      // Slot content authored by parent: a list-bound template
+      // Each item renders a div with data-test-row and the parent's rewritten class.
+      const slotContentIR = {
+        id: 'slot:g5e',
+        shape: {
+          html: '<div data-test-row></div>',
+          bindingPaths: [[0]],
+        },
+        bindings: [
+          {
+            kind: 'list' as const,
+            pathIndex: 0,
+            items: () => ['a', 'b', 'c'],
+            key: (item) => item,
+            itemTemplate: (_valueSig, _indexSig) => ({
+              id: 'row:g5e',
+              shape: { html: '<div data-test-row></div>', bindingPaths: [[0]] },
+              bindings: [
+                {
+                  kind: 'classlist' as const,
+                  pathIndex: 0,
+                  entries: [{ kind: 'toggle' as const, key: rewClass, expr: () => true }],
+                },
+              ],
+            }),
+          },
+        ],
+      }
+
+      // Child component IR — has a slot-outlet and its own styleArtifact
+      const childHash = 'childhashE'
+      const childIR = {
+        id: 'child:g5e',
+        shape: {
+          html: '<section><!--nv-0--></section>',
+          bindingPaths: [[0, 0]],
+        },
+        bindings: [{ kind: 'slot-outlet' as const, pathIndex: 0, name: 'default' }],
+        styleArtifact: {
+          staticCss: `:where([data-nv-s-${childHash}]) section { background: blue }`,
+          scopeHash: childHash,
+        },
+      }
+
+      // Parent IR — mounts child with slot content projected in
+      const parentIR = {
+        id: 'parent:g5e',
+        shape: {
+          html: '<div data-test-parent-root><!--nv-comp-0--></div>',
+          bindingPaths: [[0, 0]],
+        },
+        bindings: [
+          {
+            kind: 'component' as const,
+            pathIndex: 0,
+            component: () => childIR,
+            props: [],
+            propNames: [],
+            slots: [{ name: 'default', content: () => slotContentIR }],
+          },
+        ],
+        styleArtifact: { staticCss: parentCss, scopeHash: parentHash },
+      }
+
+      const parent = document.createElement('div')
+      document.body.appendChild(parent)
+      mount(parentIR, parent, document)
+      flushSync()
+
+      const rows = Array.from(parent.querySelectorAll('[data-test-row]'))
+      const findings: string[] = []
+
+      // 1. Row count assertion
+      if (rows.length !== 3) {
+        findings.push(`row count: expected 3, got ${rows.length}`)
+      }
+
+      // 2–4. Per-row assertions
+      rows.forEach((row, idx) => {
+        const rowEl = row as HTMLElement
+
+        // 2. Applied style per row
+        const color = getComputedStyle(rowEl).color
+        if (color !== 'rgb(0, 128, 0)') {
+          findings.push(`row[${idx}] color: expected rgb(0, 128, 0), got ${color}`)
+        }
+
+        // 3. Parent scope class present per row
+        if (!rowEl.classList.contains(rewClass)) {
+          findings.push(`row[${idx}] missing class: ${rewClass}`)
+        }
+
+        // 4. Child hash absent per row
+        const childScopeAttr = `data-nv-s-${childHash}`
+        if (rowEl.hasAttribute(childScopeAttr)) {
+          findings.push(`row[${idx}] has forbidden child-scope attr: ${childScopeAttr}`)
+        }
+
+        const childScopeClass = `card_${childHash}`
+        if (rowEl.classList.contains(childScopeClass)) {
+          findings.push(`row[${idx}] has forbidden child-scope class: ${childScopeClass}`)
+        }
+      })
+
+      parent.remove()
+      return { ok: findings.length === 0, findings }
+    })
+
+    expect(result.ok, result.findings.join('\n')).toBe(true)
+  })
+})
