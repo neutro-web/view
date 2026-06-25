@@ -1,4 +1,4 @@
-# nv Reactive Core — Runtime Contract (v0.4.3)
+# nv Reactive Core — Runtime Contract (v0.4.2)
 
 > **Status:** Design contract. Pins the reactive-core semantics that everything
 > else in `@neutro/view` (nv) depends on. This document is the fixed target for
@@ -569,29 +569,14 @@ cycles:
 #### 8.5.2 Global write-graph cycle analysis (build time)
 
 Each `sync` with a reactive source declares `(sources(source) → target)` edges.
-**Renderer-synthesized syncs contribute edges on the same footing as source
-`sync(...)` calls.** A two-way binding (`:value`/`:checked`, emitted as a `{ kind:
-'sync', writeTarget, readExpr }` IR literal rather than a `sync(...)` call) is a
-SyncBinding: its write-back is triggered by a DOM event, not a reactive read, so it
-contributes the edge `reads: ∅ → writes: {target}` (the `readExpr` is the signal→DOM
-render direction and contributes **no** write-graph edge). The compiler builds a
-**write-graph** over *all* syncs in the program — source `sync(...)` calls **and**
-renderer-synthesized SyncBindings — plus the existing derived/signal dependency edges,
-and checks for cycles:
+The compiler builds a **write-graph** over *all* syncs in the program plus the
+existing derived/signal dependency edges, and checks for cycles:
 
 - A cycle exists if a sync's target is transitively a source of that same sync's
   `source` — **except** a reduce-form self-target, which is exempt (the read is
   data, §8.5).
 - **The check MUST be global, not per-sync.** Two syncs can form a cycle neither
   exhibits alone (`sync1: a→b`, `sync2: b→a`). Per-sync analysis would miss it.
-- **The global check spans the front-end boundary.** A SyncBinding in a `.nv` template
-  and a source `sync(...)` in a `.ts`/`.tsx` module that write each other's targets form
-  exactly the cross-boundary cycle the global check must catch; both edges land in one
-  graph. Edge identity uses the single `signalSymbolId` derivation (alias-walk to
-  declaration site) for both kinds — a SyncBinding's `writeTarget` identifier resolves
-  identically to the same signal referenced as a source `sync` target, so the edges
-  connect. (Recovery mechanism: the classifier reads the emitted IR-literal `sync` shape;
-  see decision-log [A2 ruling].)
 - A detected cycle is a **build-time error** naming the participating syncs, not a
   runtime loop. This is the core payoff: the analyzable majority of
   reactive→signal writes have their loop hazard eliminated *before the code runs*.
@@ -602,13 +587,6 @@ and checks for cycles:
   runtime cascade cap (§8.5.4). The static check may only *prove and skip*; it may
   never *force* an unsound assumption (mirrors §10's hard rule). A wrong analysis
   costs performance, never correctness.
-
-> **Dynamic SyncBinding targets are excluded from this static check** (decision-log
-> D-sync-cond-1, 2026-06-24): a dynamic write-target (`:value={() => cond ? a : b}`)
-> would contribute a union-write `writes: {a, b}`, which can flag a cycle realizable in
-> only one branch — a false positive this section's "build-time error" guarantee forbids.
-> Dynamic targets therefore fall to the runtime cascade cap (§8.5.4), preserving
-> never-false-positive. Static (bare-identifier) SyncBinding targets are checked as above.
 
 #### 8.5.3 Classifying a `sync` target (accept / reject-to-`effect`)
 

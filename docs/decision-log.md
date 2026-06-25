@@ -2669,3 +2669,8 @@ correct. No contract note needed (the v0.4.3 note that would have carried it is 
 
 **Supersedes:** *A2 accepted* [2026-06-24]. **Cites:** *Part 3* [2026-06-24], *Unit 1
 LANDED* [2026-06-24], contract §8.5 / §8.5.4, CC plan self-review C1/C2.
+
+**Correction note [2026-06-24]:** The v0.4.3 contract bump was committed (`436caf5`) before
+this reversal; the reversal commit (`50bf521`) updated only the decision log. The contract
+file was reverted to v0.4.2 in a follow-up commit. End state matches this entry's ruling:
+contract v0.4.2, §8.5.2 admits no SyncBinding edges.
