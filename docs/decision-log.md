@@ -3010,3 +3010,27 @@ AMBIGUOUS only on outcome-determinative straddle). Until it lands, read any AMBI
 condition clearly fails as CLEAR and surface.
 
 No contract change (v0.4.2 holds — test-instrument behavior, not core semantics).
+
+### 2026-06-25 — Verdict-logic false-positive fix LANDED (`0c6578a`); kind-split tripwire fully closed
+
+Closes the "fix commissioned / until it lands" note in `2026-06-25 — Kind-split tripwire: verdict
+CLEAR (both engines) ...`. Commission `cc-handoff-wide-graph-verdict-logic-fix.md` landed at
+`0c6578a`, verified by reading the harness diff at SHA.
+
+**Fix verified.** The AMBIGUOUS branch now escalates only on a decision-relevant straddle:
+`decisive_straddle = (b_straddles && a_clear_hold) || (a_straddles && b_clear_hold)`, where
+`*_clear_hold = condition_* && !*_straddles`. Verdict branch is `FIRE` (A∧B) → `AMBIGUOUS`
+(decisive_straddle) → `CLEAR`. Traced across all cases: WebKit's prior config (A fails ~100×, B
+straddles 30%) now yields **CLEAR**; a genuine decision-relevant straddle (one condition clearly
+holds, the other straddles toward not-holding) still yields **AMBIGUOUS** — the fix narrows, does
+not disable, escalation. No FIRE leak (A∧B is checked first). CONFIG constants, noise bands
+(`noise_ms=0.5`, `noise_share=0.04`), and condition definitions unchanged; no `src/` touch.
+
+**Boundary note.** At an exact 30.00% share, `condition_b = share > 0.3` is false (strict `>`) and
+`b_straddles` is true; with A failing, `decisive_straddle` is false → CLEAR. The strict-inequality
+boundary behaves correctly.
+
+**Status.** Kind-split tripwire is **CLEAR, terminal, both engines**, on corrected evidence
+(~0.15–0.17ms/tick, ~100× under a 16.7ms frame). The harness no longer has a path to report a
+spurious AMBIGUOUS when one condition clearly decides the verdict. Kind-split + LIS remain accepted
+structural gaps. WS1 wide-graph frontier is closed. No contract change (v0.4.2).
