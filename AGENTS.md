@@ -83,6 +83,11 @@ as new entries citing the superseded entry's date. If a decision changes the con
 note the contract version bump in the entry. When the Log grows unwieldy, move stale
 entries to `docs/decision-log-archive.md` with a one-line pointer left behind.
 
+**`docs/decision-log.md` on `main` is the canonical copy.** CC may apply architect paste-ready
+log entries directly to the repo (commit + push). PK (`/mnt/project/decision-log.md`) syncs
+from `main` rather than being patched by hand; always pull from `main` before applying any
+further PK edits to avoid silent drift.
+
 When a change lands code that alters the inventory or a seam, update
 `docs/implementation-state.md` in the same pass (it is orientation, not history — edit it in
 place; do not append-and-date it like the log).
