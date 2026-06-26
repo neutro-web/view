@@ -134,8 +134,9 @@ _Last updated: 2026-06-24. Contract **v0.4.2** · Template-IR **v0.4.2**._
   harness reports propagation self-time ~0.15–0.17ms/tick vs a 16.7ms frame — Condition A
   (absolute breach) fails by ~100× and is unflippable at 1000×10. Chromium CLEAR clean;
   WebKit reported AMBIGUOUS via a gate-logic false positive (straddle of a decision-irrelevant
-  B when A fails by ~100×) — architect-resolved to CLEAR. **Kind-split + LIS are accepted
-  structural gaps (evidence-tested, not deferred).** The earlier "~0.005ms / ~3,000×" framing
+  B when A fails by ~100×) — architect-resolved to CLEAR. **Kind-split is an accepted structural gap (evidence-tested CLEAR, not deferred); LIS is
+  closed-by-tradeoff [2026-06-22] on its own trigger (reorder cost at larger N), not gated on
+  this verdict.** The earlier "~0.005ms / ~3,000×" framing
   is withdrawn — it was a dead-graph artifact; CLEAR holds on the corrected ~100× number.
   Reopens only on a materially larger/deeper real-app graph in real profiling. A verdict-logic
   fix is commissioned (`cc-handoff-wide-graph-verdict-logic-fix.md`) so the straddle
@@ -3034,3 +3035,33 @@ boundary behaves correctly.
 (~0.15–0.17ms/tick, ~100× under a 16.7ms frame). The harness no longer has a path to report a
 spurious AMBIGUOUS when one condition clearly decides the verdict. Kind-split + LIS remain accepted
 structural gaps. WS1 wide-graph frontier is closed. No contract change (v0.4.2).
+
+### 2026-06-25 — Clarification: LIS is closed-by-tradeoff, not gated on the wide-graph verdict
+
+Corrects a coupling overstatement in the 2026-06-25 CLEAR entries (`... verdict CLEAR (both
+engines) ...` and the Current State bullet), which read "kind-split + LIS stay gated on this
+verdict." That bundling is imprecise. The two items have **different statuses and different
+triggers**; the wide-graph CLEAR decides only kind-split.
+
+**Kind-split — deferred-on-evidence.** Gated on real-app `ReactiveNode`-width evidence. The
+wide-graph harness *is* that instrument, and its CLEAR (~0.15–0.17ms/tick, ~100× under a 16.7ms
+frame) is the evidence: propagation is not a top frame cost at realistic scale, so the cross-stream,
+§9-adjacent, regression-prone (2026-06-18 field-reorder +18%/+27%) struct split is not justified
+now. Reopens on a materially larger/deeper real-app graph breaching frame budget in real profiling.
+
+**LIS (list move-minimization) — closed-by-tradeoff, NOT gated on this verdict.** Independently
+CLOSED 2026-06-22, not commissioned: the list reconcile uses O(N) `insertBefore`, with accepted move
+cost at the current target N traded against LIS bookkeeping complexity. Its reopen trigger is its
+**own** measurement — row-churn reorder cost becoming material at larger N — which the wide-graph
+steady-state harness (signal→derived→effect propagation, not list reorder) does not measure. The
+wide-graph CLEAR neither decides nor holds LIS; LIS was already closed before the harness ran.
+
+**Why the bundling happened.** The session handoff grouped them because both touch
+`ReactiveNode`-width / reorder structural cost. That shared *theme* is real, but it is not a shared
+*gate*. Recorded so a future reader does not treat the wide-graph CLEAR as the thing holding LIS, or
+expect LIS to reopen on wide-graph evidence.
+
+**Net.** Both remain accepted structural gaps — cost measured, fix known on paper, deliberately not
+taken at current targets — but on **independent** falsifiable triggers (kind-split: real-app
+frame-budget breach; LIS: reorder cost at larger N). Neither is foreclosed; neither is scheduled. No
+contract change (v0.4.2).
