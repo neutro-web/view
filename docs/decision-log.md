@@ -199,11 +199,19 @@ _Last updated: 2026-06-24. Contract **v0.4.2** · Template-IR **v0.4.2**._
   redirect). LANDED 2026-06-23 at 1aa52b8. G1–G4, G3', G3'-inverse, G6, G7: green.
   G5 (`<each>`-in-slot) DEFERRED 2026-06-23 — out of scope; `<each>`-in-slot capability unwired
   (L773 discard). Styling handles it for free once the capability lands. G5 test skipped w/ reason.
-- **Increment SS — COMMISSIONED 2026-06-23, Gate-P (awaiting CC plan).** Joint
-  `<each>`-in-slot wiring + D-slot-style-1 structural collapse (static class → classlist
-  static entry, regex removed). Collapse toward main-walk list-push via shared helper
-  (D-SS-2). Re-enables G5 + adds emit-exec differential (D-SS-3). Gated by the Action-2
-  oracle (D-SS-4). No IR bump. Closes the slot domain. See Log 2026-06-23 + handoff.
+- **Increment SS — LANDED `58afe25` [2026-06-23], slot domain CLOSED.** `<each>`-in-slot
+  wired in BOTH FEs (`buildNvSlotContentIR` + html-tag `buildSlotContentIR` consume `lists`
+  via shared `pushListBinding` — D-SS-2 structural identity by construction). D-slot-style-1
+  collapsed: static `class=` lifted to classlist `{kind:'static'}` entries via shared
+  `liftStaticClassBindings` (both call sites — main `frag` + slot `fragWrapper`); `shape.html`
+  regex REMOVED. Main-path static-class-under-`$style` live bug fixed in the same lift.
+  All-static-slot limitation CLOSED (OP-1, post-walk scan). G5 re-enabled (live, not skipped);
+  emit-exec differential + both-FE oracle (D-SS-3/D-SS-4) green; depth-2 behavioral on both
+  back-ends. 659/0, tsc clean. No IR bump (Template-IR v0.4.2, reactive-core v0.4.2 untouched).
+  **G-SS-browser (Playwright ×3 styled-cascade leg) DEFERRED** — element-targeting correctness
+  is jsdom-proven (G-SS-mainpath-root + G-SS-depth2); only real-cascade CSS-application waits
+  on a browser run (`$style` scope-attr stamping needs `root instanceof Element`, undefined
+  under inline-jsdom). See Log 2026-06-23 (LANDED + bookkeeping-correction).
 - **SyncBinding (`:value`/`:checked`):** Parts 1+2 landed. **Part 3 CLOSED [2026-06-24] —
   no static cycle check applies.** A static SyncBinding is an external-source sync (DOM
   event = external producer, §8.5/§8.6): no reactive source, cannot form a §8.5.2
@@ -260,12 +268,14 @@ _Last updated: 2026-06-24. Contract **v0.4.2** · Template-IR **v0.4.2**._
   (no structural binding for static attrs); false-match risk on literal `class=` in text.
   Not a shipped defect. [2026-06-23]
   DISPOSITION CHOSEN 2026-06-23: structural collapse (lift static class → classlist static
-  entry, remove regex) inside Increment SS. Closes on SS land, not before.
+  entry, remove regex) inside Increment SS. **CLOSED `58afe25` [2026-06-23]** — shared
+  `liftStaticClassBindings`, regex removed, main-path bug fixed in the same lift.
 - **Slot static-class all-static limitation:** purely static slot content (no holes) yields no
   ComponentBinding → static class unrewritten. Pre-existing parser constraint (D-each-4 family).
   [2026-06-23]
-  Re-examination commissioned in Increment SS (open-point-1): may close for free given
-  the walk is full-DFS + component detection is sentinel-driven. CC verifies at HEAD.
+  Re-examination commissioned in Increment SS (open-point-1): **CLOSED `58afe25`
+  [2026-06-23]** — `liftStaticClassBindings` post-walk scan handles purely-static slot
+  content (no ComponentBinding/hole required); main and slot paths now uniform.
 - **R-style-1 — OPEN research: `<style>` fallback performance at the compiler level.**
   S1+S2 injection uses `adoptedStyleSheets`-first with graceful `<style>` fallback (OPEN-5,
   architect-ruled 2026-06-23). The fallback path appends a `<style>` element at mount time,
@@ -3065,3 +3075,21 @@ expect LIS to reopen on wide-graph evidence.
 taken at current targets — but on **independent** falsifiable triggers (kind-split: real-app
 frame-budget breach; LIS: reorder cost at larger N). Neither is foreclosed; neither is scheduled. No
 contract change (v0.4.2).
+
+### 2026-06-25 — Current State reconciled to the Increment SS landing (header-only; no code change)
+
+The Current State header still described Increment SS as "COMMISSIONED ... awaiting CC plan" and
+listed D-slot-style-1 + the all-static-slot limitation as pending, while the dated log already
+recorded Increment SS LANDED at `58afe25` (entries `2026-06-23 — Increment SS LANDED` + bookkeeping
+correction). Header was never synced on landing — Current-State-vs-dated-log drift, dated log
+authoritative.
+
+**Reconciled (header-only):** SS bullet → LANDED `58afe25`, slot domain CLOSED; D-slot-style-1 →
+CLOSED; all-static-slot limitation → CLOSED; G-SS-browser ×3 noted as the one DEFERRED leg
+(real-cascade CSS-application; element-targeting correctness already jsdom-proven). No code, contract,
+or IR change — reactive-core v0.4.2, Template-IR v0.4.2. Verified at `58afe25` by source read
+(`liftStaticClassBindings`/`pushListBinding` present, `shape.html` regex absent, G5 live, 659/0).
+
+**Named follow-up (carried, not a defect):** G-SS-browser Playwright ×3 styled-cascade leg —
+run on the next browser-harness trip; bundle with any future Playwright gate. Not blocking; slot
+domain is functionally closed and behaviorally proven in jsdom.
