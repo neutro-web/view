@@ -160,10 +160,10 @@ constructing a `ts.Program` over user source). **Landed since this list last edi
 `$style` scoping (S0→S1+S2→SS), SyncBinding, D-cl-3 — all removed from queue.
 
 **Track T — DX gaps (v0.5.0, tagged-template surface):** T-5 `each<T>` generic typing (highest value
-— item type flows through list factory), T-6 tagged-template scoped-style ergonomics (low priority —
-`injectComponentStyle` exists at low level, ergonomic wrapper missing), T-7 `slots`/`slot` DX pass.
+— item type flows through list factory), T-6 tagged-template scoped-style ergonomics (`injectComponentStyle`
+exists internally but is NOT on the public API — no-build users need an external CSS pipeline or a new
+exported helper), T-7 `slots`/`slot` DX pass.
 
 - Tagged-template docs — LANDED (first-class v0.1.0 path, both surfaces documented).
 - DX gaps logged (v0.5.0 Track T, non-blocking): T-5 each<T> generic typing (highest value),
-  T-6 tagged-template scoped-style ergonomics, T-7 slots DX. `injectComponentStyle` exists (capability
-  not missing, only ergonomics).
+  T-6 tagged-template scoped-style (no public API hook — not just ergonomics), T-7 slots DX.

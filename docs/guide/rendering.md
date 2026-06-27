@@ -77,7 +77,7 @@ html`
     ${each(
       () => items(),
       (item) => item.id,
-      ({ item }) => html`<li>${() => item.name}</li>`
+      ({ item }) => html`<li>${() => item().name}</li>`
     )}
   </ul>
 `
@@ -86,8 +86,8 @@ html`
 **Key differences from `.nv` `<each>`:**
 - `.nv` uses the `<each>` element; tagged template uses the `each()` function in a hole
 - The items argument is a thunk: `() => items()` (reactive — re-evaluated when the signal changes)
-- The factory receives `{ item, index }` via destructuring
-- Reactive values inside the factory body must still be thunks: `${() => item.name}` (note: `item` here is a plain value from the factory arg, not a signal — use it directly or wrap if reactive)
+- The **key function** receives the raw item value: `(item) => item.id`
+- The **factory** receives `{ item, index }` where both are **signal thunks** — call `item()` to read the current value, `index()` for the position. This is what makes each row reactive: the factory body creates effects that track `item()` reads.
 - Works inside `<tbody>` and `<select>` natively (no `<template>` rewrite needed — `each()` produces an anchor-based list regardless)
 
 **`<tbody>` example:**
@@ -100,8 +100,8 @@ html`
         (row) => row.id,
         ({ item: row }) => html`
           <tr>
-            <td>${() => row.name}</td>
-            <td>${() => row.value}</td>
+            <td>${() => row().name}</td>
+            <td>${() => row().value}</td>
           </tr>
         `
       )}
@@ -296,7 +296,7 @@ $style(() => ({
 
 Styles defined in `$style` are injected into a `<style>` element at mount time and removed when the component unmounts.
 
-The tagged template has no ergonomic `$style` equivalent. The low-level `injectComponentStyle(doc, hash, cssText)` function is exported from `@neutro/view/renderer` and can be called directly with a hand-supplied identity hash, but there is no automatic scoping helper on the tagged-template path. Most no-build users use an external CSS pipeline instead.
+The tagged template has no `$style` equivalent. The `injectComponentStyle(doc, hash, cssText)` function exists internally (`src/renderer/style-inject.ts`) but is not on the public package API — there is no exported scoping helper for the tagged-template path. Use an external CSS pipeline or standard `<style>` injection instead.
 
 ---
 

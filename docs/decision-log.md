@@ -3276,8 +3276,9 @@ source.
 
 Three DX/ergonomics findings on the tagged-template (raw) surface, all v0.5.0+ Track T, none blocking:
 - **F-DX-1 ($style):** no first-class tagged-template scoped-style binding. NOTE: `injectComponentStyle`
-  IS exported (`style-inject.ts`) — capability exists at low level; only the ergonomic surface is
-  missing. Docs state this honestly. → T-6.
+  exists in `style-inject.ts` but is NOT on the public API (not re-exported from the barrel, no
+  subpath export). Both the ergonomic surface AND a public low-level hook are missing; no-build users
+  must use an external CSS pipeline. Docs state this accurately. → T-6.
 - **F-DX-2 (slots):** tagged-template `slots()`/`slot()` heavier than `.nv` `let={…}`. Subjective DX.
   → T-7.
 - **F-DX-3 (each typing):** `each()` factory props are opaque `unknown`; `{item,index}` is convention
