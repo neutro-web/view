@@ -1445,6 +1445,32 @@ const List = $component((props) => {
   })
 })
 
+// ── EX-EACH-06: non-assignment slot-prop reads in event handlers ──────────────
+//
+// Regression guard: item.id / item.label in bare expressions and multi-statement
+// arrow handler bodies must be rewritten to slotProps.item().id / slotProps.item().label,
+// not left as free variables.
+
+describe('EX-EACH-06  non-assignment slot-prop reads in event handlers are rewritten', () => {
+  const source = `
+const List = $component(() => {
+  $script(() => {
+    const selected = signal(0)
+    const log = signal('')
+  })
+  $render(() => html\`<ul><each .of="\${[]}" key="\${(i) => i.id}" let={item}><li @click="\${() => { log = item.label; selected = item.id }}">\${item.label}</li></each></ul>\`)
+})`
+
+  test('EX-EACH-06  multi-statement handler body: both item.label and item.id rewritten via slotProps', () => {
+    const js = emitModule(parseNvFileForEmit(source, 'list.nv', sharedDoc))
+    // Both slot-prop reads must be rewritten — neither should appear as bare `item.`
+    expect(js).toContain('slotProps.item().label')
+    expect(js).toContain('slotProps.item().id')
+    expect(js).not.toContain('log.set(item.label)')
+    expect(js).not.toContain('selected.set(item.id)')
+  })
+})
+
 // ── EX-CL-01..04: class-selection — .nv behavioral e2e (closes D-cl-1) ──────
 
 /**

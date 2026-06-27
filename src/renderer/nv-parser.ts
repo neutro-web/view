@@ -2400,6 +2400,30 @@ function eraseHandlerExpr(
       return
     }
 
+    // Slot-prop identifier from let={item} on <each>.
+    // Must allow the object position in property access (item.id → slotProps.item().id)
+    // unlike signals, where obj position is skipped to avoid rewriting signal.set(...).
+    if (
+      propsAccessors !== undefined &&
+      ts.isIdentifier(node) &&
+      propsAccessors.has(node.text) &&
+      !shadowed.has(node.text)
+    ) {
+      const p = node.parent
+      if (ts.isCallExpression(p) && p.expression === node) return
+      if (ts.isPropertyAccessExpression(p) && p.name === node) return // skip name position only
+      if (ts.isVariableDeclaration(p) && p.name === node) return
+      if (ts.isParameter(p) && p.name === node) return
+      if (ts.isShorthandPropertyAssignment(p)) return
+      if (ts.isPropertyAssignment(p) && p.name === node) return
+      if (ts.isImportSpecifier(p) || ts.isImportClause(p)) return
+      if (ts.isLabeledStatement(p) && p.label === node) return
+      const slotAccessor = propsAccessors.get(node.text)
+      if (slotAccessor === undefined) return
+      rewrites.push({ start: node.getStart(), end: node.getEnd(), replacement: slotAccessor })
+      return
+    }
+
     // Bare read: reactive identifier in a value position, not shadowed
     if (ts.isIdentifier(node) && symbols.all.has(node.text) && !shadowed.has(node.text)) {
       const p = node.parent
