@@ -1,5 +1,6 @@
 name: Release Please
 
+# Disabled for v0.1.0 — will be activated post-release to own future version bumps and tagging.
 on:
   # Manual trigger only — uncomment the push trigger below when ready for automated releases
   workflow_dispatch:
