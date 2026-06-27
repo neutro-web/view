@@ -19,9 +19,8 @@ export default defineConfig({
       provider: 'local',
     },
     nav: [
-      { text: 'Guide', link: '/guide/getting-started' },
-      { text: 'Overview', link: '/guide/overview' },
-      { text: 'GitHub', link: 'https://github.com/neutro-web/view' },
+      { text: 'Getting Started', link: '/guide/getting-started' },
+      { text: 'API Reference', link: '/guide/api-reference' },
     ],
     sidebar: [
       {
