@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-27. Contract **v0.4.2** · Template-IR **v0.4.2**._
+_Last updated: 2026-06-27 (CP-2c). Contract **v0.4.2** · Template-IR **v0.4.2**._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
 > `decision-log-archive.md` (moved 2026-06-21). This snapshot is the resolved
@@ -67,11 +67,15 @@ _Last updated: 2026-06-27. Contract **v0.4.2** · Template-IR **v0.4.2**._
 - **CP-2b — CLOSED 2026-06-27.** nv passes isKeyed (run/remove/swap) in krausest harness (cloned SHA
   4fbccf55…), registered as keyed/nv/, build-prod TS-free, no src/ change. +2 DOM delta verified
   harmless (element-positional selectors + tr-identity keyed detection). v0.1.0 benchmarkable bar met.
-- **WATCH (low/latent-medium) — isKeyed remove-test storedTr uses tr:nth-child (Alpine template
-  workaround); nv hits index=3 branch.** Passes, margin characterized: single leading text node,
-  1000 TRs contiguous (positions 2–1001), anchor comment + trailing text after. tr:nth-child(3) = 2nd
-  row, robust. Constraint: nv must not emit inter-row whitespace/comment nodes inside list body.
-- **v0.1.0 remaining:** CP-2c (baseline, post-tag, separate commission) + CP-4 (author docs).
+- **CP-2b nth-child watch-item — RETIRED 2026-06-27** (max margin, zero inter-row nodes;
+  tr:nth-child(3)=2nd TR confirmed).
+- **CP-2c — DATA COMPLETE 2026-06-27** (Chrome 149/M2 Max/harness 4fbccf55…). nv wins select
+  (0.34×) + update-10th (0.68×) vs vanilla; at-peer bulk create (~1.7×); memory 2.4× vanilla. Axiom
+  conditionally upheld.
+- **LIS — REOPENED for v0.5.0** (2026-06-22 trigger met: swap 3.95× vanilla). Root cause:
+  unconditional insertBefore per row (interpreter L540). Fix two-tier: position-guard first (Tier 1),
+  full LIS only if Tier 1 leaves a large-N deficit (Tier 2).
+- **v0.1.0 — TAG-READY.** CP-4 docs placed. Swap deficit is v0.5.0; no blocking items remain.
 - **Component API v1:** LANDED. Composition works end-to-end through the compiled
   path (A2 factory-shape convergence).
 - **Slot consumption — increments 1 + 1.5 + 2 LANDED (2026-06-22):** inc 2 = scoped-slot
@@ -3230,3 +3234,34 @@ position 3 = 2nd row. Margin is maximum: single leading text node only, zero int
 The index-3 alignment is **robust**, not coincidental. Constraint: nv must not emit inter-row
 whitespace/comment nodes inside the list body — the <each> anchor and flanking whitespace are
 region-level (before/after all rows), not per-item.
+
+---
+
+### 2026-06-27 — CP-2c baseline recorded; axiom conditionally upheld; LIS REOPENED (trigger met)
+
+**Status:** CP-2c data complete (Chrome 149, M2 Max, harness SHA 4fbccf55…, 15 iter, 2× throttle).
+CP-2b nth-child watch-item RETIRED — tbody dump shows zero inter-row nodes, tr:nth-child(3)=2nd TR,
+maximum margin.
+
+**Axiom verdict (highly performant): conditionally upheld.** nv WINS where fine-grained reactivity
+targets: select row 0.34× vanilla, update-every-10th 0.68× — beating Solid/Svelte. At-peer on bulk
+create (1.66–1.75× vanilla, in the Solid/Svelte band). Memory 2.4× vanilla / above signal peers
+(v0.5.0 efficiency target, cleanup verified non-leaking). ONE structural defect: swap rows 3.95×
+vanilla / 3.49× Solid.
+
+**Swap root cause (verified at interpreter.ts L540–550, not inferred):** the reconcile ordering pass
+calls insertBefore unconditionally for EVERY row every reconcile (no in-position check; comment:
+"O(N) moves worst-case, LIS-Ivi move-minimization deferred"). A 2-element swap emits ~1000
+insertBefore calls = full 1000-row re-layout. Script 21.9ms (reactive work is small); paint 111.7ms
+(DOM thrash). 15/15 iterations consistent, 6% CV — structural.
+
+**LIS REOPENED.** The 2026-06-22 closed-by-tradeoff entry pre-registered reopen on "a measured swap-
+throughput deficit at benchmark scale." Met at 3.95×. Reopened for v0.5.0. Fix is two-tier: Tier 1 =
+position-guard (skip insertBefore when node already in place; ~2 moves not 1000 — may alone close the
+deficit); Tier 2 = full LIS-Ivi for arbitrary-permutation move-minimization (only if Tier 1 leaves a
+large-N deficit). Sequence Tier 1 → re-measure → decide Tier 2. Both reconcile-internal, no IR/closure-
+axiom touch.
+
+**v0.1.0 NOT blocked:** swap deficit is a characterized, root-caused, fix-pathed known tradeoff;
+measured margin is the v1.0.0 axis per the (a) ruling. v0.1.0 tags honestly as competitive-on-partial-
+update with a tracked reorder deficit. CP-2c numbers in roadmap CP-2c.
