@@ -3176,3 +3176,14 @@ Net: 705 unit tests + 10 browser gates green. CP-2b (isKeyed verify) and CP-2c (
 The Bug 3 fix (`interpreter.ts` `wireList`) filters whitespace-only text nodes for the single-root check but `mountFragment` still inserts them (L778) and item teardown removes only the content root (L508) — leading/trailing whitespace text nodes around each `<tr>` are orphaned and accumulate across remove/clear/create cycles. Invisible to rendering and to G-2a-3; relevant because CP-2c grades memory.
 
 **Preferred fix (B, collapse):** strip insignificant leading/trailing whitespace from the list-item body shape at parse/emit time so the nodes never enter the fragment — removes the cause, shrinks every item mount, demotes the Bug 3 filter to a rarely-firing guard. **Alternative (A, patch):** track + remove whitespace siblings in `onCleanup`. Scoped to parse/emit; separate commission. Required before the CP-2c memory baseline is trustworthy IF a node-count assertion (`<tbody>` `childNodes` after `create-1000 → clear → create-1000` should not grow) confirms growth.
+
+---
+
+### 2026-06-26 — Whitespace leak CLOSED (disproven); CP-2b/2c ruled harness-venue gates
+
+**Leak finding CLOSED.** Step-1 probe (`0e66fae`), both engines: `tbody.childNodes` after `create-1000 → clear → create-1000` = `1003`, equal to single `create-1000`. The `+3` is static per-list-region mount nodes (anchor comment + 2 indentation whitespace nodes flanking `<each>` in `tbody`), not per-item. Bug-3-fix orphans are bounded to the list region, not the teardown path. CP-2a-closeout leak follow-up retired; shape-strip fix (direction B) skipped — not needed.
+
+**CP-2b/2c venue ruling.** CP-2b (`isKeyed`) and CP-2c (baseline) run only in the external `krausest/js-framework-benchmark` harness (webdriver-ts/Selenium/pinned browsers/registered competitors), not in this repo. They are gated on a one-time harness-venue setup (clone harness, register the `.nv` app as `keyed/nv/`, install webdriver-ts) — a separate benchmark-venue commission, not part of the nv repo gate suite. Reimplementing the harness in-repo is rejected (degraded copy). Architect commission error owned: prior re-issue mis-scoped these as local npm steps; CC correctly HALTed on the venue boundary.
+
+**Open — user input required:** existing harness clone to point at, or venue-setup commission first?
+**Open — roadmap definition:** "benchmarkable" for v0.1.0 = harness-registerable + `isKeyed`-pass (CP-2c numbers land post-tag), OR = numbers recorded (both gate the tag). Architect leans the former (measured margin is the v1.0.0 axis); user to confirm.

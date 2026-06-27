@@ -123,10 +123,12 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
   10 gates green both engines, 8 ops real-browser, keyed-move confirmed. 4 `src/` bugs surfaced +
   fixed (emitter thunk-slot, parser `propsAccessors` ×2, interpreter whitespace-root). CP-2b/2c
   remain.
-- **OPEN (low) — whitespace text-node leak on keyed-list teardown** (Bug-3-fix residue). `wireList`
-  filters whitespace-only roots for the single-root check but `mountFragment` inserts them and
-  teardown removes only the content root — whitespace text nodes orphaned on item remove/clear.
-  Gated on CP-2c memory baseline. Preferred fix: strip item-body shape whitespace at parse/emit.
+- **CP-2 leak follow-up — CLOSED 2026-06-26 (`0e66fae`).** Probe: no per-item node growth;
+  `tbody.childNodes` stable at 1003 across create→clear→create (+3 is static per-region, not
+  per-row). Bug-3 orphans bounded. Shape-strip fix not needed.
+- **CP-2b / CP-2c — RULED harness-venue** (external `krausest/js-framework-benchmark`), not in-repo.
+  Gated on one-time venue setup. OPEN: (user) existing harness clone vs setup-first; (roadmap) does
+  CP-2c numbers gate v0.1.0 or land post-tag.
 - **`$style` × slots** — LANDED 2026-06-23 (Increment SS). `patchClasslistTokens` component
   case recurses into slot IR classlist entries. **D-slot-style-1 CLOSED (Increment SS):**
   `liftStaticClassBindings` replaces shape.html regex — static class= attrs lifted to
