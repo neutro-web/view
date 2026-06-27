@@ -10,6 +10,7 @@ export default defineConfig({
     'design/**',
     'gates/**',
     'superpowers/**',
+    'guide/**',
   ],
   title: '@neutro/view',
   description: 'Fine-grained reactive view engine for the web.',
@@ -20,23 +21,37 @@ export default defineConfig({
     },
     nav: [
       { text: 'Home', link: '/' },
-      { text: 'Getting Started', link: '/guide/getting-started' },
-      { text: 'API Reference', link: '/guide/api-reference' },
+      { text: 'Getting Started', link: '/getting-started' },
+      { text: 'API', link: '/api/' },
+      { text: 'Guides', link: '/guides/' },
+      { text: 'Community', link: '/community' },
+      { text: 'Contributing', link: '/contributing' },
     ],
-    sidebar: [
-      {
-        text: 'Guide',
-        items: [
-          { text: 'Overview', link: '/guide/overview' },
-          { text: 'Getting Started', link: '/guide/getting-started' },
-          { text: 'Authoring .nv', link: '/guide/authoring-nv' },
-          { text: 'Reactivity', link: '/guide/reactivity' },
-          { text: 'Rendering', link: '/guide/rendering' },
-          { text: 'API Reference', link: '/guide/api-reference' },
-          { text: 'Architecture', link: '/guide/architecture' },
-        ],
-      },
-    ],
+    sidebar: {
+      '/api/': [
+        {
+          text: 'API Reference',
+          items: [
+            { text: 'Overview', link: '/api/' },
+            { text: 'Core', link: '/api/core' },
+            { text: 'Renderer', link: '/api/renderer' },
+            { text: 'Plugin & Runtime', link: '/api/plugin' },
+          ],
+        },
+      ],
+      '/guides/': [
+        {
+          text: 'Guides',
+          items: [
+            { text: 'Overview', link: '/guides/' },
+            { text: 'Authoring .nv', link: '/guides/authoring-nv' },
+            { text: 'Reactivity', link: '/guides/reactivity' },
+            { text: 'Rendering', link: '/guides/rendering' },
+            { text: 'Architecture', link: '/guides/architecture' },
+          ],
+        },
+      ],
+    },
     socialLinks: [
       { icon: 'github', link: 'https://github.com/neutro-web/view' },
     ],

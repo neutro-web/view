@@ -45,8 +45,7 @@
   line-height: 1.6 !important;
 }
 
-/* ── Nav logo — bold blue brand name ── */
+/* ── Nav logo — bold, default text colour ── */
 .VPNavBarTitle .title {
   font-weight: 700 !important;
-  color: var(--vp-c-brand-1) !important;
 }

@@ -51,7 +51,7 @@ Numbers from Chrome 149 on M2 Max, harness commit 4fbccf55 (see [Decision Log â€
 
 ## Links
 
-- [API Reference](./guide/api-reference.md)
+- [API Reference](/api/)
 - [Decision Log â€” CP-2c](https://github.com/neutro-web/view/blob/main/docs/decision-log.md)
-- [Getting Started](./guide/getting-started.md)
-- [Architecture](./guide/architecture.md)
+- [Getting Started](/getting-started)
+- [Architecture](/guides/architecture)

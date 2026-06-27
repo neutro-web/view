@@ -7,10 +7,10 @@ hero:
   actions:
     - theme: brand
       text: Get Started
-      link: /guide/getting-started
+      link: /getting-started
     - theme: alt
       text: API Reference
-      link: /guide/api-reference
+      link: /api/
 
 features:
   - title: Signal-native reactivity
@@ -36,24 +36,23 @@ features:
 
 Most view libraries pay a per-update tax: reconcile a virtual DOM, diff component trees, patch the real DOM. `@neutro/view` skips all of that. Signals track exactly which DOM nodes depend on which values — when a signal changes, only those nodes update. No diffing pass, no component re-render, no scheduler.
 
-```ts
-import { createHtmlTag, mount } from '@neutro/view/renderer'
-import { signal } from '@neutro/view/core'
-
-const html = createHtmlTag(document)
-const count = signal(0)
-
-const view = html`
-  <div>
-    <p>${() => count()}</p>
-    <button @click="${() => count.set(count() + 1)}">+</button>
-  </div>
-`
-
-mount(view, document.getElementById('app')!, document)
+```js
+const Counter = $component(() => {
+  $script(() => {
+    const count = signal(0)
+  })
+  $render(() => html`
+    <div>
+      <p>${count}</p>
+      <button @click="${() => count = count + 1}">+</button>
+    </div>
+  `)
+})
 ```
 
-[Get Started](/guide/getting-started) | [API Reference](/guide/api-reference) | [Architecture](/guide/architecture)
+Write natural signal reads and assignments — the compiler erases them to efficient accessor calls at build time. No manual `.get()` / `.set()`.
+
+[Get Started](/getting-started) | [API](/api/) | [Guides](/guides/)
 
 ---
 
@@ -69,6 +68,10 @@ mount(view, document.getElementById('app')!, document)
 
 ## Support the Project
 
-If this library saves you time, consider [buying me a coffee](https://buymeacoffee.com/koficodedat). It keeps the packages maintained and the documentation up to date.
+If this library saves you time, consider supporting its development:
+
+<a href="https://buymeacoffee.com/koficodedat" target="_blank">
+  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="40" />
+</a>
 
 Found a bug or have a feature request? [Open an issue on GitHub](https://github.com/neutro-web/view/issues).
