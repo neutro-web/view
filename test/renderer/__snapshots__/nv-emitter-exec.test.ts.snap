@@ -2,7 +2,7 @@
 
 exports[`EX-02  Conditional: emitted module exercises conditional literal > EX-02-emitted-js  conditional fixture emitted JS snapshot 1`] = `
 "import { signal } from '@neutro/view/core'
-import { mount } from '@neutro/view/renderer'
+import { mount } from '@neutro/view/renderer/runtime'
 
 export function Toggle(props, slots) {
   const show = signal(true)

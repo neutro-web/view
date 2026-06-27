@@ -37,6 +37,7 @@ import { parseNvFileForEmit } from '../../src/renderer/nv-parser.js'
 const repoRoot = path.resolve(import.meta.dirname, '../..')
 const coreIndexPath = path.join(repoRoot, 'src/core/index.ts')
 const rendererIndexPath = path.join(repoRoot, 'src/renderer/index.ts')
+const rendererRuntimePath = path.join(repoRoot, 'src/renderer/runtime.ts')
 
 // ── Test environment ──────────────────────────────────────────────────────────
 
@@ -113,6 +114,9 @@ async function bundleEmittedJs(emittedJs: string): Promise<string> {
           }))
           build.onResolve({ filter: /^@neutro\/view\/renderer$/ }, () => ({
             path: rendererIndexPath,
+          }))
+          build.onResolve({ filter: /^@neutro\/view\/renderer\/runtime$/ }, () => ({
+            path: rendererRuntimePath,
           }))
         },
       },
@@ -337,6 +341,9 @@ async function bundleComponentWithSignal(source: string, name: string): Promise<
           build.onResolve({ filter: /^@neutro\/view\/renderer$/ }, () => ({
             path: rendererIndexPath,
           }))
+          build.onResolve({ filter: /^@neutro\/view\/renderer\/runtime$/ }, () => ({
+            path: rendererRuntimePath,
+          }))
         },
       },
     ],
@@ -533,6 +540,9 @@ const App = $component(() => {
             build.onResolve({ filter: /^@neutro\/view\/renderer$/ }, () => ({
               path: rendererIndexPath,
             }))
+            build.onResolve({ filter: /^@neutro\/view\/renderer\/runtime$/ }, () => ({
+              path: rendererRuntimePath,
+            }))
             // Remap .js imports that originated from .nv specifiers back to .nv
             // so nvPlugin can pick them up (nvPlugin rewrites .nv→.js in emitted source)
             build.onResolve({ filter: /\.js$/ }, (args) => {
@@ -653,6 +663,9 @@ const App = $component(() => {
           build.onResolve({ filter: /^@neutro\/view\/renderer$/ }, () => ({
             path: rendererIndexPath,
           }))
+          build.onResolve({ filter: /^@neutro\/view\/renderer\/runtime$/ }, () => ({
+            path: rendererRuntimePath,
+          }))
           build.onResolve({ filter: /\.js$/ }, (args) => {
             const jsPath = path.resolve(path.dirname(args.importer), args.path)
             const nvPath = jsPath.replace(/\.js$/, '.nv')
@@ -747,6 +760,9 @@ const App = $component((props) => {
             build.onResolve({ filter: /^@neutro\/view\/renderer$/ }, () => ({
               path: rendererIndexPath,
             }))
+            build.onResolve({ filter: /^@neutro\/view\/renderer\/runtime$/ }, () => ({
+              path: rendererRuntimePath,
+            }))
             build.onResolve({ filter: /\.js$/ }, (args) => {
               const jsPath = path.resolve(path.dirname(args.importer), args.path)
               const nvPath = jsPath.replace(/\.js$/, '.nv')
@@ -834,6 +850,9 @@ const App = $component((props) => {
             build.onResolve({ filter: /^@neutro\/view\/renderer$/ }, () => ({
               path: rendererIndexPath,
             }))
+            build.onResolve({ filter: /^@neutro\/view\/renderer\/runtime$/ }, () => ({
+              path: rendererRuntimePath,
+            }))
             build.onResolve({ filter: /\.js$/ }, (args) => {
               const jsPath = path.resolve(path.dirname(args.importer), args.path)
               const nvPath = jsPath.replace(/\.js$/, '.nv')
@@ -906,6 +925,9 @@ export { flushSync, signal } from '@neutro/view/core'
             build.onResolve({ filter: /^@neutro\/view\/core$/ }, () => ({ path: coreIndexPath }))
             build.onResolve({ filter: /^@neutro\/view\/renderer$/ }, () => ({
               path: rendererIndexPath,
+            }))
+            build.onResolve({ filter: /^@neutro\/view\/renderer\/runtime$/ }, () => ({
+              path: rendererRuntimePath,
             }))
           },
         },
@@ -1009,7 +1031,7 @@ const Counter = $component((props) => {
     // so we use the emitted bundle for both paths to ensure identical factory
     const bundleEntry = `${emitModule(counterResults)}
 export { flushSync, signal, createRoot } from '@neutro/view/core'
-export { mount } from '@neutro/view/renderer'
+export { mount } from '@neutro/view/renderer/runtime'
 `
     const entryFile = tmpPath('.js')
     const outFile = tmpPath('.bundle.mjs')
@@ -1027,6 +1049,9 @@ export { mount } from '@neutro/view/renderer'
             build.onResolve({ filter: /^@neutro\/view\/core$/ }, () => ({ path: coreIndexPath }))
             build.onResolve({ filter: /^@neutro\/view\/renderer$/ }, () => ({
               path: rendererIndexPath,
+            }))
+            build.onResolve({ filter: /^@neutro\/view\/renderer\/runtime$/ }, () => ({
+              path: rendererRuntimePath,
             }))
           },
         },
@@ -1103,6 +1128,9 @@ async function buildListBundle(source: string): Promise<string> {
           build.onResolve({ filter: /^@neutro\/view\/core$/ }, () => ({ path: coreIndexPath }))
           build.onResolve({ filter: /^@neutro\/view\/renderer$/ }, () => ({
             path: rendererIndexPath,
+          }))
+          build.onResolve({ filter: /^@neutro\/view\/renderer\/runtime$/ }, () => ({
+            path: rendererRuntimePath,
           }))
         },
       },
@@ -1444,6 +1472,9 @@ async function buildClassBundle(source: string): Promise<string> {
           build.onResolve({ filter: /^@neutro\/view\/core$/ }, () => ({ path: coreIndexPath }))
           build.onResolve({ filter: /^@neutro\/view\/renderer$/ }, () => ({
             path: rendererIndexPath,
+          }))
+          build.onResolve({ filter: /^@neutro\/view\/renderer\/runtime$/ }, () => ({
+            path: rendererRuntimePath,
           }))
         },
       },

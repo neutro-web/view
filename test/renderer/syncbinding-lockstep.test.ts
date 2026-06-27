@@ -25,6 +25,7 @@ import { parseNvFileForEmit } from '../../src/renderer/nv-parser.js'
 const repoRoot = path.resolve(import.meta.dirname, '../..')
 const coreIndexPath = path.join(repoRoot, 'src/core/index.ts')
 const rendererIndexPath = path.join(repoRoot, 'src/renderer/index.ts')
+const rendererRuntimePath = path.join(repoRoot, 'src/renderer/runtime.ts')
 
 const tempFiles: string[] = []
 const tempDirs: string[] = []
@@ -182,6 +183,9 @@ const SyncInput = $component(() => {
           build.onResolve({ filter: /^@neutro\/view\/renderer$/ }, () => ({
             path: rendererIndexPath,
           }))
+          build.onResolve({ filter: /^@neutro\/view\/renderer\/runtime$/ }, () => ({
+            path: rendererRuntimePath,
+          }))
         },
       },
     ],
@@ -275,6 +279,9 @@ const SyncInput = $component(() => {
           }))
           build.onResolve({ filter: /^@neutro\/view\/renderer$/ }, () => ({
             path: rendererIndexPath,
+          }))
+          build.onResolve({ filter: /^@neutro\/view\/renderer\/runtime$/ }, () => ({
+            path: rendererRuntimePath,
           }))
         },
       },

@@ -39,6 +39,10 @@
       "types": "./dist/renderer/index.d.ts",
       "import": "./dist/renderer/index.js"
     },
+    "./renderer/runtime": {
+      "types": "./dist/renderer/runtime.d.ts",
+      "import": "./dist/renderer/runtime.js"
+    },
     "./package.json": "./package.json"
   },
   "publishConfig": {

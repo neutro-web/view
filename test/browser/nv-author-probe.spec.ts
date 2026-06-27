@@ -61,6 +61,9 @@ test.beforeAll(async () => {
           build.onResolve({ filter: /^@neutro\/view\/renderer$/ }, () => ({
             path: join(repoRoot, 'src/renderer/index.ts'),
           }))
+          build.onResolve({ filter: /^@neutro\/view\/renderer\/runtime$/ }, () => ({
+            path: join(repoRoot, 'src/renderer/runtime.ts'),
+          }))
         },
       },
     ],

@@ -671,7 +671,7 @@ const C = $component(() => {
     expect(js).not.toContain('onCleanup')
   })
 
-  test('EM-11c  emitted string imports mount from @neutro/view/renderer', () => {
+  test('EM-11c  emitted string imports mount from @neutro/view/renderer/runtime', () => {
     const source = `
 const C = $component(() => {
   $script(() => { const count = signal(0) })
@@ -679,7 +679,7 @@ const C = $component(() => {
 })`
     const results = parseNvFileForEmit(source, 'test.nv', document)
     const js = emitModule(results)
-    expect(js).toContain("from '@neutro/view/renderer'")
+    expect(js).toContain("from '@neutro/view/renderer/runtime'")
     expect(js).toContain('mount')
   })
 

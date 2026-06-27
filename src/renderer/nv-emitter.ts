@@ -11,8 +11,10 @@
  *      Body: inlined erased $script, returns IR literal directly. No createRoot.
  *      Sugar: Name.mount = (parent, doc, props?, slots?) => mount(Name(...), parent, doc)
  *
- * Imports: only primitives referenced in $script (core) + mount (renderer).
- *          Uses @neutro/view/* published-surface aliases.
+ * Imports: only primitives referenced in $script (core) + mount (renderer/runtime).
+ *          Uses @neutro/view/* published-surface aliases:
+ *            @neutro/view/core          — reactive primitives
+ *            @neutro/view/renderer/runtime — mount only; TS-compiler-free (split from fat barrel)
  *
  * Throws if any result has an error-level diagnostic (§7).
  */
@@ -313,7 +315,7 @@ function emitImports(results: NvComponentResult[]): string {
   if (coreImports.length > 0) {
     lines.push(`import { ${coreImports.join(', ')} } from '@neutro/view/core'`)
   }
-  lines.push(`import { mount } from '@neutro/view/renderer'`)
+  lines.push(`import { mount } from '@neutro/view/renderer/runtime'`)
   return lines.join('\n')
 }
 
