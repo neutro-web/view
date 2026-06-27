@@ -16,8 +16,10 @@ hero:
 features:
   - title: Signal-native reactivity
     details: Powered by alien-signals — only the exact DOM nodes that depend on a changed signal update.
-  - title: Compiled .nv templates
-    details: No virtual DOM, no runtime diffing — a keyed reconciler moves real nodes directly.
+  - title: Two authoring surfaces
+    details: Write components in compiled .nv files (ergonomic, assignment-erasure) or use the html tagged template directly — no build step, no plugin required.
+  - title: No virtual DOM
+    details: A keyed reconciler moves real DOM nodes directly. No diffing, no patching, no runtime overhead per update.
   - title: Framework-portable
-    details: No framework lock-in. The engine is a single npm package usable from any build toolchain.
+    details: No framework lock-in. The engine is a single npm package usable from any build toolchain or served as a plain ES module.
 ---

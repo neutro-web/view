@@ -157,24 +157,38 @@ The difference: in the tagged template the entire ternary must be wrapped in a t
 
 ## Events
 
-Attach DOM event listeners with the `@eventName` attribute syntax.
+Attach DOM event listeners with the `@eventName` attribute syntax. Any standard DOM event name works: `@click`, `@input`, `@submit`, `@keydown`, and so on.
+
+### `.nv` event syntax
+
+In `.nv` files use assignment form inside the handler — the compiler erases `count = count + 1` to `count.set(count() + 1)`, and bare reads like `name` to `name()`:
 
 ```html
-<button @click="${() => count.set(count() + 1)}">Increment</button>
-```
+<button @click="${() => count = count + 1}">Increment</button>
 
-Any standard DOM event name works: `@click`, `@input`, `@submit`, `@keydown`, and so on.
-
-```html
 <input
   type="text"
-  value="${name()}"
-  @input="${(e) => name.set(e.target.value)}"
+  value="${name}"
+  @input="${(e) => name = e.target.value}"
 />
 
 <form @submit="${(e) => { e.preventDefault(); submit() }}">
   ...
 </form>
+```
+
+### Tagged-template event syntax
+
+In the tagged template there is no erasure — use explicit `.set()` and explicit accessor calls:
+
+```html
+<button @click="${() => count.set(count() + 1)}">Increment</button>
+
+<input
+  type="text"
+  value="${() => name()}"
+  @input="${(e) => name.set(e.target.value)}"
+/>
 ```
 
 Event handlers receive the native DOM event as their argument. The handler runs outside the reactive tracking context, so reading a signal inside a handler does not create a subscription — call the signal accessor explicitly.
@@ -197,6 +211,8 @@ Each key is a class name. Each value is a boolean signal or derived value. When 
 const MyComponent = $component(() => {
   $script(() => {
     const selected = signal(false)
+    const priority = signal('normal')
+    const label = signal('Task')
     const urgent = derived(() => priority === 'high')
   })
 

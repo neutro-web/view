@@ -70,8 +70,8 @@ No build step required — serve through any TypeScript-capable dev server (e.g.
 
 ## Performance
 
-js-framework-benchmark, Chrome 149 / M2 Max: wins select (0.34×) and update-10th
-(0.68×) vs vanilla; at-peer on bulk create (~1.7×); swap rows deficit (3.95×) tracked
+js-framework-benchmark, Chrome 149 / M2 Max: wins select (0.34×), update-10th (0.68×),
+and memory (2.4×) vs vanilla; at-peer on bulk create (~1.7×); swap rows deficit (3.95×) tracked
 for v0.5.0. See [CP-2c in the decision log](docs/decision-log.md).
 
 ## Packages / entry points

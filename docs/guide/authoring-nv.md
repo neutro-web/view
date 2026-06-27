@@ -210,13 +210,22 @@ $render(() => html`
 Use the `<each>` element to render a keyed list. The `.of` attribute takes the iterable signal; `key` takes a function that returns a stable key for each item.
 
 ```js
-$render(() => html`
-  <ul>
-    <each .of="${items}" key="${(item) => item.id}">
-      <li>${item.name}</li>
-    </each>
-  </ul>
-`)
+const TodoList = $component(() => {
+  $script(() => {
+    const items = signal([
+      { id: 1, name: 'Buy milk' },
+      { id: 2, name: 'Walk the dog' },
+    ])
+  })
+
+  $render(() => html`
+    <ul>
+      <each .of="${items}" key="${(item) => item.id}">
+        <li>${item.name}</li>
+      </each>
+    </ul>
+  `)
+})
 ```
 
 The body of `<each>` is the item template. `item` refers to the current element of the list.

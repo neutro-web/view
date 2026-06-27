@@ -96,7 +96,7 @@ Open `http://localhost:3000`. You should see a counter with a `+` button; clicki
 
 ## Tagged-template path (no build step)
 
-Plain TypeScript with no compiler plugin — import `createHtmlTag` and `mount` directly and run through any bundler or dev server that handles TypeScript. `.nv` is preferred for ergonomics; use this path when a build plugin is not an option.
+The tagged-template path is a first-class authoring surface, not a fallback. Import `createHtmlTag` and `mount` directly — no compiler plugin, no esbuild integration. Use it when you prefer working in plain TypeScript, when a build plugin is not available, or when you want the simplest possible setup.
 
 ### The explicit-thunk rule
 

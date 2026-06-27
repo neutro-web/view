@@ -66,7 +66,7 @@ doubled() // 2
 function effect(compute: () => void): () => void
 ```
 
-Runs `compute` once on the next flush, then re-runs whenever its reactive dependencies change. Returns a disposal function that stops the effect and severs its dependency edges.
+Runs `compute` once on the next microtask (microtask-scheduled), then re-runs whenever its reactive dependencies change. Returns a disposal function that stops the effect and severs its dependency edges.
 
 ```ts
 const stop = effect(() => {
@@ -518,7 +518,7 @@ Opaque types returned by the tagged-template helpers. You rarely need to referen
 import { structurallyEqual } from '@neutro/view/renderer'
 ```
 
-Deep structural equality comparator used internally by the renderer. Exported for use in custom equality checks.
+DOM-tree diff utility used internally by the renderer test suite. Compares two `Node` trees and returns `{ equal: boolean, diffPath: string }`. This is **not** a signal equality predicate — it cannot be passed to `signal(v, { equals: ... })` and is not intended for application use.
 
 ---
 
