@@ -3393,3 +3393,143 @@ nv equivalent: once DOC-1 (Guides) and/or a separate API section exist, split in
 | DOC-4 | Contributing page | Low | Medium — contributor funnel |
 | DOC-3 | Community page | Low | Medium — community surface |
 | DOC-5 | Path-scoped sidebars | Trivial (config change only) | Low — do last, after DOC-1 |
+
+---
+
+## 2026-06-27 — Full documentation sweep + neutro/form structural parity
+
+### Summary
+
+This session completed two distinct work phases: (1) a comprehensive documentation quality pass across every published guide page, and (2) a full structural and aesthetic parity pass against `neutro/form`, culminating in a site-wide restructure.
+
+---
+
+### Phase 1 — Documentation sweep (quality pass)
+
+All six guide pages were reviewed and corrected against the actual source code. Changes made:
+
+**`getting-started.md`**
+- Added concrete "How to run" command (Vite example with `pnpm add -D vite && npx vite`)
+- Reframed the tagged-template path as a "first-class authoring surface, not a fallback"
+- Added a link to the thunk note from the README
+
+**`api-reference.md`**
+- Inlined `ReactiveExpr` as `() => unknown` in both `slots()` signatures (was a bare type reference)
+- Corrected `structurallyEqual` description: it is a DOM-tree diff utility returning `{ equal: boolean, diffPath: string }`, not a signal equality predicate
+- Corrected `effect()` scheduling language: "next flush" → "microtask-scheduled"
+
+**`rendering.md`**
+- Split Events section into `.nv` subsection (assignment form, bare reads) and tagged-template subsection (explicit `.set()`)
+- Added missing `priority = signal('normal')` and `label = signal('Task')` declarations to the classlist example's `$script` block
+- Fixed `<code v-pre>class="${{ danger: isActive }}"</code>` in tagged-template section (Vue parser escape)
+- Removed dead link to `../template-ir.md`
+
+**`authoring-nv.md`**
+- Wrapped `<each>` example in a full `$component` with `$script` declaring `items = signal([...])`
+- Corrected erasure boundary language
+
+**`architecture.md`**
+- Clarified `ComponentName.mount(parent, document)` as a two-argument sugar form vs. the three-argument `mount(ir, parent, doc)`
+
+**`reactivity.md`**
+- Removed dead link to `../reactive-core-contract.md`
+- Ensured all imports use `@neutro/view/core`
+
+**`overview.md`**
+- Replaced dead links to excluded docs with GitHub source URLs
+
+**`STATE.md`**
+- Fixed `<code v-pre>class="${{ active: isActive }}"</code>` (Vue parser escape)
+- Replaced decision-log links with GitHub source URLs
+
+**`decision-log.md`**
+- Added entries for neutro/form visual alignment decisions and structural audit
+
+---
+
+### Phase 2 — VitePress build fixes
+
+Two successive build failures were encountered and resolved:
+
+**Vue `{{` parse error**
+VitePress renders markdown through Vue's template compiler. Inline backtick spans containing `{{` were parsed as Vue interpolation expressions, causing build failure at `STATE.md:14:51`. Fix: replaced all such spans (outside fenced code blocks) with `<code v-pre>...</code>` in `STATE.md`, `rendering.md`, and `decision-log.md`.
+
+**17 dead links from srcExclude**
+`decision-log.md`, `reactive-core-contract.md`, and `template-ir.md` are in `srcExclude` — VitePress does not build them as pages, so relative links to them 404 at deploy. Fix: internal prose references converted to plain text; footer/related section links converted to GitHub raw source URLs (`https://github.com/neutro-web/view/blob/main/docs/...`).
+
+---
+
+### Phase 3 — neutro/form structural parity
+
+A full audit of `neutro-web/form` was conducted by fetching `config.ts`, `index.md`, `community.md`, `contributing.md`, `getting-started.md`, `api/index.md`, and `api/core.md` directly from the repo.
+
+**Changes applied:**
+
+| Item | What changed |
+|---|---|
+| `text:` field in hero | Removed — was creating a large black heading below the coloured name. Form uses `name:` + `tagline:` only. |
+| Custom colour overrides | Removed — form uses VitePress defaults (`#3b5bdb`); our overrides caused colour drift. |
+| `Why @neutro/view?` hero section | Added — prose + .nv Counter example (compiler erasure as primary example, not tagged template). |
+| `Neutro Ecosystem` section | Added — lists view, form, fluid. |
+| `Support the Project` section | Added — upgraded from text link to `<img>` buymeacoffee button (matching form). |
+| Footer link row | Added below frontmatter: `Get Started | API | Guides`. |
+| LICENSE | Created: MIT, Copyright (c) 2026 Kofi Nedjoh. |
+| Nav title colour | Removed blue override — form uses VitePress default text colour. |
+
+---
+
+### Phase 4 — Site-wide restructure (DOC-1 through DOC-5 resolved)
+
+The flat `guide/` structure was replaced with a section-based layout matching neutro/form.
+
+**New URL structure:**
+
+| Before | After |
+|---|---|
+| `/guide/getting-started` | `/getting-started` (standalone, no sidebar) |
+| `/guide/overview` | `/guides/` (Guides landing) |
+| `/guide/authoring-nv` | `/guides/authoring-nv` |
+| `/guide/reactivity` | `/guides/reactivity` |
+| `/guide/rendering` | `/guides/rendering` |
+| `/guide/architecture` | `/guides/architecture` |
+| `/guide/api-reference` (monolith) | `/api/` + `/api/core` + `/api/renderer` + `/api/plugin` |
+| (none) | `/community` |
+| (none) | `/contributing` |
+
+**Nav:** `Home | Getting Started | API | Guides | Community | Contributing`
+
+**Sidebars:** path-scoped — `/api/` shows API items only; `/guides/` shows Guide items only; standalone pages show no sidebar.
+
+**API split rationale:** The monolithic `api-reference.md` was split into four pages mirroring neutro/form's per-topic API structure: `index.md` (package overview + import path table), `core.md` (`@neutro/view/core` exports), `renderer.md` (`@neutro/view/renderer` — mount, createHtmlTag, slots, slot, each, cx, classes, IR types, sentinel types, compiler-facing exports), `plugin.md` (nvPlugin + runtime entry + source files verified).
+
+**`guide/**` added to `srcExclude`** to suppress the old pages from the build.
+
+**DOC items resolved by this restructure:**
+
+| ID | Status |
+|---|---|
+| DOC-1 | RESOLVED — Guides section with 5 pages and path-scoped sidebar |
+| DOC-3 | RESOLVED — `/community` with ecosystem table, FAQ, buymeacoffee image |
+| DOC-4 | RESOLVED — `/contributing` with commit format, release process, test commands |
+| DOC-5 | RESOLVED — path-scoped sidebars implemented |
+| DOC-2 | OPEN — Playground still requires an IIFE build target; remains v0.5.0 scope |
+
+---
+
+### Aesthetic decisions (locked)
+
+- **Custom CSS:** After multiple iterations, all overrides removed. `custom.css` contains one rule only: `font-weight: 500` on `.VPHero .tagline` to match neutro/form's rendered tagline weight. VitePress defaults handle everything else.
+- **Source files verified table:** Local absolute paths (`/Users/kofi/_/view/src/...`) replaced with repo-relative paths in `api/plugin.md`.
+- **neutro/form version:** corrected to v0.3.0 in `community.md`.
+
+---
+
+### Commits (this session)
+
+- `fb7dd2b` — docs: full neutro/form structural parity pass *(prior session)*
+- `0ca4914` — docs: restructure into Getting Started, Guides, API, and Community sections
+- `bec4f7e` — docs(api): replace local absolute paths with relative repo paths in source table
+- `ff84e98` — docs(theme): remove tagline font-size override to match neutro/form default
+- `ad1acb9` — docs(theme): remove hero name overrides to match neutro/form default styling
+- `bb92eef` — docs(theme): remove all custom CSS overrides to match neutro/form defaults
+- `c9f66d5` — docs(theme): set tagline font-weight to 500 to match neutro/form
