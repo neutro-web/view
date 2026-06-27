@@ -74,6 +74,8 @@ await esbuild.build({
 })
 ```
 
+> **Note on the runtime entry:** Emitted bundles import `mount` from `@neutro/view/renderer/runtime`, not from the main renderer barrel. The runtime entry is slim — it excludes the parser and TypeScript compiler that the build-time barrel co-exports. You do not need to import from this entry directly; the esbuild plugin handles the retarget automatically.
+
 Run the build:
 
 ```bash
@@ -91,3 +93,9 @@ npx serve .
 ```
 
 Open `http://localhost:3000`. You should see a counter with a `+` button; clicking it increments the number.
+
+## Next steps
+
+- [Overview](./overview.md) — the design model
+- [Authoring .nv](./authoring-nv.md) — full .nv syntax reference
+- [API Reference](./api-reference.md) — all exported functions
