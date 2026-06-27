@@ -2,7 +2,7 @@
 
 This page documents every public export of `@neutro/view`. Every signature here was read directly from source — see [Source files verified](#source-files-verified) at the bottom.
 
-Related reading: [Reactivity guide](./reactivity.md) · [Authoring .nv](./authoring-nv.md) · [Template IR spec](../template-ir.md) · [Reactive Core Contract](../reactive-core-contract.md)
+Related reading: [Reactivity guide](./reactivity.md) · [Authoring .nv](./authoring-nv.md)
 
 ---
 
@@ -480,7 +480,7 @@ These types define the shape of a compiled template. They are consumed by the in
 | `ReactiveExpr` | A thunk: `() => T`. The standard expression type in bindings. |
 | `HandlerExpr` | Event handler: `() => (e: Event) => void` or similar. |
 
-See [Template IR spec](../template-ir.md) for full shape documentation.
+See the [Template IR source](https://github.com/neutro-web/view/blob/main/docs/template-ir.md) for full shape documentation.
 
 ---
 

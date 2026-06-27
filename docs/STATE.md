@@ -29,7 +29,7 @@ nv is a fine-grained reactive view engine. Components run once; signals track wh
 
 ## Performance position
 
-Numbers from Chrome 149 on M2 Max, harness commit 4fbccf55 (see [Decision Log — CP-2c](./decision-log.md) for full detail):
+Numbers from Chrome 149 on M2 Max, harness commit 4fbccf55 (see [Decision Log — CP-2c](https://github.com/neutro-web/view/blob/main/docs/decision-log.md) for full detail):
 
 | Benchmark | vs vanilla |
 |---|---|
@@ -52,6 +52,6 @@ Numbers from Chrome 149 on M2 Max, harness commit 4fbccf55 (see [Decision Log �
 ## Links
 
 - [API Reference](./guide/api-reference.md)
-- [Decision Log — CP-2c](./decision-log.md)
+- [Decision Log — CP-2c](https://github.com/neutro-web/view/blob/main/docs/decision-log.md)
 - [Getting Started](./guide/getting-started.md)
 - [Architecture](./guide/architecture.md)

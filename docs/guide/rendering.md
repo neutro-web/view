@@ -333,4 +333,4 @@ Counter.mount(document.getElementById('app'), document)
 - [Authoring .nv](./authoring-nv.md) — file format, `$component`, `$script`
 - [Reactivity](./reactivity.md) — `signal`, `derived`, `effect`
 - [API Reference](./api-reference.md) — full signatures for all built-ins
-- [Template IR](../template-ir.md) — the intermediate representation the parser produces
+

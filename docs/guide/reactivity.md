@@ -2,7 +2,7 @@
 
 @neutro/view uses a fine-grained reactive system built around signals, derived values, and effects. This page covers every runtime primitive and the ownership model that ties them together.
 
-For formal semantics see [Reactive Core Contract](../reactive-core-contract.md). For the `.nv` template layer (where signal reads are erased to calls at compile time) see [Authoring .nv](./authoring-nv.md). For full type signatures see [API Reference](./api-reference.md).
+For the `.nv` template layer (where signal reads are erased to calls at compile time) see [Authoring .nv](./authoring-nv.md). For full type signatures see [API Reference](./api-reference.md).
 
 ---
 

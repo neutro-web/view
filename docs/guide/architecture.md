@@ -44,7 +44,7 @@ The compiler is never imported in the browser. It runs at build time (via the es
 
 ### `@neutro/view/renderer` — Template IR interpreter
 
-The renderer consumes the reactive core and materializes a [Template IR](../template-ir.md) tree into live DOM. The interpreter walks the IR, creates DOM nodes, and wires fine-grained reactive bindings. Each binding is a single `effect` or `sync` that updates exactly one DOM attribute or text node — there is no virtual DOM diffing pass.
+The renderer consumes the reactive core and materializes a Template IR tree into live DOM. The interpreter walks the IR, creates DOM nodes, and wires fine-grained reactive bindings. Each binding is a single `effect` or `sync` that updates exactly one DOM attribute or text node — there is no virtual DOM diffing pass.
 
 The renderer barrel re-exports the TypeScript parser (`nv-parser.ts`), which transitively imports the TypeScript compiler. **Do not import `@neutro/view/renderer` in emitted bundles.** Use the runtime-only entry instead (see below).
 
@@ -56,7 +56,7 @@ The renderer barrel re-exports the TypeScript parser (`nv-parser.ts`), which tra
 2. The esbuild `nvPlugin` picks up `.nv` imports and calls `parseNvFileForEmit` from `nv-parser.ts`.
 3. The plugin emits a JS module that constructs a `TemplateIR` object and exports a component factory function.
 4. The emitted module imports `mount` from `@neutro/view/renderer/runtime` — the slim entry, not the fat barrel.
-5. At runtime in the browser, the application calls `mount(element, document)` on the component factory.
+5. At runtime in the browser, the application calls `ComponentName.mount(parent, document)` — a two-argument sugar method emitted by the plugin. Internally it calls the three-argument `mount(ir, parent, doc)` from `@neutro/view/renderer/runtime`.
 6. The interpreter walks the IR, creates real DOM nodes, and registers reactive effects for each binding.
 7. When a signal changes, only the DOM nodes whose bindings depend on that signal are updated.
 
@@ -66,7 +66,7 @@ The renderer barrel re-exports the TypeScript parser (`nv-parser.ts`), which tra
 
 The reactive core exposes a small set of stub fields on node objects — `_eqHook`, `_depHook`, and related slots — that are inert (no-op) at runtime unless populated. At build time the compiler analyzes each `derived` node and, where it can prove that a custom equality check is safe and beneficial, the `equality-hook-emitter.ts` writes the hook payload into the emitted JS. When the node next propagates, it calls the hook instead of the default reference-equality check.
 
-This is the mechanism by which the compiler specializes the runtime on a per-node basis. The core itself has no knowledge of what the hooks do; it simply calls them if present. The formal contract for these hooks is documented in the [Reactive Core Contract](../reactive-core-contract.md).
+This is the mechanism by which the compiler specializes the runtime on a per-node basis. The core itself has no knowledge of what the hooks do; it simply calls them if present. The formal contract for these hooks is documented in the Reactive Core Contract (see the source repo).
 
 ---
 
@@ -94,7 +94,7 @@ Because the reactive core has no DOM coupling:
 
 ## Further reading
 
-- [Reactive Core Contract](../reactive-core-contract.md) — formal propagation semantics and §10 hook specification
-- [Template IR](../template-ir.md) — the IR node types and serialization format
-- [Decision Log](../decision-log.md) — rationale for key architectural choices
+- [Decision Log](https://github.com/neutro-web/view/blob/main/docs/decision-log.md) — rationale for key architectural choices
+- [Reactive Core Contract](https://github.com/neutro-web/view/blob/main/docs/reactive-core-contract.md) — formal propagation semantics (source)
+- [Template IR](https://github.com/neutro-web/view/blob/main/docs/template-ir.md) — IR node types and serialization format (source)
 - [API Reference](./api-reference.md) — all public exports with signatures

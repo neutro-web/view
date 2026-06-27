@@ -8,7 +8,7 @@ Components in nv run exactly once. During that single execution, signals record 
 
 This makes the update path proportional to what changed, not to the size of the component tree.
 
-See the [Reactive Core Contract](../reactive-core-contract.md) for the full semantics and the [Decision Log](../decision-log.md) for the rationale behind these choices.
+See the [Decision Log](https://github.com/neutro-web/view/blob/main/docs/decision-log.md) for the rationale behind these choices.
 
 ## The four primitives
 
@@ -25,7 +25,7 @@ Also exported from core: `pubsub`, `errorBoundary`, `batch`, `untrack`, `createR
 
 Components are written in `.nv` files — a template format compiled by the esbuild plugin `nvPlugin`. The plugin emits IR-based code consumed by the renderer at runtime.
 
-See [Getting Started](./getting-started.md) for install and plugin setup, and [Template IR](../template-ir.md) for the IR specification.
+See [Getting Started](./getting-started.md) for install and plugin setup.
 
 ## Package exports
 
@@ -53,5 +53,4 @@ Async primitives, a store, context, and SSR are planned for v0.5.0 and are not a
 
 - [Getting Started](./getting-started.md) — install and first component
 - [API Reference](./api-reference.md) — full signatures for all exports
-- [Reactive Core Contract](../reactive-core-contract.md) — execution and update semantics
-- [Template IR](../template-ir.md) — IR specification for compiler authors
+- [Decision Log](https://github.com/neutro-web/view/blob/main/docs/decision-log.md) — rationale for architectural choices
