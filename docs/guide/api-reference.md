@@ -522,6 +522,184 @@ Deep structural equality comparator used internally by the renderer. Exported fo
 
 ---
 
+## `@neutro/view/renderer` — tagged-template surface
+
+The functions below are exported from `@neutro/view/renderer` and form the hand-authored tagged-template API. They work alongside the `.nv` compiler pipeline but can be used directly in TypeScript without any compiler plugin.
+
+Import path:
+
+```ts
+import { createHtmlTag, mount, each, slots, slot, classes, cx } from '@neutro/view/renderer'
+```
+
+---
+
+### The thunk rule
+
+> Every reactive expression in a hole must be a thunk: `${() => signal()}` not `${signal()}`. The runtime throws on violation:
+> `[nv/html] Expression at hole N is not a function. Wrap reactive values in thunks: ${() => signal()} not ${signal()}.`
+> Sentinel values (`each()`, `classes()`, `slot()`, `slots()`) are not thunks and are passed directly.
+
+---
+
+### `createHtmlTag` (tagged-template)
+
+```ts
+function createHtmlTag(document: Document): (strings: TemplateStringsArray, ...exprs: unknown[]) => TemplateIR
+```
+
+Bind the `html` tag to a document. The returned tagged template function parses the literal into a `TemplateIR` that can be passed to `mount`.
+
+```ts
+const html = createHtmlTag(document)
+const ir = html`<p>${() => count()}</p>`
+```
+
+---
+
+### `mount` (tagged-template)
+
+```ts
+function mount(ir: TemplateIR, parent: Element, doc: Document): () => void
+```
+
+Mount a `TemplateIR` into the DOM. Returns a dispose function that removes all mounted nodes and tears down reactive effects.
+
+`mount` is exported from both `@neutro/view/renderer` and `@neutro/view/renderer/runtime`.
+
+```ts
+const dispose = mount(ir, document.body, document)
+// later:
+dispose()
+```
+
+---
+
+### `each`
+
+```ts
+function each(
+  items: () => readonly unknown[],
+  key: (item: unknown, i: number) => string | number,
+  factory: (props: unknown) => TemplateIR,
+): EachSentinel
+```
+
+Keyed list sentinel. Pass directly in a content hole — do not wrap in a thunk. The `factory` receives `{ item, index }` — destructure as needed:
+
+```ts
+${each(
+  () => todos(),
+  (item) => (item as Todo).id,
+  ({ item }) => html`<li>${() => (item() as Todo).text}</li>`,
+)}
+```
+
+---
+
+### `slots`
+
+```ts
+function slots(name: string, opts?: {
+  fallback?: TemplateIR,
+  [propName: string]: ReactiveExpr | TemplateIR | undefined
+}): SlotSentinel
+```
+
+Slot outlet — the child component declares where parent-provided content renders. `fallback` renders when the slot is absent. Non-`fallback` function-valued keys in `opts` become scoped slot props.
+
+```ts
+${slots('header')}
+${slots('body', { fallback: defaultIR })}
+```
+
+---
+
+### `slot`
+
+```ts
+function slot(name: string, factory: (props: unknown) => TemplateIR): SlotFillSentinel
+```
+
+Slot fill — the parent provides content for a named slot. The `factory` receives the child-exposed slot props.
+
+```ts
+${slot('row', ({ item }) => html`<tr><td>${() => item().name}</td></tr>`)}
+```
+
+---
+
+### `classes`
+
+```ts
+function classes(
+  ...args: Array<
+    | string
+    | Record<string, () => unknown>
+    | Array<string | Record<string, () => unknown>>
+    | null | undefined | false
+  >
+): ClassesSentinel
+```
+
+Reactive class sentinel for use in a `class="${...}"` hole. Values in the object map must be `() => unknown` thunks — they are called reactively when the class list updates.
+
+- String args: split on whitespace, each token becomes a static entry.
+- Object args: each key becomes a toggle entry; the value must be `() => boolean`.
+- Array args: recursively processed.
+- Falsy args: skipped.
+
+```ts
+html`<button class="${classes('btn', { active: () => isActive() })}">`
+```
+
+---
+
+### `cx`
+
+```ts
+function cx(...args: Array<string | Record<string, unknown> | CxArg[] | null | undefined | false | 0>): string
+```
+
+A pure string builder — values are plain truthy, evaluated once, not reactive. Use `classes()` for reactive class toggling.
+
+```ts
+cx('btn', { primary: true, disabled: false }) // 'btn primary'
+```
+
+---
+
+### Sentinel types (tagged-template)
+
+```ts
+interface EachSentinel {
+  readonly __nvEach: true
+  readonly items: () => readonly unknown[]
+  readonly key: (item: unknown, i: number) => string | number
+  readonly factory: (props: unknown) => TemplateIR
+}
+
+interface ClassesSentinel {
+  readonly __nvClasses: true
+  readonly entries: ReadonlyArray<
+    { kind: 'static'; token: string } | { kind: 'toggle'; key: string; expr: () => unknown }
+  >
+}
+
+interface SlotSentinel {
+  readonly __nvSlotOutlet: string
+  readonly __nvFallback?: TemplateIR
+  readonly __nvProps?: readonly PropEntry[]
+}
+
+interface SlotFillSentinel {
+  readonly __nvSlotFill: string
+  readonly factory: (props: unknown) => TemplateIR
+}
+```
+
+---
+
 ## `@neutro/view/renderer/runtime`
 
 ```ts
