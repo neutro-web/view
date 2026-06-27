@@ -119,6 +119,41 @@ $script(() => {
 })
 ```
 
+### Tagged-template: explicit reads and writes
+
+In the tagged template there is no erasure. You write thunks and `.set()` calls explicitly.
+
+```ts
+import { createHtmlTag } from '@neutro/view/renderer'
+import { signal, derived } from '@neutro/view/core'
+
+const html = createHtmlTag(document)
+
+const count = signal(0)
+const doubled = derived(() => count() * 2)
+
+// Reads — must be thunks in holes:
+html`<p>${() => count()}</p>`         // ✓ thunk
+html`<p>${count()}</p>`               // ✗ throws: value not a function
+
+// Writes — explicit .set() always:
+count.set(count() + 1)               // explicit
+```
+
+Side-by-side contrast table:
+
+| Construct | .nv (erased) | Tagged template (explicit) |
+|-----------|-------------|---------------------------|
+| Read signal | `${count}` | `${() => count()}` |
+| Write signal | `count = v` | `count.set(v)` |
+| Compound write | `count += 1` | `count.set(count() + 1)` |
+| Event handler | `@click="${() => count = count + 1}"` | `@click="${() => count.set(count() + 1)}"` |
+
+The runtime enforces the thunk rule — passing a non-thunk, non-sentinel value throws:
+```
+[nv/html] Expression at hole N is not a function. Wrap reactive values in thunks: ${() => signal()} not ${signal()}.
+```
+
 ## The $render Block
 
 The `$render` block returns an `html` tagged template literal that defines the component's markup. The compiler recognises several special syntaxes inside the template.
@@ -146,6 +181,16 @@ $render(() => html`
 ```
 
 The compiler rewrites `count = count + 1` inside the handler to `count.set(count() + 1)`.
+
+### Tagged-template: event handlers
+
+In the tagged template, event handlers use the same `@click="${...}"` syntax, but the handler body is plain JavaScript with explicit `.set()` calls — there is no assignment-form erasure.
+
+```ts
+html`<button @click="${() => count.set(count() + 1)}">Increment</button>`
+```
+
+The handler arrow function is passed directly to the runtime as-is. Any reads inside must call the signal as a function; any writes must call `.set()` explicitly.
 
 ### Conditional Rendering
 
