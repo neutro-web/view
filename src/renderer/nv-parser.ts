@@ -546,19 +546,22 @@ function walkNvNodeList(
       const el = node as Element
 
       // <each> element detection — before component detection.
-      if (el.tagName.toLowerCase() === 'each') {
+      // After sentinelHtml rewrite, <each> appears as <template data-nv-each> in the DOM.
+      // <template> survives in all restricted-content parents (table/select etc.); body is in .content.
+      if (el.tagName.toLowerCase() === 'template' && el.hasAttribute('data-nv-each')) {
+        const eachEl = el as HTMLTemplateElement
         // Find .of and key hole indices from data sentinels
         let itemsHoleIdx = -1
         let keyHoleIdx = -1
         for (let k = 0; k < holeExprs.length; k++) {
-          if (el.getAttribute(`data-nv-prop-${k}`) === 'of') {
+          if (eachEl.getAttribute(`data-nv-prop-${k}`) === 'of') {
             itemsHoleIdx = k
-            el.removeAttribute(`data-nv-prop-${k}`)
+            eachEl.removeAttribute(`data-nv-prop-${k}`)
             consumed.add(k)
           }
-          if (el.getAttribute(`data-nv-attr-${k}`) === 'key') {
+          if (eachEl.getAttribute(`data-nv-attr-${k}`) === 'key') {
             keyHoleIdx = k
-            el.removeAttribute(`data-nv-attr-${k}`)
+            eachEl.removeAttribute(`data-nv-attr-${k}`)
             consumed.add(k)
           }
         }
@@ -567,21 +570,16 @@ function walkNvNodeList(
         }
 
         // Extract let-bound names from let={item, index}.
-        // JSDOM parses `let={item, index}` (unquoted) as two attributes because
-        // of the comma: let="{item," and index}=""
-        // To handle both quoted and unquoted forms, we reassemble the full value
-        // by collecting all broken continuation attributes (attr names ending with '}').
-        const rawLet = el.getAttribute('let') ?? ''
-        // Collect all attribute names that look like broken continuations:
-        // jsdom turns `index}` into an attr name with value "".
+        // JSDOM still splits unquoted `let={item, index}` into broken `let="{item,"` + `index}=""`
+        // even inside a <template> element. To handle both quoted and unquoted forms, reassemble
+        // the full value by collecting broken continuation attributes (attr names ending with '}').
+        const rawLet = eachEl.getAttribute('let') ?? ''
         const brokenParts: string[] = []
-        for (const attr of Array.from(el.attributes)) {
+        for (const attr of Array.from(eachEl.attributes)) {
           if (attr.name !== 'let' && attr.name.endsWith('}') && attr.value === '') {
-            brokenParts.push(attr.name.slice(0, -1).trim()) // strip trailing '}'
+            brokenParts.push(attr.name.slice(0, -1).trim())
           }
         }
-        // rawLet may be "{item," (broken) or "{item, index}" (quoted, complete)
-        // Concatenate any broken continuation parts.
         const fullLetValue =
           brokenParts.length > 0 ? `${rawLet}, ${brokenParts.join(', ')}` : rawLet
         const letNames = fullLetValue
@@ -590,8 +588,8 @@ function walkNvNodeList(
           .map((s) => s.trim())
           .filter(Boolean)
 
-        // Build body IR from child nodes via shared slot content builder
-        const bodyNodes = Array.from(el.childNodes)
+        // Build body IR from template content (body is in .content, not direct childNodes)
+        const bodyNodes = Array.from(eachEl.content.childNodes)
         const { ir: bodyIR, holeIndices: bodyHoleIndices } = buildNvSlotContentIR(
           bodyNodes,
           holeExprs,
@@ -602,14 +600,14 @@ function walkNvNodeList(
         )
         for (const idx of bodyHoleIndices) consumed.add(idx)
 
-        // Replace <each> element with anchor comment
+        // Replace <template data-nv-each> element with anchor comment
         const listIndex = lists.length
         const anchor = doc.createComment(`nv-list-${listIndex}`)
-        el.parentNode?.replaceChild(anchor, el)
+        eachEl.parentNode?.replaceChild(anchor, eachEl)
         const anchorPath = computePath(anchor, root)
 
         lists.push({ anchorPath, itemsHoleIdx, keyHoleIdx, letNames, bodyIR, bodyHoleIndices })
-        return // don't recurse into <each> children (body already processed)
+        return // don't recurse into <each> body (already processed via .content)
       }
 
       // Component element detection via data-nv-component sentinel.
@@ -1101,7 +1099,14 @@ function processHtmlTemplate(
     classifyPosition(strings[i] ?? '', strings[i + 1] ?? ''),
   )
 
-  const { sentinelHtml, shapeHtml } = buildNvHtmlStrings(strings, positions)
+  const { sentinelHtml: rawSentinelHtml, shapeHtml } = buildNvHtmlStrings(strings, positions)
+
+  // Rewrite <each …> → <template data-nv-each …> before innerHTML so HTML foster-parenting
+  // rules don't eject <each> from table/select/etc. contexts. <template> is whitelisted in
+  // all restricted-content parents and survives in place; the walker reads .content.childNodes.
+  const sentinelHtml = rawSentinelHtml
+    .replace(/<each(\s[^>]*)?>/g, (_, attrs) => `<template data-nv-each${attrs ?? ''}>`)
+    .replace(/<\/each>/g, '</template>')
 
   const tmpl = doc.createElement('template')
   tmpl.innerHTML = sentinelHtml
