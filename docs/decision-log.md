@@ -3295,3 +3295,33 @@ v0.1.0 unaffected — both authoring paths work + are documented. These polish t
   blessed pattern. Low priority (external CSS covers most users).
 - **T-7 — slots/slot DX pass.** Reduce scoped-slot verbosity on the tagged-template path. Lowest
   priority; v1.0.0-adjacent.
+
+---
+
+### 2026-06-27 — Docs site visual alignment with neutro/form
+
+**Decision:** Align `@neutro/view` VitePress site structure and visual treatment with `@neutro/form` to establish a consistent neutro ecosystem aesthetic. All changes are docs/config only — no `src/` impact.
+
+**Changes made and rationale:**
+
+**Hero restructure (index.md):**
+- Removed `text:` frontmatter field. VitePress renders `text:` as a second large black heading beneath the coloured `name:`. neutro/form uses `name:` + `tagline:` only — a single coloured title followed by a compact subtitle sentence. The `text:` field caused nv to display two separate large text blocks, doubling the visual weight and breaking the form pattern.
+- Tagline changed to a single descriptive sentence: "Fine-grained reactive view engine for the web." The former tagline ("No virtual DOM. Signal-native. Framework-portable.") duplicated content already present in the feature cards.
+- Removed "View on GitHub" action button. The GitHub icon in the toolbar already serves this link; a dedicated CTA button is redundant and inconsistent with form (which uses "Get Started" + "API Reference" only).
+- Second CTA changed from "View on GitHub" → "API Reference" (`/guide/api-reference`), matching form's button pair convention.
+
+**Feature card count (index.md):**
+- Expanded from 4 features to 6. VitePress renders 4 features as a 2+2 grid; 6 renders as 3+3 — matching form's visual layout. The two new cards ("Fine-grained updates", "Keyed reconciler") are accurate and were undocumented at this surface. No invented claims.
+
+**Nav (config.ts):**
+- Removed GitHub link from nav items. Social link icon (already present) covers this; a duplicate text link with an external-arrow indicator looked inconsistent with form's clean nav.
+- Renamed "Guide" → "Getting Started", "Overview" → "API Reference" to match form's label conventions for equivalent entry points.
+
+**CSS (theme/custom.css):**
+- Removed custom `--vp-c-brand-*` colour overrides. VitePress default `#3b5bdb` already matches neutro/form's blue exactly; the overrides were creating a colour mismatch (the custom values were slightly different from the resolved default).
+- Retained structural overrides: pill-shaped CTA buttons (`border-radius: 9999px`), feature card background/radius/border-removal, nav logo weight, hero name colour binding. These match form's appearance without a custom CSS file (form achieves the same via VitePress defaults + its own border-radius adjustments).
+
+**What was NOT changed:**
+- Sidebar structure — nv has a richer guide than form; sidebar depth is appropriate to content.
+- Feature card content — all details are technically accurate; no new claims added.
+- Colour palette — VitePress default brand colours used as-is.
