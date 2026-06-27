@@ -239,6 +239,32 @@ test('G-2a-2  remove: clicking ✕ removes that row', async ({ page }) => {
   expect(newRow2Label).toBe(row3Label)
 })
 
+// ── G-leak: whitespace text-node leak probe (create-1000 → clear → create-1000) ──
+
+test('G-leak  childNodes stable: create-1000 → clear → create-1000 = single create-1000', async ({
+  page,
+}) => {
+  // Baseline: single create-1000 from fresh mount
+  await mountApp(page)
+  await page.locator('#run').click()
+  await flush(page)
+  const baseline = await page.evaluate(
+    () => document.querySelector('#main tbody')!.childNodes.length,
+  )
+
+  // Drive: clear, then create-1000 again
+  await page.locator('#clear').click()
+  await flush(page)
+  await page.locator('#run').click()
+  await flush(page)
+  const afterCycle = await page.evaluate(
+    () => document.querySelector('#main tbody')!.childNodes.length,
+  )
+
+  console.log(`\nG-leak childNodes: baseline=${baseline}, after-clear-recreate=${afterCycle}`)
+  expect(afterCycle, 'childNodes must not grow across create→clear→create').toBe(baseline)
+})
+
 // ── G-2a-3: keyed identity — swap moves DOM nodes ────────────────────────────
 
 test('G-2a-3  swaprows: row positions swap + DOM nodes are moved, not recreated', async ({
