@@ -65,6 +65,51 @@ Raw `<each>` inside a `<tbody>` or `<select>` would produce invalid HTML because
 
 You do not need to do anything special — the rewrite happens automatically.
 
+### Tagged-template: `each()` function
+
+```ts
+import { createHtmlTag, each } from '@neutro/view/renderer'
+
+const html = createHtmlTag(document)
+
+html`
+  <ul>
+    ${each(
+      () => items(),
+      (item) => item.id,
+      ({ item }) => html`<li>${() => item.name}</li>`
+    )}
+  </ul>
+`
+```
+
+**Key differences from `.nv` `<each>`:**
+- `.nv` uses the `<each>` element; tagged template uses the `each()` function in a hole
+- The items argument is a thunk: `() => items()` (reactive — re-evaluated when the signal changes)
+- The factory receives `{ item, index }` via destructuring
+- Reactive values inside the factory body must still be thunks: `${() => item.name}` (note: `item` here is a plain value from the factory arg, not a signal — use it directly or wrap if reactive)
+- Works inside `<tbody>` and `<select>` natively (no `<template>` rewrite needed — `each()` produces an anchor-based list regardless)
+
+**`<tbody>` example:**
+```ts
+html`
+  <table>
+    <tbody>
+      ${each(
+        () => rows(),
+        (row) => row.id,
+        ({ item: row }) => html`
+          <tr>
+            <td>${() => row.name}</td>
+            <td>${() => row.value}</td>
+          </tr>
+        `
+      )}
+    </tbody>
+  </table>
+`
+```
+
 ---
 
 ## Conditionals
@@ -95,6 +140,18 @@ const MyComponent = $component(() => {
 ```
 
 The condition is re-evaluated reactively — wrap derived conditions in `derived` if they depend on multiple signals.
+
+### Tagged-template: conditional thunk
+
+```ts
+// .nv (condition is auto-erased, branches are html`...`):
+${isLoggedIn ? html`<span>Welcome</span>` : html`<a>Sign in</a>`}
+
+// Tagged template (whole conditional wrapped in a thunk):
+${() => isLoggedIn() ? html`<span>Welcome</span>` : html`<a>Sign in</a>`}
+```
+
+The difference: in the tagged template the entire ternary must be wrapped in a thunk because there is no erasure. The branches are the same `html` tagged template literals.
 
 ---
 
@@ -157,6 +214,29 @@ Static classes can be combined with reactive bindings by including a fixed `true
 <div class="${{ card: true, highlighted: isHighlighted }}">
 ```
 
+### Tagged-template: `classes()` and `cx()`
+
+```ts
+import { createHtmlTag, classes, cx } from '@neutro/view/renderer'
+
+// classes() — REACTIVE. Values must be thunks (() => boolean):
+html`<tr class="${classes({ danger: () => selected() === item.id })}">...</tr>`
+
+// cx() — STATIC. Values are plain truthy (not thunks). Evaluated once:
+html`<div class="${cx('col-md-4', isActive && 'active')}">...</div>`
+```
+
+**The critical distinction (G-TT-3 gate):**
+- `classes()` is the tagged-template analog of `.nv`'s `class="${{ danger: isActive }}"` — but values must be `() => boolean` thunks, not plain booleans
+- `cx()` is a pure string builder — no reactivity, used for static class composition
+- Using `cx()` where you need `classes()` means class toggles will not update when signals change
+
+Mapping from .nv to tagged template:
+```
+.nv:              class="${{ active: isActive, urgent: priority === 'high' }}"
+Tagged template:  class="${classes({ active: () => isActive(), urgent: () => priority() === 'high' })}"
+```
+
 ---
 
 ## Scoped styles with `$style`
@@ -215,6 +295,8 @@ $style(() => ({
 ```
 
 Styles defined in `$style` are injected into a `<style>` element at mount time and removed when the component unmounts.
+
+The tagged template does not have a `$style` equivalent — scoped styles are a `.nv`-specific feature.
 
 ---
 
