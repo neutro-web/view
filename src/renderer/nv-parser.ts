@@ -2190,10 +2190,11 @@ function eraseHandlerExpr(
   symbols: ScriptSymbols,
   diagnostics: NvDiagnostic[],
   propsParamName?: string,
+  propsAccessors?: ReadonlyMap<string, string>,
 ): string {
   if (!ts.isArrowFunction(handlerExpr)) {
     // Non-arrow handler (e.g., bare identifier): just erase bare reads
-    return eraseSignalReadsInNode(handlerExpr, symbols.all)
+    return eraseSignalReadsInNode(handlerExpr, symbols.all, propsAccessors)
   }
 
   const fn = handlerExpr
@@ -2262,7 +2263,7 @@ function eraseHandlerExpr(
       if ((isSimple || binaryOp !== undefined) && ts.isIdentifier(lhs) && !shadowed.has(lhs.text)) {
         const name = lhs.text
         if (symbols.writable.has(name)) {
-          const erasedRhs = eraseSignalReadsInNode(rhs, symbols.all)
+          const erasedRhs = eraseSignalReadsInNode(rhs, symbols.all, propsAccessors)
           rewrites.push({
             start: node.expression.getStart(),
             end: node.expression.getEnd(),
@@ -2334,7 +2335,7 @@ function eraseHandlerExpr(
       if ((isSimple || binaryOp !== undefined) && ts.isIdentifier(lhs) && !shadowed.has(lhs.text)) {
         const name = lhs.text
         if (symbols.writable.has(name)) {
-          const erasedRhs = eraseSignalReadsInNode(rhs, symbols.all)
+          const erasedRhs = eraseSignalReadsInNode(rhs, symbols.all, propsAccessors)
           rewrites.push({
             start: node.getStart(),
             end: node.getEnd(),
@@ -2682,7 +2683,7 @@ function computeThunkSource(
   // event
   return {
     kind: 'event',
-    handlerSrc: eraseHandlerExpr(holeExpr, symbols, diagnostics, propsParamName),
+    handlerSrc: eraseHandlerExpr(holeExpr, symbols, diagnostics, propsParamName, propsAccessors),
   }
 }
 

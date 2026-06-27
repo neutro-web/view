@@ -238,10 +238,28 @@ function emitBindingLiteral(
 function emitIrLiteral(ir: TemplateIR, thunks: ThunkSource[], indent: string): string {
   const bindingPaths = ir.shape.bindingPaths.map((p) => emitNodePath(p)).join(', ')
   const i4 = `${indent}    `
+  // Use a separate cursor for thunks: pure-static classlist bindings (from
+  // liftStaticClassBindings) have no thunk and must not advance the cursor.
+  let thunkIdx = 0
   const bindingsStr = ir.bindings
-    .map((b, i) => {
-      const thunk = thunks[i]
-      if (thunk === undefined) throw new Error(`[nv/emitter] Missing thunk for binding ${i}`)
+    .map((b) => {
+      // Pure-static classlist — emit directly, no thunk slot consumed.
+      if (
+        b.kind === 'classlist' &&
+        (b as ClassListBinding).entries.every((e) => e.kind === 'static')
+      ) {
+        const clb = b as ClassListBinding
+        const entries = clb.entries
+          .map(
+            (e) =>
+              `{ kind: 'static', token: ${JSON.stringify((e as { kind: 'static'; token: string }).token)} }`,
+          )
+          .join(', ')
+        return `${i4}{ kind: 'classlist', pathIndex: ${clb.pathIndex}, entries: [${entries}] }`
+      }
+      const thunk = thunks[thunkIdx++]
+      if (thunk === undefined)
+        throw new Error(`[nv/emitter] Missing thunk for binding (thunk index ${thunkIdx - 1})`)
       return `${i4}${emitBindingLiteral(b, thunk, ir, i4)}`
     })
     .join(',\n')

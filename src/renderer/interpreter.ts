@@ -493,14 +493,20 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
           createRoot((d) => {
             const itemIR = binding.itemTemplate(valueSig, indexSig)
             const { roots } = mountFragment(itemIR, parent, doc, anchorNode)
-            const [root] = roots
-            if (root === undefined || roots.length !== 1) {
+            // Strip whitespace-only text nodes — well-formatted templates have them
+            // around the single root element (e.g. newlines between <each> and <tr>).
+            const contentRoots = roots.filter(
+              (n) => n.nodeType !== 3 /* TEXT_NODE */ || (n.textContent?.trim() ?? '') !== '',
+            )
+            const [root] = contentRoots
+            if (root === undefined || contentRoots.length !== 1) {
               throw new Error(
                 '[nv] Multi-root list items are not supported in v1. Wrap the item template in a single root element.',
               )
             }
             mountedRoot = root
             onCleanup(() => {
+              // Remove the content root; whitespace siblings are harmless orphans.
               if (mountedRoot.parentNode !== null) mountedRoot.parentNode.removeChild(mountedRoot)
             })
             return d
