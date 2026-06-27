@@ -11,7 +11,7 @@ nv is a fine-grained reactive view engine. Components run once; signals track wh
 - Use `<each>` for keyed lists, including in tables and selects via `<template>` rewrite
 - Use ternary conditionals: `${cond ? html`...` : html`...`}`
 - Bind events with `@click="${() => count = count + 1}"` (assignment-form, erased to `.set()`)
-- Use reactive classlist: `class="${{ active: isActive }}"`
+- Use reactive classlist: <code v-pre>class="${{ active: isActive }}"</code>
 - Use `$style` for scoped styles (key-form and selector-form)
 - Use `sync` for bidirectional or external-source signal binding
 - Compile via the esbuild plugin (`nvPlugin` from `@neutro/view/renderer/plugin`)

@@ -165,7 +165,7 @@ _Last updated: 2026-06-27 (CP-2c). Contract **v0.4.2** · Template-IR **v0.4.2**
   secondary read if FALSE density is varied; not the harness's primary verdict. *(Note
   2026-06-25: this instrument carried the effect-subscription defect reversed above; it
   the fix landed at `387990f`; the instrument now serves the FALSE-heavy read.)*
-- **Per-key class-toggle node-width** — object-form `class={{...}}` emits one effect per
+- **Per-key class-toggle node-width** — object-form <code v-pre>class={{...}}</code> emits one effect per
   key (fine-grained). For wide objects this trades N graph nodes against 1 looping effect.
   Same `ReactiveNode`-width structural cost as the kind-split tripwire; per-key default
   carries a compile-time width-threshold fallback, threshold gated on real-app evidence.
@@ -202,7 +202,7 @@ _Last updated: 2026-06-27 (CP-2c). Contract **v0.4.2** · Template-IR **v0.4.2**
   behaviorally proven on the emit-exec path (EX-CL-01..04; 599 green; emitted JS shows real
   `boolSrc`, not `stubExpr`). Parse-path structural IR still uses `stubExpr` (unchanged, by
   design — structural-only), but behavioral coverage now exists via the emit path. Tests cover
-  the **interpolated** object-literal form (`class="${{...}}"`); bare-attribute `class={{...}}`
+  the **interpolated** object-literal form (<code v-pre>class="${{...}}"</code>); bare-attribute <code v-pre>class={{...}}</code>
   form distinctness is a minor open question, not blocking.
 - **`$style × slots` — UNPARKED 2026-06-23; spec in progress.** S1+S2 landed, so the
   scope-carry rule is answerable. Seam read done: `patchClasslistTokens` has no
@@ -1102,7 +1102,7 @@ no new attribute):
   `class=${() => cx(...)}`) → ONE full-string AttrBinding (reassigns whole attribute).
 - **per-key toggle**, reached by each FE's idiom (forms differ by FE constraint, not
   inconsistency — matches `each` `<each>`/`each(...)` and slots `slots.x`/`slot(...)`):
-  - **`.nv`:** bare object/array literal — `class={{ active: isActive() }}`.
+  - **`.nv`:** bare object/array literal — <code v-pre>class={{ active: isActive() }}</code>.
   - **tagged-template:** `classes(...)` SENTINEL — `class=${classes({ active: isActive() })}`
     (bare object throws the FE thunk-validator; sentinel is forced by the medium, like
     `each`/`slot`).
@@ -1128,7 +1128,7 @@ analogue of the `.nv` object literal; `.nv` does NOT accept `classes(...)` call-
 (object literal only), mirroring `<each>` vs `each(...)`.
 
 **DX seam (document, not an impl problem):** do not MIX strategies on one element's
-`class` — `class={cx(...)}` is full-reassign; `class={{...}}` is per-key-toggle; pick one
+`class` — `class={cx(...)}` is full-reassign; <code v-pre>class={{...}}</code> is per-key-toggle; pick one
 per element (same root cause as Solid's class+classList warning). Static literal classes
 coexist with either.
 
@@ -1276,10 +1276,10 @@ summary:
   does not reach the emit path.
 
 **Deviation from handoff (not a defect):** the handoff specced the `.nv` bare-attribute form
-`class={{...}}`; the landed tests use the interpolated form `class="${{...}}"` (object literal
+<code v-pre>class={{...}}</code>; the landed tests use the interpolated form <code v-pre>class="${{...}}"</code> (object literal
 at an interpolation hole). CC chose the form the emit path actually exercises — correct under
 the handoff's "confirm the form, do not guess" instruction. Consequence: EX-CL-02 proves the
-**interpolated object-literal** path. Whether the bare-attribute `class={{...}}` `.nv` form is
+**interpolated object-literal** path. Whether the bare-attribute <code v-pre>class={{...}}</code> `.nv` form is
 a distinct emit path or sugar over the same lowering is **not settled** by this increment —
 logged as a minor open question, not blocking.
 
@@ -1329,8 +1329,8 @@ which stated D-cl-3 affects "both back-ends / both front-ends." That framing was
   construction.** Both back-ends *consume* the bad token, but the defect originates solely in
   `.nv` key extraction. Corrected severity: `.nv`-FE-only, not "both front-ends."
 
-- **Open question resolved (the EX-CL-02 deviation):** the bare `class={{...}}` and interpolated
-  `class="${{...}}"` `.nv` surface forms are **NOT distinct extraction sites** — both reach
+- **Open question resolved (the EX-CL-02 deviation):** the bare <code v-pre>class={{...}}</code> and interpolated
+  <code v-pre>class="${{...}}"</code> `.nv` surface forms are **NOT distinct extraction sites** — both reach
   `buildNvHoleBinding`'s object-literal branch. So D-cl-3 is one `.nv` AST-extraction path with
   exactly **four call sites** (object/array × structural/emit: `nv-parser.ts` L367/L399/L2205/L2237),
   no fifth site. The "however many paths" risk flagged before commissioning is closed at four.

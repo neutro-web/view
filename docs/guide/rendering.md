@@ -243,7 +243,7 @@ html`<div class="${cx('col-md-4', isActive && 'active')}">...</div>`
 ```
 
 **The critical distinction (G-TT-3 gate):**
-- `classes()` is the tagged-template analog of `.nv`'s `class="${{ danger: isActive }}"` — but values must be `() => boolean` thunks, not plain booleans
+- `classes()` is the tagged-template analog of `.nv`'s <code v-pre>class="${{ danger: isActive }}"</code> — but values must be `() => boolean` thunks, not plain booleans
 - `cx()` is a pure string builder — no reactivity, used for static class composition
 - Using `cx()` where you need `classes()` means class toggles will not update when signals change
 
