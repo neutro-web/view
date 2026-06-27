@@ -6,6 +6,7 @@ nv is a fine-grained reactive view engine. Components run once; signals track wh
 
 ## What you can do today
 
+**`.nv` components (compiled):**
 - Author `.nv` components with the four primitives: `signal`, `derived`, `effect`, `sync`
 - Use `<each>` for keyed lists, including in tables and selects via `<template>` rewrite
 - Use ternary conditionals: `${cond ? html`...` : html`...`}`
@@ -16,6 +17,15 @@ nv is a fine-grained reactive view engine. Components run once; signals track wh
 - Compile via the esbuild plugin (`nvPlugin` from `@neutro/view/renderer/plugin`)
 - Mount in a real browser: `Component.mount(element, document)`
 - Run in the js-framework-benchmark suite as `keyed/nv/`
+
+**Tagged template (`html`, no-build):**
+- Author components in plain `.ts`/`.js` — no esbuild plugin, no `.nv` files
+- Use `createHtmlTag(document)` to get the `html` tagged template tag
+- Reactive holes require explicit thunks: `${() => signal()}` (no compiler erasure)
+- Use `each()` for keyed lists, `classes()` for reactive class toggling, `cx()` for static class strings
+- Use `slots()` / `slot()` for component composition
+- Mount with `mount(ir, parent, document)` from `@neutro/view/renderer`
+- Same runtime, same performance characteristics as the `.nv` path
 
 ## Performance position
 

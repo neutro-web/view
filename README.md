@@ -46,6 +46,28 @@ Counter.mount(document.getElementById('app'), document)
 
 > `// @ts-nocheck` is required because `.nv` files have no TypeScript declarations yet.
 
+**Tagged template (no-build alternative):**
+
+```ts
+import { createHtmlTag, mount } from '@neutro/view/renderer'
+import { signal } from '@neutro/view/core'
+
+const html = createHtmlTag(document)
+const count = signal(0)
+
+const view = html`
+  <div>
+    <p>${() => count()}</p>
+    <button @click="${() => count.set(count() + 1)}">+</button>
+  </div>
+`
+
+mount(view, document.getElementById('app')!, document)
+// No build step. No .nv file. No esbuild plugin.
+```
+
+No build step required — import and run from any TypeScript-capable bundler or dev server. The explicit thunk (`() => count()`) is required because there is no compiler erasure.
+
 ## Performance
 
 js-framework-benchmark, Chrome 149 / M2 Max: wins select (0.34×) and update-10th
