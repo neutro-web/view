@@ -3265,3 +3265,32 @@ axiom touch.
 **v0.1.0 NOT blocked:** swap deficit is a characterized, root-caused, fix-pathed known tradeoff;
 measured margin is the v1.0.0 axis per the (a) ruling. v0.1.0 tags honestly as competitive-on-partial-
 update with a tracked reorder deficit. CP-2c numbers in roadmap CP-2c.
+
+---
+
+### 2026-06-27 — Tagged-template docs landed; 3 DX gaps logged (none v0.1.0-blocking)
+
+Tagged-template authoring documented as a first-class v0.1.0 path (getting-started no-build section,
+per-construct parity in rendering, API-reference section, README + STATE both paths). Verified at
+source.
+
+Three DX/ergonomics findings on the tagged-template (raw) surface, all v0.5.0+ Track T, none blocking:
+- **F-DX-1 ($style):** no first-class tagged-template scoped-style binding. NOTE: `injectComponentStyle`
+  IS exported (`style-inject.ts`) — capability exists at low level; only the ergonomic surface is
+  missing. Docs state this honestly. → T-6.
+- **F-DX-2 (slots):** tagged-template `slots()`/`slot()` heavier than `.nv` `let={…}`. Subjective DX.
+  → T-7.
+- **F-DX-3 (each typing):** `each()` factory props are opaque `unknown`; `{item,index}` is convention
+  not a typed interface. Most impactful (typing gap on every list). Fix: generic `each<T>`. → T-5.
+
+v0.1.0 unaffected — both authoring paths work + are documented. These polish the secondary surface.
+
+**Track T additions (v0.5.0 DX-track):**
+- **T-5 — tagged-template `each<T>` generic typing.** Thread item type through the `each` signature so
+  list factories get inference. Highest-value of the three (every list, every no-build user).
+  Compiler/type-level only, no runtime change.
+- **T-6 — tagged-template scoped-style ergonomics.** A first-class scoped-style helper for the
+  tagged-template path (wrapping `injectComponentStyle` with auto identity-hashing), or a documented
+  blessed pattern. Low priority (external CSS covers most users).
+- **T-7 — slots/slot DX pass.** Reduce scoped-slot verbosity on the tagged-template path. Lowest
+  priority; v1.0.0-adjacent.

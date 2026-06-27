@@ -296,7 +296,7 @@ $style(() => ({
 
 Styles defined in `$style` are injected into a `<style>` element at mount time and removed when the component unmounts.
 
-The tagged template does not have a `$style` equivalent — scoped styles are a `.nv`-specific feature.
+The tagged template has no ergonomic `$style` equivalent. The low-level `injectComponentStyle(doc, hash, cssText)` function is exported from `@neutro/view/renderer` and can be called directly with a hand-supplied identity hash, but there is no automatic scoping helper on the tagged-template path. Most no-build users use an external CSS pipeline instead.
 
 ---
 
