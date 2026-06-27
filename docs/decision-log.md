@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-24. Contract **v0.4.2** · Template-IR **v0.4.2**._
+_Last updated: 2026-06-27. Contract **v0.4.2** · Template-IR **v0.4.2**._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
 > `decision-log-archive.md` (moved 2026-06-21). This snapshot is the resolved
@@ -64,6 +64,14 @@ _Last updated: 2026-06-24. Contract **v0.4.2** · Template-IR **v0.4.2**._
   ruled: emitted bundles pull the TS compiler via the fat `@neutro/view/renderer` barrel — runtime
   entry `@neutro/view/renderer/runtime` commissioned (package split, emitter L316 retarget); no
   runtime/IR/contract change.
+- **CP-2b — CLOSED 2026-06-27.** nv passes isKeyed (run/remove/swap) in krausest harness (cloned SHA
+  4fbccf55…), registered as keyed/nv/, build-prod TS-free, no src/ change. +2 DOM delta verified
+  harmless (element-positional selectors + tr-identity keyed detection). v0.1.0 benchmarkable bar met.
+- **WATCH (low/latent-medium) — isKeyed remove-test storedTr uses tr:nth-child (Alpine template
+  workaround); nv hits index=3 branch.** Passes, margin characterized: single leading text node,
+  1000 TRs contiguous (positions 2–1001), anchor comment + trailing text after. tr:nth-child(3) = 2nd
+  row, robust. Constraint: nv must not emit inter-row whitespace/comment nodes inside list body.
+- **v0.1.0 remaining:** CP-2c (baseline, post-tag, separate commission) + CP-4 (author docs).
 - **Component API v1:** LANDED. Composition works end-to-end through the compiled
   path (A2 factory-shape convergence).
 - **Slot consumption — increments 1 + 1.5 + 2 LANDED (2026-06-22):** inc 2 = scoped-slot
@@ -3187,3 +3195,38 @@ The Bug 3 fix (`interpreter.ts` `wireList`) filters whitespace-only text nodes f
 
 **Open — user input required:** existing harness clone to point at, or venue-setup commission first?
 **Open — roadmap definition:** "benchmarkable" for v0.1.0 = harness-registerable + `isKeyed`-pass (CP-2c numbers land post-tag), OR = numbers recorded (both gate the tag). Architect leans the former (measured margin is the v1.0.0 axis); user to confirm.
+
+---
+
+### 2026-06-27 — CP-2b CLOSED: nv passes isKeyed in the krausest harness
+
+**Status:** CP-2b CLOSED. v0.1.0 "benchmarkable" bar (roadmap ruling (a)) met. Verified by reading
+harness isKeyed.ts/webdriverAccess.ts at cloned SHA 4fbccf55…, not the gate report.
+
+nv registered as frameworks/keyed/nv/ in krausest/js-framework-benchmark (cloned SHA 4fbccf55…),
+builds via build-prod (23K IIFE, TS-compiler-free), passes isKeyed for run/remove/swap. No nv src/
+change required.
+
+The +2 <tbody> DOM delta vs vanillajs (one <!--nv-list-0--> anchor comment + one trailing whitespace
+text node from the <each>→<template> rewrite) is verified harmless: all benchmark + isKeyed row
+selectors are tbody>tr:nth-of-type(N) (element-positional, blind to non-element nodes), and the keyed
+detector counts tr node identities only (filterTRInNodeList). #634 DOM identity substantively clean
+(TR structure + aria-hidden match; harness uses contained class checks).
+
+**LOGGED watch-item (low/latent-medium, not a reopen):** the remove-keyed test picks its tracked
+storedTr via tr:nth-child() (isKeyed.ts L123-125, an Alpine <template>-in-tbody workaround), NOT
+:nth-of-type. nv's <each>→<template> structure lands in that workaround's path: nv hits the index=3
+branch (first tbody child is whitespace → tr:nth-child(1) null). Test passes, but the index-3→2nd-row
+alignment was verified by outcome, not by characterizing nv's exact tbody child sequence. Risk: a
+future change to nv's emitted item-shape whitespace/comments could shift the nth-child arithmetic and
+silently flip remove-keyed to a false result. Action: CC to dump nv's first-3-rows tbody node sequence
+once to size the margin; record any resulting item-shape emission constraint. This is the only place
+nv's extra nodes are not invisible to the harness.
+
+**§2 characterization completed (same session):** tbody child sequence after #add (1000 rows):
+`[1] TEXT "\n            "`, `[2..1001] 1000 × TR (contiguous, no inter-row nodes)`,
+`[1002] COMMENT <!--nv-list-0-->`, `[1003] TEXT "\n          "`. tr:nth-child(3) = TR at child
+position 3 = 2nd row. Margin is maximum: single leading text node only, zero inter-row nodes.
+The index-3 alignment is **robust**, not coincidental. Constraint: nv must not emit inter-row
+whitespace/comment nodes inside the list body — the <each> anchor and flanking whitespace are
+region-level (before/after all rows), not per-item.
