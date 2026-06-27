@@ -38,7 +38,7 @@ The body of `<each>` is the item template. Two implicit bindings are available i
 
 When the array signal updates, the renderer compares old and new keys. Items whose keys still exist are moved rather than recreated, preserving any internal DOM state (focus, scroll position, input values). New keys are inserted with `insertBefore`; removed keys are detached from the DOM.
 
-This means reordering a large list is cheap: the renderer relocates existing DOM nodes instead of destroying and rebuilding them.
+Items that move keep their existing DOM nodes — the renderer relocates them with `insertBefore` rather than destroying and rebuilding. Note: the current implementation calls `insertBefore` unconditionally on every reorder pass, which makes random-swap operations more expensive than sequential appends. This is a known deficit (3.95× vanilla on the swap-rows benchmark) tracked for v0.5.0.
 
 ### Table and select contexts
 
@@ -79,12 +79,14 @@ Both branches must be `html` template literals. When the condition changes, the 
 
 ```javascript
 const MyComponent = $component(() => {
-  const [showDetail, setShowDetail] = $signal(false)
+  $script(() => {
+    const showDetail = signal(false)
+  })
 
   $render(() => html`
     <div>
-      <button @click="${() => setShowDetail(!showDetail())}">Toggle</button>
-      ${showDetail()
+      <button @click="${() => showDetail = !showDetail}">Toggle</button>
+      ${showDetail
         ? html`<section class="detail">...</section>`
         : html`<p>No detail selected.</p>`}
     </div>
@@ -92,7 +94,7 @@ const MyComponent = $component(() => {
 })
 ```
 
-The condition is re-evaluated reactively — wrap derived conditions in `$derived` if they depend on multiple signals.
+The condition is re-evaluated reactively — wrap derived conditions in `derived` if they depend on multiple signals.
 
 ---
 
@@ -136,12 +138,14 @@ Each key is a class name. Each value is a boolean signal or derived value. When 
 
 ```javascript
 const MyComponent = $component(() => {
-  const [selected, setSelected] = $signal(false)
-  const urgent = $derived(() => priority() === 'high')
+  $script(() => {
+    const selected = signal(false)
+    const urgent = derived(() => priority === 'high')
+  })
 
   $render(() => html`
     <li class="${{ selected: selected, urgent: urgent }}">
-      ${label()}
+      ${label}
     </li>
   `)
 })
@@ -229,6 +233,6 @@ Counter.mount(document.getElementById('app'), document)
 ## Related
 
 - [Authoring .nv](./authoring-nv.md) — file format, `$component`, `$script`
-- [Reactivity](./reactivity.md) — `$signal`, `$derived`, `$effect`
+- [Reactivity](./reactivity.md) — `signal`, `derived`, `effect`
 - [API Reference](./api-reference.md) — full signatures for all built-ins
 - [Template IR](../template-ir.md) — the intermediate representation the parser produces

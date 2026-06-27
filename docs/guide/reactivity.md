@@ -11,7 +11,7 @@ For formal semantics see [Reactive Core Contract](../reactive-core-contract.md).
 A signal is a readable, writable reactive value. Reading it inside a reactive context (a derived or an effect) registers a dependency.
 
 ```typescript
-import { signal } from '@neutro/view'
+import { signal } from '@neutro/view/core'
 
 const count = signal(0)
 
@@ -40,7 +40,7 @@ point.set({ x: 0, y: 0 })
 A derived value memoizes a computation that depends on one or more signals (or other derived values). It is **lazy**: the computation does not run until the value is first read, and it does not recompute again until a dependency changes and the value is read again.
 
 ```typescript
-import { signal, derived } from '@neutro/view'
+import { signal, derived } from '@neutro/view/core'
 
 const count  = signal(2)
 const double = derived(() => count() * 2)
@@ -71,7 +71,7 @@ const first = derived(() => ids()[0], {
 An effect runs a side-effectful function and re-runs it whenever its reactive dependencies change. It returns a dispose function that tears down the effect and its cleanups.
 
 ```typescript
-import { signal, effect } from '@neutro/view'
+import { signal, effect } from '@neutro/view/core'
 
 const name = signal('Ada')
 
@@ -98,7 +98,7 @@ Effects are **microtask-scheduled**: after a signal write, pending effects run i
 `batch` defers all effect scheduling until the callback returns. Signals updated inside the batch are committed atomically: dependents see only the final state, and effects run once after the batch, not once per write.
 
 ```typescript
-import { signal, effect, batch } from '@neutro/view'
+import { signal, effect, batch } from '@neutro/view/core'
 
 const x = signal(0)
 const y = signal(0)
@@ -123,7 +123,7 @@ Batches may be nested. Effects are scheduled when the outermost batch returns.
 `untrack` reads signals inside a callback without registering them as dependencies of the enclosing reactive context.
 
 ```typescript
-import { signal, derived, untrack } from '@neutro/view'
+import { signal, derived, untrack } from '@neutro/view/core'
 
 const a = signal(1)
 const b = signal(10)
@@ -150,7 +150,7 @@ result()  // 22 — recomputes because a changed
 `flushSync` runs all pending effects and sync nodes synchronously before returning. Use it in tests, or when you need a guarantee that the DOM reflects the latest signal state before continuing.
 
 ```typescript
-import { signal, effect, flushSync } from '@neutro/view'
+import { signal, effect, flushSync } from '@neutro/view/core'
 
 const n = signal(0)
 
@@ -172,7 +172,7 @@ Sync nodes drain before effects within a single flush (contract §8.7).
 Every effect and derived created inside a reactive context is owned by that context and disposed when the owner is disposed. `createRoot` creates an explicit owner scope.
 
 ```typescript
-import { signal, effect, createRoot } from '@neutro/view'
+import { signal, effect, createRoot } from '@neutro/view/core'
 
 const visible = signal(true)
 
@@ -194,7 +194,7 @@ dispose()
 `onCleanup` registers a cleanup function on the current reactive owner (an effect or a `createRoot`). The cleanup runs before the next execution of the owner, or when the owner is disposed.
 
 ```typescript
-import { signal, effect, onCleanup } from '@neutro/view'
+import { signal, effect, onCleanup } from '@neutro/view/core'
 
 const id = signal('abc')
 
@@ -221,7 +221,7 @@ effect(() => {
 When the source is a function, `sync` tracks it as a reactive computation. The target signal is updated whenever the source value changes.
 
 ```typescript
-import { signal, sync } from '@neutro/view'
+import { signal, sync } from '@neutro/view/core'
 
 const celsius = signal(0)
 const fahrenheit = signal(32)
@@ -251,7 +251,7 @@ sync(
 When the source implements `ExternalSource` (a `subscribe(cb)` method that returns an unsubscribe function), `sync` subscribes to it and pushes updates into the target signal. This is the standard pattern for bridging DOM events, WebSockets, or any push-based source into the reactive graph.
 
 ```typescript
-import { signal, sync } from '@neutro/view'
+import { signal, sync } from '@neutro/view/core'
 
 const inputEl = document.querySelector('input')!
 const value = signal(inputEl.value)
@@ -283,7 +283,7 @@ Writing back to a signal that is in the source path of the same `sync` creates a
 `pubsub` returns a `PubSub` channel that implements `ExternalSource`. It is usable directly as the `source` argument to `sync`.
 
 ```typescript
-import { signal, pubsub, sync } from '@neutro/view'
+import { signal, pubsub, sync } from '@neutro/view/core'
 
 const channel = pubsub<string>()
 const latest  = signal('')
@@ -300,7 +300,7 @@ channel.subscribe((msg) => console.log('received', msg))
 `errorBoundary` wraps a reactive subtree so that errors thrown during computation are caught by a handler rather than propagating up.
 
 ```typescript
-import { signal, derived, errorBoundary } from '@neutro/view'
+import { signal, derived, errorBoundary } from '@neutro/view/core'
 
 errorBoundary(
   (err) => console.error('reactive error:', err),

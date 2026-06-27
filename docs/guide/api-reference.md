@@ -32,7 +32,7 @@ function signal<T>(
 
 Creates a reactive value. Call the returned accessor to read; call `.set(v)` to write.
 
-Pass `equals: false` to always notify observers regardless of value equality. Pass a custom comparator to override the default `===` check.
+Pass `equals: false` to always notify observers regardless of value equality. Pass a custom comparator to override the default `Object.is` check.
 
 ```ts
 const count = signal(0)

@@ -43,7 +43,7 @@ $script(() => {
 })
 ```
 
-Bare-read erasure applies everywhere inside `$script`, including inside event handlers passed as inline expressions. It does not cross function-scope boundaries — see [Shadowing](#erasure-rule-3--shadowing) below.
+Bare-read erasure applies everywhere inside `$script` with no function-scope boundary — it crosses into nested arrow functions and callbacks. The mechanism that limits erasure is [Shadowing](#erasure-rule-3--shadowing): if a nested function declares a local variable with the same name as a signal, only reads and writes to that name inside that function are suppressed.
 
 ### Erasure Rule 2 — Assignment Erasure
 
