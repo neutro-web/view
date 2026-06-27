@@ -31,3 +31,44 @@ features:
   - title: Framework-portable
     details: No framework lock-in. The engine ships as a single npm package usable from any build toolchain or served as a plain ES module with no bundler.
 ---
+
+## Why @neutro/view?
+
+Most view libraries pay a per-update tax: reconcile a virtual DOM, diff component trees, patch the real DOM. `@neutro/view` skips all of that. Signals track exactly which DOM nodes depend on which values — when a signal changes, only those nodes update. No diffing pass, no component re-render, no scheduler.
+
+```ts
+import { createHtmlTag, mount } from '@neutro/view/renderer'
+import { signal } from '@neutro/view/core'
+
+const html = createHtmlTag(document)
+const count = signal(0)
+
+const view = html`
+  <div>
+    <p>${() => count()}</p>
+    <button @click="${() => count.set(count() + 1)}">+</button>
+  </div>
+`
+
+mount(view, document.getElementById('app')!, document)
+```
+
+[Get Started](/guide/getting-started) | [API Reference](/guide/api-reference) | [Architecture](/guide/architecture)
+
+---
+
+## Neutro Ecosystem
+
+`@neutro/view` is part of the Neutro collection — focused, zero-dependency primitives for the web.
+
+- **`@neutro/view`** — the library you're reading about now
+- **`@neutro/form`** — zero-dependency reactive form engine for every framework
+- **`@neutro/fluid`** *(coming soon)* — a physics-grounded glass material system for the web
+
+---
+
+## Support the Project
+
+If this library saves you time, consider [buying me a coffee](https://buymeacoffee.com/koficodedat). It keeps the packages maintained and the documentation up to date.
+
+Found a bug or have a feature request? [Open an issue on GitHub](https://github.com/neutro-web/view/issues).

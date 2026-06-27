@@ -12,13 +12,14 @@ export default defineConfig({
     'superpowers/**',
   ],
   title: '@neutro/view',
-  description: 'High-performance, framework-portable, fine-grained reactive view engine.',
+  description: 'Fine-grained reactive view engine for the web.',
   base: '/view/',
   themeConfig: {
     search: {
       provider: 'local',
     },
     nav: [
+      { text: 'Home', link: '/' },
       { text: 'Getting Started', link: '/guide/getting-started' },
       { text: 'API Reference', link: '/guide/api-reference' },
     ],

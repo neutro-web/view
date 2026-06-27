@@ -3325,3 +3325,71 @@ v0.1.0 unaffected — both authoring paths work + are documented. These polish t
 - Sidebar structure — nv has a richer guide than form; sidebar depth is appropriate to content.
 - Feature card content — all details are technically accurate; no new claims added.
 - Colour palette — VitePress default brand colours used as-is.
+
+---
+
+### 2026-06-27 — neutro/form full structural audit and homepage parity pass
+
+**Context.** After the initial visual-alignment commit, a complete structural audit of the neutro/form VitePress source was performed by fetching `config.ts` and `index.md` from `neutro-web/form` directly. Every difference between form and view was enumerated and categorised as mappable now vs. requires future pages.
+
+---
+
+#### Mapped in this session
+
+**config.ts:**
+- `description` — shortened to match form's concise one-line pattern: `"Fine-grained reactive view engine for the web."` (was: "High-performance, framework-portable, fine-grained reactive view engine.")
+- Nav — added `{ text: 'Home', link: '/' }` as the first nav item, matching form's nav structure exactly. Form leads with Home; nv was missing it, causing the nav to jump straight to Getting Started with no home anchor.
+
+**index.md — homepage body (below frontmatter):**
+
+Form's homepage has three sections below the YAML hero block. nv had none. All three were added:
+
+1. **`## Why @neutro/view?`** — two-sentence prose explaining the core proposition (skip the virtual-DOM tax, signal-tracked updates), followed by the tagged-template Counter as a complete runnable example. Mirrors form's `## Why @neutro/form?` + `createForm` example pattern exactly. Footer link row added at end: `[Get Started] | [API Reference] | [Architecture]` (form has `[Get Started] | [API Reference] | [Playground]` — Playground replaced with Architecture since nv has no playground page yet).
+
+2. **`## Neutro Ecosystem`** — lists `@neutro/view` (current), `@neutro/form`, and `@neutro/fluid` (coming soon). Form's ecosystem section listed itself + fluid; nv cross-links form since both exist and are in the same org.
+
+3. **`## Support the Project`** — buymeacoffee link + GitHub issues link. Identical pattern to form.
+
+---
+
+#### Not mappable — requires future pages (proposed for v0.5.0 roadmap)
+
+These are structural gaps where form has a page or section that nv has no equivalent content for yet. All are documented here so the architect can schedule them against the v0.5.0 milestone.
+
+**DOC-1 — Guides section (nav + sidebar + pages)**
+Form has a `Guides` nav item linking to `/guides/react` and a full path-scoped sidebar with framework-specific guides (React, Svelte 5, Vue 3, SolidJS, Angular) and advanced topics (Validation Modes, Async Validation, etc.).
+nv equivalent: integration guides showing how to use `@neutro/view` alongside popular frameworks or bundlers. Also: advanced guides (e.g. SSR considerations, testing with jsdom/vitest, migration from React/Vue patterns).
+**Blocks:** No guide pages exist. Need content before adding nav item and sidebar section.
+
+**DOC-2 — Playground page**
+Form has `/playground.html` — a live in-browser editor (loaded with `target: '_self'` which hints at a standalone HTML file using the pre-built `form-core.global.js` bundle). The form `docs:build` script copies `packages/core/dist/index.global.js` to `docs/public/form-core.js` for this purpose.
+nv equivalent: a live playground using `@neutro/view`'s tagged-template surface (no compiler needed in-browser). The renderer is already browser-runnable; a playground is technically feasible with the current v0.1.0 build.
+**Blocks:** No `index.global.js` (IIFE) build target exists in nv's package.json. Need an IIFE bundle output and a standalone HTML playground page.
+**Note:** This is the highest-value item for developer acquisition — playground removes all friction from first contact.
+
+**DOC-3 — Community page**
+Form has `/community` — likely contribution norms, Discord/chat links, issue guidelines.
+nv equivalent: a `docs/community.md` with issue reporting guidelines, discussion channel links, and contribution norms.
+**Blocks:** Content doesn't exist. Low effort to write; needs a decision on where community discussion lives (GitHub Discussions vs. Discord vs. other).
+
+**DOC-4 — Contributing page**
+Form has `/contributing` — how to contribute code, run tests, submit PRs.
+nv equivalent: `docs/contributing.md` covering repo setup, test suite (`vitest run`), lefthook hooks, PR conventions.
+**Blocks:** Content doesn't exist. Medium effort; most of the information is derivable from the repo structure (package.json scripts, lefthook.yml, AGENTS.md).
+
+**DOC-5 — Path-scoped sidebars**
+Form uses `sidebar: { '/api/': [...], '/guides/': [...] }` — each top-level section gets its own focused sidebar. nv uses a flat array sidebar showing all 7 guide pages regardless of which section you're in.
+nv equivalent: once DOC-1 (Guides) and/or a separate API section exist, split into `{ '/guide/': [...], '/api/': [...] }` scoped sidebars.
+**Blocks:** Only meaningful once nv has more than one top-level doc section. Premature to change now.
+
+---
+
+#### Recommended v0.5.0 doc additions (priority order)
+
+| ID | Item | Effort | Value |
+|---|---|---|---|
+| DOC-2 | Playground | High (needs IIFE build + HTML page) | Highest — removes first-contact friction |
+| DOC-1 | Guides section | High (multiple pages) | High — framework adoption |
+| DOC-4 | Contributing page | Low | Medium — contributor funnel |
+| DOC-3 | Community page | Low | Medium — community surface |
+| DOC-5 | Path-scoped sidebars | Trivial (config change only) | Low — do last, after DOC-1 |
