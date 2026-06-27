@@ -1,14 +1,5 @@
 /* ── Hero ── */
 
-/* Name: blue, bold — VitePress default brand colour (#3b5bdb) */
-.VPHero .name {
-  background: none !important;
-  -webkit-background-clip: unset !important;
-  -webkit-text-fill-color: var(--vp-c-brand-1) !important;
-  color: var(--vp-c-brand-1) !important;
-  font-weight: 800 !important;
-}
-
 /* Tagline: match form — default VitePress size, no override */
 .VPHero .tagline {
   color: var(--vp-c-text-2) !important;
