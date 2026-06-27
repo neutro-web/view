@@ -1,0 +1,6 @@
+const Counter = $component(() => {
+  $script(() => {
+    const count = signal(0)
+  })
+  $render(() => html`<span id="count">${count}</span><button id="btn" @click="${() => count = count + 1}">+</button>`)
+})
