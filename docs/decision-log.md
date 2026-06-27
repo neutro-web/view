@@ -76,6 +76,11 @@ _Last updated: 2026-06-27 (CP-2c). Contract **v0.4.2** · Template-IR **v0.4.2**
   unconditional insertBefore per row (interpreter L540). Fix two-tier: position-guard first (Tier 1),
   full LIS only if Tier 1 leaves a large-N deficit (Tier 2).
 - **v0.1.0 — TAG-READY.** CP-4 docs placed. Swap deficit is v0.5.0; no blocking items remain.
+- **Documentation sweep — CLOSED 2026-06-27 (verified at source).** Both authoring surfaces documented;
+  section-based site matching neutro/form; MIT LICENSE. Playground (DOC-2) → v0.5.0 Track T-8 (needs
+  IIFE compiler build target).
+- **v0.1.0 TAG — content/engineering GREEN.** Gated only on manual checklist: NPM_TOKEN + Pages enabled
+  (+ optional publish tag-guard). Then `git tag v0.1.0` → publish.
 - **Component API v1:** LANDED. Composition works end-to-end through the compiled
   path (A2 factory-shape convergence).
 - **Slot consumption — increments 1 + 1.5 + 2 LANDED (2026-06-22):** inc 2 = scoped-slot
@@ -3533,3 +3538,21 @@ The flat `guide/` structure was replaced with a section-based layout matching ne
 - `ad1acb9` — docs(theme): remove hero name overrides to match neutro/form default styling
 - `bb92eef` — docs(theme): remove all custom CSS overrides to match neutro/form defaults
 - `c9f66d5` — docs(theme): set tagline font-weight to 500 to match neutro/form
+
+---
+
+### 2026-06-27 — Documentation sweep CLOSED; v0.1.0 tag-ready (content/engineering)
+
+Doc sweep + neutro/form parity landed and verified at source. Phase 1 corrected real API errors
+against source (structurallyEqual: confirmed a DOM-tree diff utility, was mis-documented as signal
+equality; effect microtask-scheduling; dead links → GitHub URLs). Site restructured to section-based
+layout (getting-started standalone; /guides/ + /api/ path-scoped sidebars; /community; /contributing)
+matching neutro/form nav; all internal links verified resolving. Both authoring surfaces (.nv +
+tagged-template) documented. MIT LICENSE added.
+
+DOC-2 (playground) deferred to v0.5.0 Track T (T-8): requires an IIFE compiler build target
+(index.global.js) — real engineering, not a doc task; the .nv compiler can't run in-browser otherwise.
+Highest-value first-contact DX item but non-blocking for v0.1.0.
+
+v0.1.0 tag now gated ONLY on the manual checklist: NPM_TOKEN secret + GitHub Pages enabled (+ optional
+publish-step tag-guard fast-follow). No content/engineering blockers remain.
