@@ -94,6 +94,71 @@ npx serve .
 
 Open `http://localhost:3000`. You should see a counter with a `+` button; clicking it increments the number.
 
+## Tagged-template path (no build step)
+
+Plain TypeScript with no compiler plugin — import `createHtmlTag` and `mount` directly and run through any bundler or dev server that handles TypeScript. `.nv` is preferred for ergonomics; use this path when a build plugin is not an option.
+
+### The explicit-thunk rule
+
+::: warning Thunks are required — no erasure happens at runtime
+In `.nv` files the compiler rewrites bare signal reads and assignments automatically. In the tagged template there is no such erasure. **Every reactive value in a template hole must be a thunk.** The runtime throws if you forget:
+
+```
+[nv/html] Expression at hole N is not a function. Wrap reactive values in thunks: ${() => signal()} not ${signal()}.
+```
+:::
+
+Side-by-side comparison:
+
+```ts
+// .nv (compiler erases bare reads):
+${count}                               // → count()  (auto-erased)
+@click="${() => count = count + 1}"    // → count.set(count() + 1)  (auto-erased)
+
+// tagged template (explicit — no erasure):
+${() => count()}                       // thunk required
+@click="${() => count.set(count() + 1)}"  // explicit .set()
+```
+
+### Example
+
+```ts
+import { createHtmlTag, mount } from '@neutro/view/renderer'
+import { signal } from '@neutro/view/core'
+
+const html = createHtmlTag(document)   // bind the tag to a document once
+
+const count = signal(0)
+
+const view = html`
+  <div>
+    <p>${() => count()}</p>
+    <button @click="${() => count.set(count() + 1)}">increment</button>
+  </div>
+`
+
+mount(view, document.getElementById('app')!, document)
+```
+
+`mount` takes three arguments: `(ir, parent, doc)` — the third argument is the document instance.
+
+### API signatures
+
+```ts
+// from @neutro/view/renderer
+export function createHtmlTag(document: Document): (strings: TemplateStringsArray, ...exprs: unknown[]) => TemplateIR
+export function mount(ir: TemplateIR, parent: Element, doc: Document): () => void
+// signals from @neutro/view/core
+```
+
+### How to run
+
+No `build.ts` or esbuild plugin required. Import directly and run through any bundler or dev server that understands TypeScript. Because `createHtmlTag` needs a live `document`, the code runs in a browser or jsdom environment.
+
+See also:
+- [Rendering guide](./rendering.md) — `each()`, conditionals, `classes()`, `slots()`
+- [API Reference](./api-reference.md) — full tagged-template signatures
+
 ## Next steps
 
 - [Overview](./overview.md) — the design model
