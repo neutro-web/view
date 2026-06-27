@@ -1,6 +1,6 @@
 {
   "name": "@neutro/view",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "High-performance, framework-portable, fine-grained reactive view engine.",
   "type": "module",
   "license": "MIT",
@@ -25,7 +25,7 @@
     "framework-agnostic"
   ],
   "sideEffects": false,
-  "files": ["dist"],
+  "files": ["dist", "README.md"],
   "exports": {
     "./core": {
       "types": "./dist/core/index.d.ts",
@@ -43,7 +43,14 @@
       "types": "./dist/renderer/runtime.d.ts",
       "import": "./dist/renderer/runtime.js"
     },
+    "./renderer/plugin": {
+      "types": "./dist/renderer/nv-esbuild-plugin.d.ts",
+      "import": "./dist/renderer/nv-esbuild-plugin.js"
+    },
     "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "jsdom": "^28.0.0"
   },
   "publishConfig": {
     "access": "public"
@@ -58,7 +65,10 @@
     "check": "biome check --write .",
     "prepare": "lefthook install",
     "prepublishOnly": "pnpm build",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
   },
   "engines": {
     "node": ">=20"
@@ -71,11 +81,11 @@
     "@types/node": "^22.0.0",
     "alien-signals": "3.1.2",
     "esbuild": "^0.28.1",
-    "jsdom": "^28.0.0",
     "lefthook": "^1.8.0",
     "serve": "^14.2.6",
     "tsx": "^4.22.4",
     "typescript": "^5.6.0",
-    "vitest": "^2.1.0"
+    "vitest": "^2.1.0",
+    "vitepress": "^1.3.0"
   }
 }

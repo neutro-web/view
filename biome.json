@@ -13,7 +13,8 @@
       "*.md",
       ".claude",
       "test/browser/test-results",
-      "test/browser/playwright-report"
+      "test/browser/playwright-report",
+      "docs"
     ]
   },
   "organizeImports": {
