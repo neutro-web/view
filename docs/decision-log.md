@@ -3148,3 +3148,31 @@ verified TS-compiler-free by a bundle-size or dependency-graph assertion (a gate
 
 **Commissioned:** `cc-handoff-runtime-package-split.md` (CC, real-hardware bundle measurement).
 Closes CP-1a's production-viability sub-gate once the emitted bundle is measured TS-compiler-free.
+
+---
+
+### 2026-06-26 — CP-2a CLOSED: js-framework-benchmark keyed app proven in .nv
+
+**Status:** CP-2a CLOSED at `ef86bd7` (+ `4ef0205`). Verified by source read, not gate report.
+
+Benchmark keyed app authored in pure `.nv` (element `<each>` inside `<tbody>`, per the `<each>`→`<template>` rewrite ruling). 10 probe gates green chromium+webkit; 8 ops proven in real browser; keyed-move confirmed (swap moves DOM nodes, `data-nv-probe` survives); bundle 46.5 KB, 0 typescript inputs.
+
+Four `src/` defects surfaced by the integration and fixed at source (all verified):
+- **Bug 1 (nv-emitter):** static `ClassListBinding` thunk-slot misalignment — separate `thunkIdx` cursor.
+- **Bug 2 (nv-parser):** `eraseHandlerExpr` lacked `propsAccessors` for assignment RHS — `item.id` now rewrites to `slotProps.item().id`.
+- **Bug 3 (interpreter):** whitespace text nodes around `<each>` body tripped the single-root guard — `wireList` now filters whitespace-only roots before the check. (Introduces a low-severity whitespace text-node leak — see follow-up entry.)
+- **Bug 4 (nv-parser `@4ef0205`):** slot-prop reads in non-assignment handler expressions not rewritten — dedicated `propsAccessors` identifier case in `walkHandlerNode`; EX-EACH-06 locks it.
+
+G-2a-5 (no `src/` change) recorded **violated-as-expected**: the gate forced escalation of engine changes rather than masking them. Benchmark app is `test/`-only.
+
+Net: 705 unit tests + 10 browser gates green. CP-2b (isKeyed verify) and CP-2c (baseline numbers) remain. CP-2a closure criteria met.
+
+---
+
+### 2026-06-26 — FOLLOW-UP: whitespace text-node leak on keyed-list teardown (from Bug 3 fix)
+
+**Status:** OPEN, low severity, gated on CP-2c memory baseline. NOT a CP-2a reopen.
+
+The Bug 3 fix (`interpreter.ts` `wireList`) filters whitespace-only text nodes for the single-root check but `mountFragment` still inserts them (L778) and item teardown removes only the content root (L508) — leading/trailing whitespace text nodes around each `<tr>` are orphaned and accumulate across remove/clear/create cycles. Invisible to rendering and to G-2a-3; relevant because CP-2c grades memory.
+
+**Preferred fix (B, collapse):** strip insignificant leading/trailing whitespace from the list-item body shape at parse/emit time so the nodes never enter the fragment — removes the cause, shrinks every item mount, demotes the Bug 3 filter to a rarely-firing guard. **Alternative (A, patch):** track + remove whitespace siblings in `onCleanup`. Scoped to parse/emit; separate commission. Required before the CP-2c memory baseline is trustworthy IF a node-count assertion (`<tbody>` `childNodes` after `create-1000 → clear → create-1000` should not grow) confirms growth.

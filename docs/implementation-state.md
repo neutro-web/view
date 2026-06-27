@@ -14,7 +14,7 @@ it disagrees with the source, the source wins and this file is stale → fix it.
 **Maintenance.** Update in the same pass that lands code, as a ready-to-commit edit (same
 discipline as log entries). Keep it to roughly this length; detail belongs in the code.
 
-Last verified against source: **2026-06-23 (Increment SS).** Contract **v0.4.2**, Template IR **v0.4.2**.
+Last verified against source: **2026-06-26 (CP-2a closeout).** Contract **v0.4.2**, Template IR **v0.4.2**.
 
 ---
 
@@ -119,6 +119,14 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
   External-source sync (`reads: ∅`, no §8.5.2 write-graph edge); bounded by §8.5.4
   external-event budget. Part 3 CLOSED 2026-06-24.
 - **Multi-root list items not supported** — single-root guard; wrap in a container element.
+- **CP-2a — CLOSED 2026-06-26 (`ef86bd7` + `4ef0205`).** Benchmark keyed app proven in pure `.nv`,
+  10 gates green both engines, 8 ops real-browser, keyed-move confirmed. 4 `src/` bugs surfaced +
+  fixed (emitter thunk-slot, parser `propsAccessors` ×2, interpreter whitespace-root). CP-2b/2c
+  remain.
+- **OPEN (low) — whitespace text-node leak on keyed-list teardown** (Bug-3-fix residue). `wireList`
+  filters whitespace-only roots for the single-root check but `mountFragment` inserts them and
+  teardown removes only the content root — whitespace text nodes orphaned on item remove/clear.
+  Gated on CP-2c memory baseline. Preferred fix: strip item-body shape whitespace at parse/emit.
 - **`$style` × slots** — LANDED 2026-06-23 (Increment SS). `patchClasslistTokens` component
   case recurses into slot IR classlist entries. **D-slot-style-1 CLOSED (Increment SS):**
   `liftStaticClassBindings` replaces shape.html regex — static class= attrs lifted to
