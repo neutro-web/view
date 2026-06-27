@@ -24,8 +24,13 @@ export default defineConfig({
       {
         text: 'Guide',
         items: [
-          { text: 'Getting Started', link: '/guide/getting-started' },
           { text: 'Overview', link: '/guide/overview' },
+          { text: 'Getting Started', link: '/guide/getting-started' },
+          { text: 'Authoring .nv', link: '/guide/authoring-nv' },
+          { text: 'Reactivity', link: '/guide/reactivity' },
+          { text: 'Rendering', link: '/guide/rendering' },
+          { text: 'API Reference', link: '/guide/api-reference' },
+          { text: 'Architecture', link: '/guide/architecture' },
         ],
       },
     ],
