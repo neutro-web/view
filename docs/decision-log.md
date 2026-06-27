@@ -58,6 +58,12 @@ _Last updated: 2026-06-24. Contract **v0.4.2** · Template-IR **v0.4.2**._
   compares root `styleArtifact`/`classRewrites`. Slot content + style outputs are
   no longer FE/back-end-equivalence blind spots.
 - **Build pipeline `.nv → .js`:** Mode A, landed. Executable-module gate closed.
+  **[2026-06-25] `.nv` author path proven E2E in real browsers** (probe `8146d82`): `.nv` → plugin →
+  esbuild → browser, click updates DOM, chromium+webkit. Authoring is assignment-form
+  (`@click="${() => count = count + 1}"`), parser-erased to `.set()`. CP-1b/CP-3 closed. One blocker
+  ruled: emitted bundles pull the TS compiler via the fat `@neutro/view/renderer` barrel — runtime
+  entry `@neutro/view/renderer/runtime` commissioned (package split, emitter L316 retarget); no
+  runtime/IR/contract change.
 - **Component API v1:** LANDED. Composition works end-to-end through the compiled
   path (A2 factory-shape convergence).
 - **Slot consumption — increments 1 + 1.5 + 2 LANDED (2026-06-22):** inc 2 = scoped-slot
@@ -3093,3 +3099,52 @@ or IR change — reactive-core v0.4.2, Template-IR v0.4.2. Verified at `58afe25`
 **Named follow-up (carried, not a defect):** G-SS-browser Playwright ×3 styled-cascade leg —
 run on the next browser-harness trip; bundle with any future Playwright gate. Not blocking; slot
 domain is functionally closed and behaviorally proven in jsdom.
+
+### 2026-06-25 — Runtime/build-time package split RULED: emitted bundles must not pull the TS compiler
+
+**Source of finding:** `.nv` authoring probe (`probe-nv-author-findings.md`, `8146d82`). Verified at
+SHA by architect source read.
+
+**Probe outcome (the good part).** The full author path works end-to-end in real browsers:
+`counter.nv` → `nvPlugin` → esbuild → IIFE bundle → chromium + webkit, click increments DOM text.
+- **Authoring syntax:** `@click="${() => count = count + 1}"` (assignment form); the parser erases
+  it to `count.set(count() + 1)` at build time. Bare `${count}` → `count()`. Authors write neither
+  `.set()` nor the getter call. (Confirms the call-read/`.set`-write API is a *compile target*, not
+  the authoring surface.)
+- **CP-1b → CLOSED:** "documented pattern, not missing wiring." No event→signal wiring gap.
+- **CP-3 → CLOSED:** no thin wrapper needed. Emitted module exposes `Component.mount(parent, doc)`
+  as a static method; documented convention is
+  `import { Counter } from './app.nv'; Counter.mount(document.body, document)`.
+
+**The blocker (the ruling).** `src/renderer/index.ts` (the `@neutro/view/renderer` barrel)
+co-exports runtime (`mount`, L4) and build-time (`parseNvFile`/`parseNvFileForEmit`, L33). The
+parser does `import * as ts from 'typescript'` (`nv-parser.ts` L51) at module top-level. The emitter
+hard-codes `import { mount } from '@neutro/view/renderer'` into every emitted bundle
+(`nv-emitter.ts` L316). **Net: every emitted app bundle transitively pulls ~4 MB of the TypeScript
+compiler into the browser, though the parser is never called at runtime.** The bundle runs
+correctly; it is just not production-viable in size. This is a **CP-1a blocker**.
+
+**Verified clean-split precondition.** All runtime-surface modules — `interpreter` (home of `mount`),
+`html-tag`, `style-inject`, `comparator` — carry **zero** `typescript` imports. The split is clean
+by construction: a runtime-only entry exporting these pulls nothing build-time.
+
+**RULING.** Add a runtime-only package entry and point the emitter at it.
+1. **New entry `@neutro/view/renderer/runtime`** exporting only the TS-compiler-clean runtime surface
+   (`mount`, html-tag helpers, `injectComponentStyle`/style-registry, `structurallyEqual` as needed
+   by emitted code) — **never** `parseNvFile*`/`preprocessMutationWrites`.
+2. **Emitter change:** `nv-emitter.ts` L316 emits
+   `import { mount } from '@neutro/view/renderer/runtime'` (and any other emitted runtime imports
+   move to the runtime entry). This is a change to the **published-surface aliases the emitter
+   depends on** — contract-adjacent (the emitter's §-published-surface convention), hence an
+   architect ruling, not a silent CC edit.
+3. **Keep the fat `@neutro/view/renderer` barrel** for build-time consumers (the esbuild plugin,
+   tooling) — it legitimately needs the parser. The split is additive; nothing is removed from the
+   existing barrel.
+
+**Constraints.** No `mount`/runtime behavior change. No IR change. No contract-semantics change
+(v0.4.2 holds) — this is package topology + one emitted import specifier. The runtime entry must be
+verified TS-compiler-free by a bundle-size or dependency-graph assertion (a gate that fails if
+`typescript` ever re-enters the runtime graph).
+
+**Commissioned:** `cc-handoff-runtime-package-split.md` (CC, real-hardware bundle measurement).
+Closes CP-1a's production-viability sub-gate once the emitted bundle is measured TS-compiler-free.
