@@ -5,7 +5,7 @@
 | Package | Description | Status |
 |---|---|---|
 | [`@neutro/view`](https://github.com/neutro-web/view) | Fine-grained reactive view engine | v0.1.0 |
-| [`@neutro/form`](https://github.com/neutro-web/form) | Zero-dependency reactive form engine | v0.2.0 |
+| [`@neutro/form`](https://github.com/neutro-web/form) | Zero-dependency reactive form engine | v0.3.0 |
 | `@neutro/fluid` | Physics-grounded glass material system | Coming soon |
 
 ## Filing Issues

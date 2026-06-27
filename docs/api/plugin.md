@@ -65,11 +65,13 @@ End users do not import from this path directly. It is wired up automatically by
 
 The following source files were read to produce this reference. No signature was guessed or inferred from memory.
 
-- `/Users/kofi/_/view/src/core/core.ts` (lines 978–end)
-- `/Users/kofi/_/view/src/core/index.ts`
-- `/Users/kofi/_/view/src/renderer/index.ts`
-- `/Users/kofi/_/view/src/renderer/runtime.ts`
-- `/Users/kofi/_/view/src/renderer/interpreter.ts` (mount signature at line 802)
-- `/Users/kofi/_/view/src/renderer/html-tag.ts`
-- `/Users/kofi/_/view/src/renderer/nv-esbuild-plugin.ts` (nvPlugin signature at line 42)
-- `/Users/kofi/_/view/package.json` (exports map)
+| File | Notes |
+|---|---|
+| `src/core/core.ts` | lines 978–end |
+| `src/core/index.ts` | |
+| `src/renderer/index.ts` | |
+| `src/renderer/runtime.ts` | |
+| `src/renderer/interpreter.ts` | mount signature |
+| `src/renderer/html-tag.ts` | |
+| `src/renderer/nv-esbuild-plugin.ts` | nvPlugin signature |
+| `package.json` | exports map |
