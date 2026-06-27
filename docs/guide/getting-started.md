@@ -153,7 +153,16 @@ export function mount(ir: TemplateIR, parent: Element, doc: Document): () => voi
 
 ### How to run
 
-No `build.ts` or esbuild plugin required. Import directly and run through any bundler or dev server that understands TypeScript. Because `createHtmlTag` needs a live `document`, the code runs in a browser or jsdom environment.
+No `build.ts` or esbuild plugin required. Serve the entry file with any TypeScript-capable dev server. For example, with [Vite](https://vitejs.dev/):
+
+```bash
+pnpm add -D vite
+npx vite
+```
+
+Point `index.html` at your entry file as a `type="module"` script. Vite handles TypeScript and ES modules out of the box — no config needed for a basic app.
+
+Because `createHtmlTag` needs a live `document`, the code runs in a browser (or jsdom for tests) — not in Node directly.
 
 See also:
 - [Rendering guide](./rendering.md) — `each()`, conditionals, `classes()`, `slots()`

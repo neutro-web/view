@@ -345,7 +345,7 @@ const ir = html`<span class="${() => cls()}">${() => count()}</span>`
 ```ts
 function slots(
   name: string,
-  opts?: { fallback?: TemplateIR; [propName: string]: ReactiveExpr | TemplateIR | undefined },
+  opts?: { fallback?: TemplateIR; [propName: string]: (() => unknown) | TemplateIR | undefined },
 ): SlotSentinel
 ```
 
@@ -602,7 +602,7 @@ ${each(
 ```ts
 function slots(name: string, opts?: {
   fallback?: TemplateIR,
-  [propName: string]: ReactiveExpr | TemplateIR | undefined
+  [propName: string]: (() => unknown) | TemplateIR | undefined
 }): SlotSentinel
 ```
 

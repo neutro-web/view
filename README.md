@@ -66,7 +66,7 @@ mount(view, document.getElementById('app')!, document)
 // No build step. No .nv file. No esbuild plugin.
 ```
 
-No build step required — import and run from any TypeScript-capable bundler or dev server. The explicit thunk (`() => count()`) is required because there is no compiler erasure.
+No build step required — serve through any TypeScript-capable dev server (e.g. Vite). The explicit thunk (`() => count()`) is required because there is no compiler erasure on this path. See [Getting Started](docs/guide/getting-started.md) for a complete walkthrough of both paths.
 
 ## Performance
 
