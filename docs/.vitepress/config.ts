@@ -15,6 +15,9 @@ export default defineConfig({
   description: 'High-performance, framework-portable, fine-grained reactive view engine.',
   base: '/view/',
   themeConfig: {
+    search: {
+      provider: 'local',
+    },
     nav: [
       { text: 'Guide', link: '/guide/getting-started' },
       { text: 'Overview', link: '/guide/overview' },
