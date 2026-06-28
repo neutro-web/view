@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-27 (CP-2c). Contract **v0.4.2** · Template-IR **v0.4.2**._
+_Last updated: 2026-06-27 (PT-1a async ruling). Contract **v0.4.2** · Template-IR **v0.4.2**._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
 > `decision-log-archive.md` (moved 2026-06-21). This snapshot is the resolved
@@ -146,6 +146,14 @@ _Last updated: 2026-06-27 (CP-2c). Contract **v0.4.2** · Template-IR **v0.4.2**
   fix [2026-06-25] / a6cafbd): nested styled components stamp `data-nv-s-<hash>` + inject
   CSS on mount through a parent binding; transitive through conditionals/lists. Regression-gated
   by G7 (browser).
+- **PT-1a-syntax — async-read compile-time lowering — DESIGN-OPEN [2026-06-27].**
+  Resource read in template position auto-lowers to loading/error/data control-flow
+  (the nv-shaped ergonomic win: compiler exploits resource-vs-signal info Solid
+  discards; lowers to PT-3 `<when>`-class control-flow; runtime-neutral, DX-only;
+  soundness fallback to manual branch when resource-ness unprovable). Spelling
+  (implicit vs explicit-first) + FE-equivalence open; read PT-3 `<when>` IR at SHA
+  before designing (collapse, don't fork). Non-blocking — raw `resource` ships
+  usable without it. Not a contract concern.
 
 ### Genuine research / deferred-on-evidence
 - Beating the alien-signals-class baseline: nv wins/ties 5 of 7 cases; two wide-graph
@@ -176,6 +184,19 @@ _Last updated: 2026-06-27 (CP-2c). Contract **v0.4.2** · Template-IR **v0.4.2**
   carries a compile-time width-threshold fallback, threshold gated on real-app evidence.
 
 ### Forward queue (named, not blocking)
+- **PT-1a async `resource` — RULED 2026-06-27 (shape 1, composition).** `signal`
+  triple (data/loading/error) + one source-tracking `effect` that settle-writes via
+  `.set()` (external-event write, §8.6 precedent — no `sync`, cycle-impossible by
+  construction) + `onCleanup` abort + epoch guard for stale settles. Zero graph
+  primitives; closure axiom upheld; no contract change (v0.4.2). CC commission
+  (factory + abort/epoch + tests, WS1/WS3) gated on this ruling, not yet written.
+- **PT-1b Suspense-equivalent — NAMED OPEN [2026-06-27], not ruled.** Multi-resource
+  coordination boundary; structurally the `errorBoundary` owner-scope precedent
+  (§5.4.4) but its **renderer-gating cost (withhold-mount of pending subtrees,
+  `<each>` interaction) must be read at source before ruling.** Do not fold into
+  PT-1a. Single-resource ergonomics are served by PT-1a-syntax, not PT-1b.
+- **Async transitions — OUT of v0.5.0 [2026-06-27].** Touch mid-propagation
+  observation → locked §1 → contract-level if ever raised; not an async ruling.
 - **Slots — design APPROVED (2026-06-22), Path B phasing:** Increments 1 + 1.5 LANDED
   (2026-06-22). Increment 2 (queued, `cc-handoff-scoped-slots.md`) = scoped-slot IR shape
   (`SlotEntry.content` → factory + `SlotOutletBinding.props?`) + `let={...}` authoring;
@@ -3556,3 +3577,136 @@ Highest-value first-contact DX item but non-blocking for v0.1.0.
 
 v0.1.0 tag now gated ONLY on the manual checklist: NPM_TOKEN secret + GitHub Pages enabled (+ optional
 publish-step tag-guard fast-follow). No content/engineering blockers remain.
+
+---
+
+### [2026-06-27] PT-1a — async `resource`: RULED (composition, shape 1). Closure axiom upheld. No contract change (v0.4.2).
+
+**Workstream:** WS4 architect (parity target shape) → unblocks a WS3/WS1 commission.
+
+**Decision.** The v0.5.0 async target is a `resource`-equivalent and **nothing more**
+for PT-1a. It is **composition over the four primitives**, not a new graph primitive.
+Suspense-equivalent coordination is split out as PT-1b (named open, not ruled here);
+transitions are **out of v0.5.0** (they touch what a computation observes
+mid-propagation — contract-level §1, not an async ruling).
+
+**Shape (core, DOM-free).** A `resource` is:
+- one `signal` triple for observable state — `data`, `loading`, `error` (or a
+  single status signal carrying the tri-state; field layout is an in-stream
+  implementation choice, not a contract concern);
+- one `effect` that (a) reads the resource's reactive sources — establishing
+  fine-grained dependency tracking exactly as any effect does (§5.3) — (b) kicks
+  the async fetcher, and (c) writes the settled result back via `.set()`. The
+  effect's source-write on settle is the **sanctioned terminal write** — a fetcher
+  settling is an external (non-reactive) event, structurally the `pubsub`/external-
+  source case (§8.6), not a reactive→signal write, so it does **not** invoke `sync`
+  and cannot form a reactive cycle by construction;
+- `onCleanup` (§6) registered on the current owner to **abort the in-flight
+  fetch** (e.g. `AbortController`) when sources change before settle or when the
+  owner disposes. Stale settles are dropped (generation/epoch guard) so a slow
+  earlier fetch cannot overwrite a newer one. Teardown-with-owner is automatic —
+  no leak, same guarantee `sync`/`pubsub` already give (§6, §8.6).
+
+**Why this is closure-clean (the load-bearing point).** A resource's result is just
+a `signal` that happens to be written by a settled promise. The async-ness lives
+**entirely in *when* the write happens**, never in a new edge kind, never in new
+propagation semantics. Source-tracking is ordinary effect tracking; settle-write is
+the external-event write `pubsub` already legitimizes; cleanup is ordinary owner
+teardown. The graph never learns the word "async." This is precisely the
+`store`/`pubsub` precedent the contract anticipates ("built on top, outside this
+contract," §11/L837) generalized to async: **out-of-graph timing, in-graph state.**
+
+**Performance position (why shape 1 is the performance-first answer).** Cost is one
+effect + the state signals per resource — the exact fine-grained granularity nv
+already prices well (the select-row 0.34× / update-10th 0.68× wins live in this
+class). No syntax or coordination layer can make this reactive work *smaller*; it
+can only make it larger by over-subscribing. The primitive shape is therefore the
+whole performance story. Ergonomics is the second-order axis (entry B).
+
+**Scope fences.**
+- **PT-1b Suspense-equivalent — NAMED OPEN, not ruled.** A multi-resource
+  coordination boundary that discovers pending descendants and gates fallback↔
+  resolved content. Structurally the `errorBoundary` precedent (owner-scope-
+  attached, §5.4.4/L832) — so *likely* also composition + out-of-graph, BUT its
+  natural implementation wants to **withhold mounting** pending subtrees, which is
+  renderer-coupled and interacts with the `<each>` reconciler. Its renderer-gating
+  cost MUST be read at source before ruling. Do not fold it into PT-1a. ("named
+  next ≠ needed next.")
+- **Single-resource ergonomics do not need Suspense.** They are reachable from
+  control-flow nv is already building (PT-3 `<when>`) over one resource's
+  `loading`/`error`/`data` — see entry B. Multi-resource coordination is the only
+  thing that genuinely needs PT-1b.
+- **Transitions — OUT of v0.5.0.** Concurrent/deferred updates influence
+  mid-propagation observation → locked §1 territory → separate contract-level
+  question if ever raised. An async ruling must not drag it in.
+
+**Closure-axiom check (mandatory for every parity target).** Adds **zero** graph
+primitives. Uses `signal` + `effect` + `onCleanup` + owner teardown, all extant.
+The four-primitive closure is intact; `derived` purity, `sync`, and `pubsub` static
+guarantees are untouched. **No reversal of the closure axiom.**
+
+**Contract.** No change. v0.4.2 holds. `resource` is renderer/userland-layer
+composition built on the contract surface, like `store` (§11/L837) — it is **not**
+a contract addition; the contract does not need to name it.
+
+**Not commissioned yet.** This ruling fixes the *shape*. The CC commission (a
+`resource` factory + abort/epoch guard + tests, WS1/WS3) is downstream and gated on
+this entry. P-1a (swap position-guard) is independent and proceeds in parallel.
+
+**Supersedes:** nothing. Opens: PT-1b (Suspense, named), entry B (async-read
+lowering, design-open).
+
+---
+
+### [2026-06-27] PT-1a-syntax — compile-time async-read lowering: DESIGN-OPEN (the nv-shaped ergonomic opening). No code.
+
+**Workstream:** WS3 renderer/templating + WS2 compiler (front-end lowering). Not a
+reactive-core concern — does not touch the axiom or the contract.
+
+**The question.** Raw `resource` (entry A) leaves the consumer to hand-write the
+tri-state branch at every use site: `loading ? … : error ? … : data`. That is the
+same boilerplate Solid users hit pre-Suspense. Performance is already maximal
+(entry A); the open work is **ergonomics only**, and the bar is: remove use-site
+boilerplate **without** widening what's tracked and **without** introducing a
+coordination construct that is secretly Suspense.
+
+**The first-principles opening (why this is nv-shaped, not borrowed).** Because nv
+erases bare-reads / mutation-writes at compile time, the front-end **already
+distinguishes a resource read from a plain-signal read at the syntax site** — it has
+the type/origin information at build time. Solid cannot do this: `createResource`
+returns an accessor indistinguishable from a signal, forcing the manual
+`loading()` branch. nv's compiler can exploit information Solid throws away: **a
+resource read in template position can lower automatically to the loading/error/
+data control-flow** the consumer would otherwise write by hand.
+
+**Why it costs nothing at runtime.** The lowering target *is* the exact fine-grained
+branch the consumer would hand-write — same effects, same signals, same granularity
+(entry A). The compiler is removing authoring boilerplate, not adding runtime work.
+Worst case neutral; the win is purely DX. This is the "compiler may only skip
+provable work; misclassification costs perf, never correctness" license applied to
+ergonomics: the compiler only auto-lowers when it can *prove* the read is a
+resource; otherwise it falls back to treating it as an ordinary read (the consumer
+branches manually). Soundness fallback always applies.
+
+**What this is, structurally.** PT-1a primitive (entry A) **+ a PT-3 control-flow
+lowering rule**. NOT a new async construct, NOT a coordination boundary, NOT a graph
+primitive. It lowers to control-flow nv is already building. It therefore stays
+inside the closure axiom trivially (it adds no primitive at all).
+
+**Open sub-questions (to resolve before any commission).**
+- Spelling: implicit (any resource read in template position auto-lowers) vs.
+  explicit sugar (a `<when>`-shaped marker over a resource). Implicit is more
+  ergonomic but risks surprising the author when a resource is read where they
+  expected a value; explicit is louder but predictable. Lean: **explicit-first**
+  (predictability > magic for a tri-state that can show error UI), revisit on use.
+- Both front-ends: the lowering must be FE-equivalent (`.nv` and `html` tag produce
+  one IR) or it is a divergence. Likely a new/extended Template-IR control-flow
+  member or a reuse of the PT-3 `<when>` shape — **read the PT-3 `<when>` IR shape
+  at SHA before designing** so this reuses rather than forks (collapse, don't patch).
+- Multi-resource at one site: out of scope here — that is PT-1b (Suspense). This
+  entry is single-resource ergonomics only.
+
+**Status: design-open, non-blocking.** Does not gate the PT-1a `resource`
+commission (entry A) — raw `resource` ships usable with manual branching; this
+lowering is the ergonomic layer on top. Reopen/advance when the PT-3 `<when>` IR
+shape is read and a spelling is chosen. No contract change (v0.4.2).
