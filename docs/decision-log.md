@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-28 (P-2c-B gate-held, ceiling probe out). Contract **v0.4.3** · Template-IR **v0.4.2**._
+_Last updated: 2026-06-28 (P-2c-B closed, ceiling 0; index-elision opens). Contract **v0.4.3** · Template-IR **v0.4.2**._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
 > `decision-log-archive.md` (moved 2026-06-21). This snapshot is the resolved
@@ -96,7 +96,7 @@ _Last updated: 2026-06-28 (P-2c-B gate-held, ceiling probe out). Contract **v0.4
   and **P-2b** (fast dispose, ~0.35× addressable vs Svelte, mostly inherent) =
   characterized-not-commissioned. Goal: narrow create gap where provably free; do NOT
   trade mutation speed to chase Solid's create number.
-- **Live frontier (code/ruling):** P-2c-B ceiling probe (Sonnet — harvest-count/row on jfb create; build-or-close pending the number) and PT-1b Suspense+SWR (named open — renderer-gating cost unread). P-2c-B GATE-HELD. Index-elision named (B redirect). PT-1a `resource` + P-2c-A1 LANDED. Contract v0.4.3. P-1b CLOSED. P-2a/b characterized-not-commissioned.
+- **Live frontier (code/ruling):** index-elision (next create-time lever — design-gate-open, read `wireList`/`<each>` IR seams → spec) and PT-1b Suspense+SWR (named open — renderer-gating cost unread). P-2c-B CLOSED (ceiling 0, SHA cce6423). PT-1a `resource` + P-2c-A1 LANDED. Contract v0.4.3. P-1b CLOSED. P-2a/b characterized-not-commissioned.
 - **v0.1.0 — TAG-READY.** CP-4 docs placed. Swap deficit is v0.5.0; no blocking items remain.
 - **Documentation sweep — CLOSED 2026-06-27 (verified at source).** Both authoring surfaces documented;
   section-based site matching neutro/form; MIT LICENSE. Playground (DOC-2) → v0.5.0 Track T-8 (needs
@@ -185,24 +185,21 @@ _Last updated: 2026-06-28 (P-2c-B gate-held, ceiling probe out). Contract **v0.4
   (§6.2). **CP-2d PASS:** memory 2.50× → **2.33×** vanilla (< 2.4× target); remove-one
   0.62×; no mutation regression; create flat (1.78×, allocation not saved). Single
   back-end (no IR change). Verified by source-read at SHA, not green-counts.
-- **P-2c-B — compile-time STATIC verdict → elide `effect()` allocation — GATE-HELD
-  [2026-06-28], SHA `3cffb7b`.** Design-gate read complete: (1) PLAIN cannot be the
-  predicate — safety direction inverts (erasure: over-wiring safe; B: over-eliding =
-  stale-DOM FIRE), so B needs a NEW positive DECLINE-biased STATIC verdict, full-visibility-
-  gated. (2) Scope is three coupled changes — new verdict + verdict→emitter plumbing (does
-  not exist today) + new one-shot leaf shape the interpreter mounts → Template-IR additive
-  bump. (3) Reach is narrow — provably-static leaves ⊆ A1's inert set (typical row binding
-  reads `value()` → reactive); the fixed valueSig/indexSig/createRoot triple is untouched.
-  **RULING: measure the ceiling before building** — A1 harvest-count/row on jfb create is an
-  upper bound on B's reach (static ⊆ inert). Sonnet probe commissioned (`__test` harvest
-  counter + locked jfb harness). **< ~5% of create → close B, redirect to index-elision**
-  (elide `indexSig` when the row never reads index — fixed-cost, higher reach, simpler);
-  **meaningful fraction → build B.** Build-or-close pending the probe number.
-- **Index-elision (elide `indexSig` for rows that never read index) — NAMED [2026-06-28],
-  not commissioned.** The P-2c-B redirect target if B's ceiling proves too low. Fixed-cost
-  reduction (1 of the per-row `2+1` triple), reaches every qualifying row regardless of K,
-  row-level "reads index?" predicate simpler than per-leaf static proof. Characterize
-  alongside / after the B ceiling probe.
+- **P-2c-B — compile-time STATIC verdict → elide `effect()` allocation — CLOSED
+  [2026-06-28], SHA `cce6423`.** Ceiling probe: **0 harvests/row on jfb** (every row
+  binding-effect reads a signal → reactive → nothing to elide). B's static set ⊆ A1's inert
+  set; on the keyed-dynamic-list workload that defines the create deficit, the inert set is
+  empty. Not built (would cost a new STATIC verdict + emitter plumbing + Template-IR bump to
+  elide zero allocations). Counter validated (TC-P2CB-COUNTER-INERT proves it fires; jfb 0 is
+  a true zero). Not reopened absent a mostly-static-template workload.
+- **Index-elision (elide `indexSig` for rows that never read index) — NEXT CREATE-TIME LEVER,
+  design-gate-open [2026-06-28].** Promoted from B-redirect to measured-superior: jfb `<each>`
+  binds only `item`, never index, yet `wireList` allocates `indexSig` unconditionally
+  (interpreter.ts L499) + writes it on every reorder (L547). Beats B on three axes — fixed
+  1-of-6 nodes/row for 100% of qualifying rows (vs B's 0-of-6), a mutation-path win (drops the
+  reorder `.set()`), and a simpler row-level "reads index?" predicate. Soundness: elide only
+  when the item template provably never reads index (ACCEPT-biased; unsure ⇒ keep). Design gate
+  not yet opened (read `wireList` + `<each>` IR seams; decide Template-IR carrier). Not specced.
 - **PT-1a-syntax — async-read compile-time lowering — DESIGN-OPEN [2026-06-27].**
   Resource read in template position auto-lowers to loading/error/data control-flow
   (the nv-shaped ergonomic win: compiler exploits resource-vs-signal info Solid
@@ -3887,6 +3884,69 @@ Closure axiom intact (B removes effects where provable; adds no primitive).
 **Status: P-2c-B GATE-HELD — Sonnet ceiling probe commissioned (`p-2c-b-ceiling-probe-
 commission.md`). Build-or-close ruling pending the harvest-count number. Index-elision named
 as the redirect target if B closes.**
+
+---
+
+### [2026-06-28] P-2c-B CLOSED — characterized-not-worth-building. Ceiling probe returns 0 harvests/row on jfb (not <5% — exactly 0%): every jfb row binding-effect is reactive, B has nothing to elide. Architect-verified at SHA `cce6423`. Index-elision promoted from redirect-hypothesis to measured-superior next create-time lever. Closes the P-2c-B GATE-HOLD [2026-06-28].
+
+**Workstream:** WS2/WS3. Probe ruled-on by reading placed source + the harness + the actual
+jfb template at `cce642315617379197220d88fb7d7b32c357d1f1` (on `main`) — not from the reported
+number alone.
+
+**The number (validated, not accepted):** 0 total harvests across 1000 rows; 0.0000
+harvests/row; 0.00% of the per-row node count. K=3 binding-effects/row, all reactive.
+
+**Validation performed (the zero could have been false — it is not):**
+- **Counter is real and on the live path.** `harvestInertEffect` increments `_harvestCount`
+  immediately before `return true`, after detachment (core.ts L737). Test-only surface
+  (`__test.harvestCount`/`resetHarvestCount`); no production branch. Verified at source.
+- **Counter is proven to fire** (false-zero ruled out). `TC-P2CB-COUNTER-INERT` constructs an
+  effect reading nothing, flushes, harvests, asserts `harvestCount === 1`. So 0 on the jfb
+  topology means zero inert effects, NOT a dead counter.
+- **K-derivation matches the real template.** Read `test/browser/fixtures/benchmark/app.nv`:
+  the row is `<tr class="${{ danger: selected() === item.id }}"><td>${item.id}</td>
+  <td><a @click>${item.label}</a></td><td><a class="remove" @click>…</a></td><td></td></tr>`.
+  Three reactive holes (class reads `selected`+`item`; two texts read `item`), two `@click`
+  events (no effect), one empty `<td>` (no binding). K=3, all reactive — confirmed. The probe
+  harness (`TC-P2CB-JFB-ROW`) replicates this exact topology (valueSig+indexSig+createRoot+3
+  reactive effects) per row.
+- **Topology-replica caveat addressed.** The probe is a DOM-free core-primitive replica, not
+  the literal mounted `app.nv`. Sound for a *count*: the harvest predicate (`firstSource ===
+  null`) is a pure core-graph property, DOM-independent. A real mount could only ADD reactive
+  effects (more ACCEPT), never inert ones — so the replica cannot under-count inert effects.
+  Ceiling of 0 holds for the real template.
+
+**Ruling: B CLOSED.** B's static set ⊆ A1's inert set; on the workload that DEFINES the
+create-time deficit, the inert set is empty (every binding reads a signal). B would add a
+new STATIC verdict + verdict→emitter plumbing + a Template-IR bump + interpreter path +
+differential conformance — to elide **zero** allocations on jfb. Not built. (B remains a
+theoretical option for a hypothetical mostly-static-template workload, but nv's create-cost
+target is the keyed dynamic list, where B is inert. Not reopened absent such a workload.)
+
+**Index-elision PROMOTED (redirect validated, sharper than the gate stated).** The same
+template read confirms the jfb `<each .of="${rows}" key="${(row) => row.id}" let={item}>`
+binds only `item` — **index is never exposed or read.** Yet `wireList` allocates `indexSig`
+**unconditionally** per row (interpreter.ts L499) and writes it on every position shift
+(L547, `existing.indexSig.set(i)`). So every jfb row carries an `indexSig` that nothing reads
+— dead weight on create AND a redundant `.set()` on every swap/update reconcile. Index-elision
+therefore beats B on three axes the gate only hypothesized:
+- **Fixed-cost, 100% reach:** removes 1 of the 6 nodes/row for EVERY qualifying row (vs B's
+  0-of-6 on jfb).
+- **Mutation-path win B never had:** eliminates the `indexSig.set(i)` write during
+  reorder reconcile (swap/update), not just the create allocation.
+- **Simpler predicate:** a row-level "does the item template read `index`?" check (the `let`
+  binding exposes index or it doesn't) vs B's per-leaf transitive static proof.
+**Soundness fence (carry to the index-elision spec):** elide `indexSig` only when the row
+body provably never reads index — same ACCEPT-biased discipline (unsure ⇒ keep indexSig). The
+predicate is "is the index `let`-binding referenced anywhere in the item template," which is a
+compile-time/IR-visible fact (and runtime-checkable on the returned IR for the interpreter).
+
+**Contract.** No change. P-2c-B closed adds nothing; index-elision (when specced) is a renderer/
+IR optimization — Template-IR impact TBD at its design gate (likely an additive `itemReadsIndex`
+or absence-of-index-binding inference; surface at spec). Closure axiom intact throughout.
+
+**Status: P-2c-B CLOSED (ceiling 0, verified SHA `cce6423`). Index-elision = next create-time
+lever, design-gate-open (not yet specced). P-2c line: A1 LANDED, B CLOSED, index-elision opens.**
 
 ---
 
