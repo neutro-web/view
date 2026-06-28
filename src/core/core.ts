@@ -679,6 +679,82 @@ function disposeNodeFull(node: ReactiveNode): void {
 }
 
 // ============================================================================
+// §6.x: Inert-effect harvest — P-2c-A1
+// ============================================================================
+
+/**
+ * §6.x — Harvest an inert effect: an effect that ran, tracked zero sources,
+ * and owns no children can never re-fire and owns nothing reactive. Detach it
+ * from the reactive graph and owner tree, PROMOTING its onCleanups to its owner
+ * so DOM teardown still fires at owner (row-root) disposal. The node is freed.
+ *
+ * Cleanup-promotion ordering: effect's cleanups move to owner.cleanups and run
+ * in owner LIFO at owner disposal. All harvestable cleanups are order-independent
+ * DOM ops (wireChild textNode.remove(); wireEvent listener is outside the effect).
+ *
+ * Precondition (enforced by early return): kind === KIND_EFFECT &&
+ * firstSource === null && firstChild === null && !isDisposed && !hasError &&
+ * state === CLEAN. Returns false if unmet (no-op).
+ */
+function harvestInertEffect(node: ReactiveNode): boolean {
+  if (
+    node.kind !== KIND_EFFECT ||
+    node.firstSource !== null ||
+    node.firstChild !== null ||
+    node.isDisposed ||
+    node.hasError ||
+    node.state !== CLEAN
+  ) {
+    return false
+  }
+
+  const owner = node.owner
+
+  // Promote cleanups to owner so DOM teardown fires on row disposal.
+  if (node.cleanups !== null) {
+    if (owner === null) {
+      // Degenerate: no owner to promote to — run them now rather than losing them.
+      runCleanups(node)
+    } else if (owner.cleanups === null) {
+      owner.cleanups = node.cleanups
+    } else {
+      for (let i = 0; i < node.cleanups.length; i++) {
+        // biome-ignore lint/style/noNonNullAssertion: in-bounds
+        owner.cleanups.push(node.cleanups[i]!)
+      }
+    }
+    node.cleanups = null
+  }
+
+  // Detach from owner tree. firstSource is already null; effects are leaves
+  // (no observer reads an effect), so firstObserver is also null.
+  removeFromParent(node)
+  node.isDisposed = true
+
+  return true
+}
+
+/**
+ * §6.x — Sweep an owner's direct children, harvesting each inert effect.
+ * Walks firstChild → nextSibling. Children that are structural scopes
+ * (firstChild !== null), still-reactive effects (firstSource !== null), or
+ * not-yet-run effects (state !== CLEAN) are left intact.
+ *
+ * Safe to call after the owner's subtree has had its first flush.
+ * Called from wireList post-flush to reclaim inert per-binding effects.
+ */
+export function harvestInertChildren(owner: Owner | null): void {
+  if (owner === null) return
+  const node = owner as unknown as ReactiveNode
+  let child = node.firstChild
+  while (child !== null) {
+    const next = child.nextSibling // capture before harvest may detach child
+    harvestInertEffect(child)
+    child = next
+  }
+}
+
+// ============================================================================
 // §5.4.4: Error routing — walk owner tree for nearest errorBoundary handler
 // ============================================================================
 
@@ -1301,6 +1377,21 @@ export const __test = {
     while (l) {
       c++
       l = l.nextObserver
+    }
+    return c
+  },
+
+  /** Walk direct children of an owner scope; return count.
+   *  owner must be the value returned by getOwner() inside a createRoot.
+   *  Returns -1 if owner is null. */
+  childCount(owner: Owner | null): number {
+    if (owner === null) return -1
+    const node = owner as unknown as ReactiveNode
+    let c = 0
+    let child = node.firstChild
+    while (child !== null) {
+      c++
+      child = child.nextSibling
     }
     return c
   },

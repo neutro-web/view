@@ -13,6 +13,7 @@ export {
   createRoot,
   onCleanup,
   flushSync,
+  harvestInertChildren,
 } from './core.js'
 
 export type {
