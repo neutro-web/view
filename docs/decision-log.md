@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-28 (P-2 open / P-2c-static-body design-open). Contract **v0.4.2** · Template-IR **v0.4.2**._
+_Last updated: 2026-06-28 (P-2c-A1 landed + verified, SHA d142919). Contract **v0.4.3** · Template-IR **v0.4.2**._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
 > `decision-log-archive.md` (moved 2026-06-21). This snapshot is the resolved
@@ -96,9 +96,7 @@ _Last updated: 2026-06-28 (P-2 open / P-2c-static-body design-open). Contract **
   and **P-2b** (fast dispose, ~0.35× addressable vs Svelte, mostly inherent) =
   characterized-not-commissioned. Goal: narrow create gap where provably free; do NOT
   trade mutation speed to chase Solid's create number.
-- **Live frontier (code/ruling):** P-2c-static-body (design-open compiler ruling —
-  resolve 4 sub-questions → spec → commission) and PT-1a `resource` (ruled, commission
-  unwritten). P-1b CLOSED. P-2a/b characterized-not-commissioned.
+- **Live frontier (code/ruling):** PT-1a `resource` (ruled, commission unwritten — the live code item) and P-2c-B (reopenable — create-time, compile-time STATIC verdict; A1 re-measure gate cleared). P-2c-A1 LANDED (SHA d142919, contract v0.4.3). P-1b CLOSED. P-2a/b characterized-not-commissioned.
 - **v0.1.0 — TAG-READY.** CP-4 docs placed. Swap deficit is v0.5.0; no blocking items remain.
 - **Documentation sweep — CLOSED 2026-06-27 (verified at source).** Both authoring surfaces documented;
   section-based site matching neutro/form; MIT LICENSE. Playground (DOC-2) → v0.5.0 Track T-8 (needs
@@ -176,15 +174,24 @@ _Last updated: 2026-06-28 (P-2 open / P-2c-static-body design-open). Contract **
   fix [2026-06-25] / a6cafbd): nested styled components stamp `data-nv-s-<hash>` + inject
   CSS on mount through a parent binding; transitive through conditionals/lists. Regression-gated
   by G7 (browser).
-- **P-2c-static-body — compiler skip-effect for static list rows — DESIGN-OPEN
-  [2026-06-28].** Primary P-2 create lever. Skip the per-item effect node when a list
-  row body is provably static (no reactive reads beyond value/index) — removes ~1 of
-  ≥3 ReactiveNodes/row, the real slice of the 1.74× create cost. Extension of existing
-  `exprReadsSignal`/`_compilerSources` static analysis; axiom-clean (removes an
-  effect, adds no primitive); **soundness fallback mandatory** (unsure ⇒ keep the
-  effect; false-static = correctness bug). 4 open sub-questions incl. whether it bumps
-  Template-IR (IR carrier) and interpreter-back-end parity. Reactive-core contract
-  unchanged regardless.
+- **P-2c-A1 — runtime inert-effect harvest — LANDED + verified [2026-06-28], SHA
+  `d142919`.** Post-first-flush sweep harvests per-binding effects with
+  `firstSource===null && firstChild===null && state===CLEAN` — detaches from graph +
+  owner tree, promotes onCleanups to row root (currently a no-op: all harvestable effects
+  have `cleanups===null`, CC-AUDIT-1 confirmed at source). One §6 op
+  (`harvestInertEffect` internal + `harvestInertChildren` export); axiom-clean.
+  Sweep via `queueMicrotask` post-reconcile; timing verified at the `flushAll` drain
+  (item effects reach CLEAN same-invocation before harvest microtask). **Contract v0.4.3**
+  (§6.2). **CP-2d PASS:** memory 2.50× → **2.33×** vanilla (< 2.4× target); remove-one
+  0.62×; no mutation regression; create flat (1.78×, allocation not saved). Single
+  back-end (no IR change). Verified by source-read at SHA, not green-counts.
+- **P-2c-B — compile-time STATIC verdict → elide `effect()` allocation — REOPENABLE
+  [2026-06-28].** A1 re-measure gate cleared. Attacks the still-open create-time deficit
+  (1.78× vanilla) that A1 leaves flat: a stricter analyzer verdict (provably reads no
+  reactive source transitively, distinct from PLAIN's prove-failure conflation) lets the
+  emitter emit a non-effect one-shot binding, saving the allocation. Compiled-path-only;
+  narrow initial coverage (`getOuterThunkBody` bails on non-inlined fns, `resolveId` nulls
+  across param boundaries). Not yet commissioned — design-open if picked up.
 - **PT-1a-syntax — async-read compile-time lowering — DESIGN-OPEN [2026-06-27].**
   Resource read in template position auto-lowers to loading/error/data control-flow
   (the nv-shaped ergonomic win: compiler exploits resource-vs-signal info Solid
@@ -4165,3 +4172,156 @@ correctness FIRE.
 3 — flagged, not decided).** Resolve the four sub-questions into a spec, architect-
 approve, then commission. Contract (reactive-core) unchanged regardless — this is
 compiler/IR, not core.
+
+### [2026-06-28] P-2c design gate CLOSED at source → resolves to P-2c-A1 runtime inert-effect harvest. Handoff framing corrected; sub-q 3/4 moot; A1 commissioned, B deferred. Contract v0.4.2 → v0.4.3 (additive §6.x). Supersedes entry B's four-sub-question framing.
+
+**Workstream:** renderer/reconcile + core §6 (one internal op + one export). Read at
+`f3c48781c39f0f8b5368b5f71bd3e96184ed1697`. Closes the P-2c-static-body design gate
+opened in entry B [2026-06-28]; supersedes its framing in three places (below).
+
+**The four sub-questions resolved by reading the seams (not by deliberation).**
+
+1. **Predicate — corrected.** Entry B assumed a single per-item effect to skip.
+   **Source refutes this:** `mountFragment` (interpreter.ts L807) wires one effect PER
+   effect-bearing binding (`wireText`/`wireAttr`/`wireProp`/`wireStyleVar`/`wireChild`/
+   `wireEvent`, `wireClassList` 1+/toggle). "≥3 nodes/row" = `valueSig + indexSig +
+   createRoot + K binding-effects`. The lever is per-binding effect elision summed over
+   the row — the "graded" case (entry B sub-q 1) is the ONLY accurate case, not a harder
+   variant. **The predicate is runtime, not static:** after `runRecompute` (core.ts L480),
+   `firstSource === null` ⟺ the effect tracked zero reactive sources — a direct read of
+   existing state. Harvest iff `kind===EFFECT && firstSource===null && firstChild===null
+   && state===CLEAN && !isDisposed && !hasError`.
+
+2. **valueSig/indexSig — folds in for free.** A row that reads neither value nor index
+   reactively produces binding effects with `firstSource===null` → harvested. A row that
+   reads `value()` reactively keeps that binding's effect (`firstSource!==null`). No
+   special index-elision logic needed; the source-count observation subsumes it. Stable
+   event handlers (read no signal) are harvested too — their listener is row-root-owned
+   (interpreter L397), so the listener survives.
+
+3. **IR carrier — MOOT.** `emitted-mount.ts` is empty; `runtime.ts` re-exports `mount`
+   from `interpreter.ts`; `nv-emitter.ts` L184 emits an IR literal consumed by the
+   interpreter `mount`. **There is one back-end.** No second mount path exists to diverge
+   on node count. No Template-IR field needed; Template-IR stays v0.4.2.
+
+4. **Interpreter parity — MOOT (same reason).** One mount path serves both front-ends;
+   the harvest runs there for both. No compiler-only/interpreter-only split.
+
+**Why PLAIN is not the predicate (the soundness crux).** The compile-time analyzer
+(read-write-erasure-analyzer.ts L9–15) emits PLAIN when it finds no provable reactive
+read — **conflating genuinely-static with couldn't-prove-the-read** (a silently-dropped
+reactive read surfaces as PLAIN by the analyzer's own header). Skipping an effect on PLAIN
+would turn every missed-read PLAIN into a stale binding = correctness FIRE. A1 does NOT use
+the analyzer; it observes the actual tracking run. There is no false-static case: an effect
+that read a signal has `firstSource!==null` and is kept. This is the load-bearing reason A1
+is sound by construction where a static-verdict skip would not be.
+
+**The one §6 touch (surfaced, approved).** Harvest detaches an inert effect from the graph
+and owner tree while **promoting its onCleanups to its owner** (the row root) so DOM
+teardown survives. New internal `harvestInertEffect` + exported `harvestInertChildren`. It
+is axiom-clean (removes a node, adds no primitive). The cleanup-promotion changes ordering
+from effect-LIFO to owner-LIFO; **architect-audited at `f3c4878`: the only effect-internal
+onCleanup that promotes is `wireChild` L413 `textNode.remove()`; all promotable cleanups
+are order-independent DOM ops** (CC re-confirms as gate CC-AUDIT-1). Contract gains an
+additive §6.x sub-entry → **v0.4.2 → v0.4.3** (doc bump; no primitive/invariant change).
+
+**Timing safety.** Effects run on flush, not at `effect()` call. The sweep is post-first-
+flush. Condition `state===CLEAN` guards against sweeping an un-run (DIRTY) effect — a
+premature sweep is harmless (skips un-run effects); a missed sweep is a perf miss, never a
+correctness issue.
+
+**Commission written** (`p-2c-a1-commission.md`): the harvest op + sweep + Gate-P
+(CC-AUDIT-1, TC-A1-1/2/3/TIMING/CLEANUP/DISPOSE, DIFF-CONF, CP-2d-REMEASURE). **Target:
+memory < 2.4× vanilla + remove-one < 2.16×; swap/select/update-10th within ±2% (no
+regression).** A1 reclaims retained nodes (memory + teardown); it does NOT save the
+allocation (node still created + run once) — that is **P-2c-B (deferred):** a stricter
+compile-time STATIC verdict (distinct from PLAIN) letting the emitter elide the `effect()`
+allocation, attacking create-time directly, gated on A1 re-measure.
+
+**Supersedes:** entry B [2026-06-28]'s four-sub-question framing — specifically (a) the
+single-per-item-effect model (refuted: one effect per binding), (b) sub-q 3/4 as open
+(moot: single back-end), (c) PLAIN/static-verdict as the predicate (replaced by runtime
+zero-source observation, which has no false-static hole). Closure axiom and single-current-
+value invariant untouched.
+
+**Status: P-2c design-open → A1 COMMISSIONED. P-2c-B deferred (gated on A1 re-measure).
+Reactive-core semantics unchanged; contract doc v0.4.3 (additive §6.x harvest op).**
+
+---
+
+### [2026-06-28] P-2c-A1 inert-effect harvest LANDED + architect-verified at SHA `d142919`. CP-2d-REMEASURE PASS: memory 2.50× → 2.33× vanilla; no mutation regression. Contract v0.4.2 → v0.4.3 (§6.2). Closes the P-2c-A1 commission.
+
+**Workstream:** core §6 + renderer/reconcile. Verified by reading placed source at
+`d142919c380a28c159aee1aeb53850425e2d5456` (on `main`) — not from CC's green-counts.
+A prior CC report cited the work against commits not yet on `main` (raw host 404 on all
+five SHAs); the merge-to-main gate held and verification was deferred until the push
+landed. After merge, every load-bearing claim confirmed at source.
+
+**Source verification (read at SHA):**
+- `harvestInertEffect` (core.ts L699–735): predicate is the full six conditions
+  including `state === CLEAN` (L705). Promotes `node.cleanups` to `owner.cleanups`,
+  calls `removeFromParent`, sets `isDisposed = true`. **Does NOT call `disposeNodeFull`**
+  (confirmed — that path would run cleanups / delete row DOM). Correct.
+- `harvestInertChildren` (core.ts L753–761): walks `firstChild→nextSibling`, captures
+  `next` BEFORE harvest detaches the child, gated on the bypass flag. Correct.
+- Bypass `__setHarvestDisabled` (core.ts L748–751): module-level `_harvestDisabled`,
+  default false, no public API / no contract surface — internal harness affordance for
+  same-session before/after. As specced.
+- `wireList` sweep (interpreter.ts L502–536, L638–643): item root captured via
+  `getOwner()` INSIDE the item `createRoot` callback (L505), pushed to `pendingSweep`
+  post-mount (L536); swept at end of reconcile effect body via `queueMicrotask` with
+  `splice(0)` clear (L638–643). Microtask runs untracked, after the effect.
+- **Timing verified at the flush loop** (core.ts L906–940): `flushAll` is a
+  `while (cycles ≤ MAX_CASCADE)` drain — item effects enqueued during the reconcile
+  effect's run are drained in a subsequent cycle of the SAME `flushAll` invocation
+  (`flushRunning` stays true throughout), reaching `state === CLEAN` before the harvest
+  microtask (queued during that flush) fires. The `state === CLEAN` guard is the
+  belt-and-suspenders fallback: any un-run (DIRTY) effect is skipped, so the harvest is
+  correct under any flush ordering. No race.
+
+**CC-AUDIT-1 confirmed at source.** The only effect-internal `onCleanup` candidate
+(`wireChild`) registers `onCleanup(() => textNode.remove())` at interpreter.ts L414,
+**before** `effect()` at L416 — so it is owned by the enclosing `createRoot` (item root
+via `currentOwner`), NOT the effect node. `wireEvent` (L398) and `wireSync` register
+their `removeEventListener` cleanups outside the effect body, also root-owned. Result:
+every currently-harvestable effect has `cleanups === null`; the cleanup-promotion branch
+is verified-correct future-proofing, presently a no-op. Harvest is pure node reclamation.
+
+**Contract §6.2** (`reactive-core-contract.md` v0.4.3, L431–460): documents inert-effect
+harvest as a partial (deferred-cleanup) disposal; states explicitly it "adds no reactive
+primitive, relaxes no propagation invariant; the closure axiom and single-current-value
+invariant are untouched." Axiom-clean — confirmed. **Note (verified detail, not a
+discrepancy):** §6.2 specifies promoted cleanups run before owner's own cleanups (LIFO,
+appended) — a stronger ordering statement than the spec's "interleaved"; immaterial given
+the order-independence audit (all harvestable cleanups are independent DOM ops).
+
+**CP-2d-REMEASURE — same-session, both arms, Chrome 149 / M2 Max / harness `4fbccf55`
+(harvest-OFF via `__setHarvestDisabled(true)`, identical binary):**
+
+| Op | vanilla | harvest-OFF | harvest-ON | vs-vanilla ON | gate |
+|---|---|---|---|---|---|
+| run-memory (MB) | 1.858 | 4.641 | 4.324 (−0.317) | **2.33×** | < 2.4× ✅ |
+| remove-one (ms) | 14.1 | 8.6 | 8.8 | **0.62×** | < 2.16× ✅ |
+| create-1k (ms) | 28.7 | 51.4 | 51.1 | 1.78× | flat ✅ |
+| swap (ms) | 34 | 9.9 | 9.7 | 0.29× | no-regress ✅ |
+| update-10th (ms) | 31.7 | 9.4 | 5.6 | 0.18× | no-regress ✅ |
+| select (ms) | 26 | 7.0 | 6.9 | 0.27× | no-regress ✅ |
+
+Memory: **2.50× → 2.33× vanilla** (−0.317 MB reclaim). Modest-but-real and consistent
+with the mechanism: most harvestable effects have `cleanups === null`, so the reclaim is
+one freed `ReactiveNode` per inert binding, of which a 1k-row jfb table has a bounded
+count. No mutation-path regression (swap/select/update-10th within noise of harvest-OFF;
+update-10th's larger swing is at sub-6ms timescales — both arms beat vanilla >5×).
+**Create-time flat as expected** — A1 reclaims retained nodes, does not save the
+allocation. The create-time win remains **P-2c-B** (compile-time STATIC verdict elides
+the `effect()` allocation), now re-measure-gate cleared and available to reopen.
+
+**Correctness gates** (all green before perf was read, per commission ordering):
+CC-AUDIT-1, TC-A1-1/2/3/TIMING/CLEANUP/DISPOSE (715/715 vitest), DIFF-CONF (asserts both
+reactive survival and inert harvest, childCount 2→1 post-`await`). No false-static harvest
+in any test; the `state === CLEAN` guard correctly skipped DIRTY effects.
+
+**Status: P-2c-A1 LANDED + verified. Contract v0.4.3. P-2c-B (create-time, compile-time
+STATIC verdict) now reopenable — its re-measure gate is cleared (A1's memory win is real
+but bounded; B attacks the still-open 1.78× create deficit). Closure axiom +
+single-current-value invariant untouched.**
