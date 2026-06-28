@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-28 (P-2c-A1 landed + verified, SHA d142919). Contract **v0.4.3** · Template-IR **v0.4.2**._
+_Last updated: 2026-06-28 (PT-1a resource landed + verified, SHA 9017db2). Contract **v0.4.3** · Template-IR **v0.4.2**._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
 > `decision-log-archive.md` (moved 2026-06-21). This snapshot is the resolved
@@ -96,7 +96,7 @@ _Last updated: 2026-06-28 (P-2c-A1 landed + verified, SHA d142919). Contract **v
   and **P-2b** (fast dispose, ~0.35× addressable vs Svelte, mostly inherent) =
   characterized-not-commissioned. Goal: narrow create gap where provably free; do NOT
   trade mutation speed to chase Solid's create number.
-- **Live frontier (code/ruling):** PT-1a `resource` (ruled, commission unwritten — the live code item) and P-2c-B (reopenable — create-time, compile-time STATIC verdict; A1 re-measure gate cleared). P-2c-A1 LANDED (SHA d142919, contract v0.4.3). P-1b CLOSED. P-2a/b characterized-not-commissioned.
+- **Live frontier (code/ruling):** P-2c-B (reopenable — create-time, compile-time STATIC verdict; design-open if picked up, NOT ruled — needs the full design-gate arc) and PT-1b Suspense+SWR (named open — renderer-gating cost unread). PT-1a `resource` LANDED (SHA 9017db2). P-2c-A1 LANDED (SHA d142919). Contract v0.4.3. P-1b CLOSED. P-2a/b characterized-not-commissioned.
 - **v0.1.0 — TAG-READY.** CP-4 docs placed. Swap deficit is v0.5.0; no blocking items remain.
 - **Documentation sweep — CLOSED 2026-06-27 (verified at source).** Both authoring surfaces documented;
   section-based site matching neutro/form; MIT LICENSE. Playground (DOC-2) → v0.5.0 Track T-8 (needs
@@ -233,12 +233,19 @@ _Last updated: 2026-06-28 (P-2c-A1 landed + verified, SHA d142919). Contract **v
 - **P-2 creation/teardown — OPEN 2026-06-28; split into P-2a/b/c.** P-2c-static-body
   is the live lever (design-open above). P-2a/b characterized-not-commissioned until
   P-2c lands and re-measures. See Log entry A 2026-06-28.
-- **PT-1a async `resource` — RULED 2026-06-27 (shape 1, composition).** `signal`
-  triple (data/loading/error) + one source-tracking `effect` that settle-writes via
-  `.set()` (external-event write, §8.6 precedent — no `sync`, cycle-impossible by
-  construction) + `onCleanup` abort + epoch guard for stale settles. Zero graph
-  primitives; closure axiom upheld; no contract change (v0.4.2). CC commission
-  (factory + abort/epoch + tests, WS1/WS3) gated on this ruling, not yet written.
+- **PT-1a async `resource` — LANDED + verified [2026-06-28], SHA `9017db2`.** Composition
+  factory at `src/renderer/resource.ts` (re-exported from renderer index): three signals
+  (`data`/`loading`/`error`) + one source-tracking `effect` (fetcher in `untrack`) + bare
+  `.set()` settle-write (external→signal, no `sync`) + `onCleanup` abort + epoch stale-drop.
+  Core public surface only; zero new primitive; **closure axiom intact**. Three sound
+  beyond-ruling decisions verified at source: UNSET sentinel (undefined-resolve no-op),
+  explicit `getOwner()` guard (onCleanup-throw fallback wouldn't fire from inside the effect),
+  epoch-bumped-before-`source()` (CC self-review caught a real ordering bug; regression test
+  TC-R-6e). Write-after-dispose safe via `nodeSet` `isDisposed` guard (architect-verified at
+  seam). 19 tests; TC-R-3 + TC-R-6e (deferred-promise deterministic) read at source. No
+  contract change (v0.4.3). **PT-1b carry-over:** `derived()`-scope call is semantically
+  wrong but passes the owner guard — JSDoc-warned; runtime guard needs owner-kind exposure
+  (PT-1b note).
 - **PT-1b Suspense-equivalent + stale-while-revalidate — NAMED OPEN [2026-06-27],
   not ruled.** Multi-resource coordination boundary (errorBoundary owner-scope
   precedent §5.4.4) PLUS the SWR behavior (keep last resolved content instead of
@@ -3727,6 +3734,84 @@ this entry. P-1a (swap position-guard) is independent and proceeds in parallel.
 
 **Supersedes:** nothing. Opens: PT-1b (Suspense, named), entry B (async-read
 lowering, design-open).
+
+---
+
+### [2026-06-28] PT-1a `resource` LANDED + architect-verified at SHA `9017db2`. Composition factory; closure axiom intact; no contract change. Implements the [2026-06-27] PT-1a ruling exactly. Closes the PT-1a commission.
+
+**Workstream:** WS1/WS3. Verified by reading placed source + the two correctness-fence
+tests at `9017db20ffb331831aa3eafffe79b84f5c8caf94` (on `main`).
+
+**Note on the report SHA (verify-at-real-HEAD discipline).** CC's report cited base
+`821d6b8` "working tree — no commit made yet" — that SHA 404s on the raw host. The work
+WAS committed and pushed afterward; `main` advanced to `9017db2` (the report wasn't
+re-stamped). Verification was performed at the real HEAD, not the reported SHA. (Recurrent
+pattern: CC prose loose where the code is correct — read the placed source at actual HEAD.)
+
+**Shape delivered — matches the ruling (read at source, `src/renderer/resource.ts`):**
+- **Three independent signals** (`data`/`loading`/`error`) — fine-grained subscription
+  (a `data` reader does not re-run on a `loading` flip; TC-R-7a/7b).
+- **One source-tracking `effect`**: `source()` read tracked; fetcher wrapped in `untrack`
+  so its synchronous reactive reads don't become deps (TC-R-UNTRACK).
+- **Settle-write via bare `.set()`** — external-event category, NOT routed through `sync`.
+  Confirmed contract-legal: the continuation runs outside propagation (no `currentObserver`),
+  no reactive cycle; `nodeSet` schedules a flush on out-of-flush write so downstream
+  re-runs (TC-R-SETTLE / TC-R-SETTLE-DERIVED). The "`sync` is the single reactive→signal
+  write" rule is not violated — this write is external→signal (§8.6), outside `sync`'s
+  monopoly.
+- **Two lifecycle guards, both present:** `onCleanup(() => ac.abort())` (fires on effect
+  re-run via `preRunCleanup` AND on owner dispose) + `gen !== epoch` stale-drop.
+- **Imports: core public surface only** (`signal`/`effect`/`onCleanup`/`getOwner`/`untrack`).
+  No core edit, no new core export, no new node kind. **Closure axiom intact** (TC-R-CLOSURE).
+- Placed at `src/renderer/resource.ts`, re-exported from `src/renderer/index.ts`.
+
+**Three implementation decisions beyond the ruling — reviewed, all sound:**
+1. **UNSET sentinel** (`Symbol('nv.resource.unset')`) as `data`'s initial value. Without it,
+   `signal<T|undefined>(undefined).set(undefined)` is an `Object.is` no-op — a fetcher
+   legitimately resolving to `undefined` would silently fail to notify. Sentinel makes the
+   initial→resolved transition always observable; accessor maps UNSET→undefined to preserve
+   the `T | undefined` external type. Correct (TC-R-UNDEFINED).
+2. **Explicit `getOwner() === null` guard** at factory entry, instead of relying on
+   `onCleanup`'s throw. Verified necessary: `onCleanup` is called INSIDE the effect body,
+   whose owner is the effect node — it would never see `currentOwner === null`, so the
+   commission's "rely on onCleanup throw" fallback would not fire. Explicit guard is the
+   correct choice (TC-R-8).
+3. **Epoch bumped before `source()`** (`const gen = ++epoch` as the first effect-body line).
+   CC's self-review pass-3 caught a real ordering bug: if epoch bumped AFTER `source()`, a
+   throwing `source()` leaves epoch unchanged, so a concurrent prior in-flight resolve passes
+   `gen === epoch` and overwrites the error state. Bumping first, unconditionally, invalidates
+   all prior in-flight settles before anything else. **Architect-confirmed at source AND at
+   the regression test** (TC-R-6e uses deferred promises; deterministic). Good catch, landed.
+
+**Write-after-dispose safety (architect-verified at seam; not in CC's report).** The
+success-races-dispose path — a fetch *resolving* exactly as the owner disposes — passes the
+epoch check (dispose doesn't bump epoch) and isn't abort-guarded on the resolve arm, so it
+reaches `data.set(result)`. This is safe: `disposeChildrenOf` marks child signals
+`isDisposed`, and `nodeSet` early-returns on `isDisposed` — the write is a silent no-op, not
+a corruption. The core write-path is the backstop. (CC's report did not call out this race;
+the code is correct because the seam guards it. Read the seams.)
+
+**Correctness-fence tests read (not green-counted):**
+- **TC-R-3** (stale-settle, the load-bearing test): deferred promises, B-settles-first /
+  A-settles-late; asserts `data` holds B's value after A's stale settle. Deterministic.
+- **TC-R-6e** (epoch ordering): deferred promise + throwing `source()` on re-run; asserts
+  error not overwritten by the stale resolve. Only passes if `++epoch` precedes `source()`.
+Both use controllable `deferred()` promises — no timing flakiness. 19 tests total, all named
+per report; 734-test suite, no regressions (suite count CC-reported).
+
+**Scope held (no PT-1b leakage):** no Suspense, no multi-resource coordination, no
+stale-while-revalidate *rendering* behavior. `data` retaining its prior value on error/refetch
+is a natural consequence (SWR-*semantics* at the data layer), but the renderer's stale-vs-
+fallback *display* choice is correctly left to PT-1b.
+
+**Contract.** No change. v0.4.3 holds (from P-2c-A1; `resource` adds nothing). `resource` is
+renderer/userland-layer composition, like `store` (§11/L837) — the contract does not name it.
+
+**Status: PT-1a `resource` LANDED + verified. Closure axiom + single-current-value invariant
+untouched. Contract v0.4.3.** Carried open for PT-1b: a `derived()`-scope call passes the
+`getOwner()` guard but is semantically wrong (the internal effect would be disposed/re-created
+each `derived` re-eval); JSDoc warns, a runtime guard would need an owner-kind check the core
+doesn't currently expose — note for PT-1b, not a PT-1a defect.
 
 ---
 
