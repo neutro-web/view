@@ -72,9 +72,18 @@ _Last updated: 2026-06-27 (PT-1a async ruling). Contract **v0.4.2** · Template-
 - **CP-2c — DATA COMPLETE 2026-06-27** (Chrome 149/M2 Max/harness 4fbccf55…). nv wins select
   (0.34×) + update-10th (0.68×) vs vanilla; at-peer bulk create (~1.7×); memory 2.4× vanilla. Axiom
   conditionally upheld.
-- **LIS — REOPENED for v0.5.0** (2026-06-22 trigger met: swap 3.95× vanilla). Root cause:
-  unconditional insertBefore per row (interpreter L540). Fix two-tier: position-guard first (Tier 1),
-  full LIS only if Tier 1 leaves a large-N deficit (Tier 2).
+- **P-1 swap deficit — root-cause CORRECTED 2026-06-27.** P-1a position-guard is
+  **already in main since v0.1.0** (`interpreter.ts` L549 `if (rec.rootEl.nextSibling
+  !== ref)`) — the handoff's "unconditional insertBefore" was wrong; commissioning
+  P-1a would be a no-op. Deficit is real (harness: jfb swap 1↔n-2 = **997
+  insertBefore at n=1000**) and caused by the moving reference node cascading
+  re-inserts across the swapped span, which the guard cannot catch. **P-1b (LIS-Ivi
+  move-minimization) gate is SATISFIED — promoted to the active P-1 commission**
+  (jfb swap → 2 moves). Reconcile-internal; no IR/contract/axiom touch. Verdict gate
+  = real-browser CP-2c swap re-measure.
+- **Live frontier (code):** P-1b LIS-Ivi (active — P-1a found already-shipped,
+  gate satisfied) and PT-1a `resource` (unblocked, entry A landed). P-1b is the
+  higher-value next: the swap deficit is the one measured structural defect.
 - **v0.1.0 — TAG-READY.** CP-4 docs placed. Swap deficit is v0.5.0; no blocking items remain.
 - **Documentation sweep — CLOSED 2026-06-27 (verified at source).** Both authoring surfaces documented;
   section-based site matching neutro/form; MIT LICENSE. Playground (DOC-2) → v0.5.0 Track T-8 (needs
@@ -3792,3 +3801,79 @@ protected is already §5; this entry names it as a guarded line.
 
 **Supersedes:** the coarse "transitions OUT of v0.5.0" note in
 `[2026-06-27] PT-1a … RULED` (replaced by the SPLIT fence in that entry).
+
+---
+
+### [2026-06-27] P-1 swap deficit — root-cause CORRECTED; P-1a found already-present; P-1b (LIS-Ivi) gate SATISFIED, promoted to active. No contract change (v0.4.2).
+
+**Workstream:** WS3 renderer (reconcile). Verified at SHA, not from the handoff.
+
+**Finding 1 — P-1a (position-guard) is ALREADY IN MAIN.** The handoff
+(road-to-0.5.0) root-caused the swap deficit as `interpreter.ts` L540–550 calling
+`parent.insertBefore(rec.rootEl, ref)` "unconditionally for every row every
+reconcile," and named P-1a (add a skip-when-already-correct-sibling guard) as the
+next commission. **Reading the placed source at `d3b780b` AND at the v0.1.0 tag
+`606e04b` (identical): the guard already exists:**
+
+    if (rec.rootEl.nextSibling !== ref) {
+      parent.insertBefore(rec.rootEl, ref)
+    }
+    ref = rec.rootEl
+
+The reconcile loop has been guarded since v0.1.0. **P-1a as specified is a no-op** —
+it asks for a guard that is present. The handoff's "unconditional insertBefore"
+mechanism is incorrect.
+
+**Finding 2 — the deficit is real; the mechanism is the moving reference node, not
+a missing guard.** Deterministic harness reproducing the exact reverse-walk loop
+(move-count only, no browser/timing — sandbox-valid for a counting question),
+js-framework-benchmark "swap rows" = swap index 1 with index n-2:
+
+    jfb swap (1, n-2)   n=1000   insertBefore = 997   (correct ordering)
+    adjacent swap (i,i+1) n=1000 insertBefore =   1
+    identity (no change)  n=1000 insertBefore =   0
+    append tail           n=1000 insertBefore =   1
+
+The guard is fully effective for identity (0), append (1), and adjacent swap (1).
+It is **useless for the jfb swap (997 moves)** because moving row 1 to position n-2
+changes the `nextSibling` of every node in the spanned range, so the
+`rec.rootEl.nextSibling !== ref` test fires for each one, cascading a re-insert down
+the whole span. The handoff's "~1000 insertBefore" magnitude was right (997); its
+explanation (unconditional) was wrong. Script time is small; the cost is DOM
+thrash / re-layout from ~N moves on a 2-element logical swap.
+
+**Finding 3 — the P-1a→P-1b gate is SATISFIED, by evidence not by a deferred
+measurement loop.** The handoff's two-tier plan gated full LIS-Ivi (P-1b) behind
+"only if P-1a leaves a large-N arbitrary-permutation deficit; re-measure P-1a
+first." P-1a is **already present** and leaves a **997-move deficit at n=1000** for
+the standard benchmark swap. The gate condition is met. **P-1b (LIS-Ivi
+move-minimization) is promoted from gated to the active P-1 commission target.** It
+is the only fix: LIS keeps the longest stable subsequence in place and moves only
+genuinely-displaced nodes — a jfb swap becomes **2 moves**, not 997. ("named next ≠
+needed next" — P-1a was named next; reading code showed it neither needed nor
+absent.)
+
+**Scope of P-1b (the commission to write next).** Replace the reverse-walk
+unconditional-sequence enforcement with LIS-based move-minimization over the keyed
+records: compute the longest increasing subsequence of the kept nodes' current
+positions, leave those in place, `insertBefore` only the nodes not in the LIS.
+Reconcile-internal: **no Template-IR change, no closure-axiom touch, no contract
+change.** Correctness bar is unchanged (final order == `next`); the win is move
+count. Verdict gate is **real-browser Playwright re-run of the CP-2c swap op**
+(JSDOM/linkedom barred from this verdict path) — the move-count harness proves the
+algorithm reduces moves, but the paint/layout payoff is a real-browser number.
+
+**Gate-P (failable items) for the P-1b commission:**
+1. LIS implementation: for a jfb swap (1↔n-2) at n=1000, emitted `insertBefore`
+   count ≤ 2 (harness-checkable, deterministic — fails if guard-equivalent count).
+2. Correctness: final DOM order === `next` for swap/reverse/shuffle/add/remove/
+   identity across n ∈ {10,100,1000} (harness + interpreter test suite).
+3. No IR/contract diff in the changeset (inspection — fails if any `docs/` or
+   template-IR file touched).
+4. Real-browser CP-2c swap-rows re-measure vs the `606e04b` baseline (3.95×
+   vanilla) shows material reduction (Playwright, Chromium primary). Failable: a
+   non-improvement is a FIRE, not a silent pass.
+
+**Supersedes:** the handoff's P-1 frontier (P-1a-as-next-commission, "unconditional
+insertBefore" root-cause, P-1b-as-gated). P-1a requires no work (already shipped).
+P-1b is now the active P-1 item.
