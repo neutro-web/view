@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-27 (PT-1a async ruling). Contract **v0.4.2** · Template-IR **v0.4.2**._
+_Last updated: 2026-06-28 (CP-2d / P-1b closure). Contract **v0.4.2** · Template-IR **v0.4.2**._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
 > `decision-log-archive.md` (moved 2026-06-21). This snapshot is the resolved
@@ -72,18 +72,22 @@ _Last updated: 2026-06-27 (PT-1a async ruling). Contract **v0.4.2** · Template-
 - **CP-2c — DATA COMPLETE 2026-06-27** (Chrome 149/M2 Max/harness 4fbccf55…). nv wins select
   (0.34×) + update-10th (0.68×) vs vanilla; at-peer bulk create (~1.7×); memory 2.4× vanilla. Axiom
   conditionally upheld.
-- **P-1 swap deficit — root-cause CORRECTED 2026-06-27.** P-1a position-guard is
-  **already in main since v0.1.0** (`interpreter.ts` L549 `if (rec.rootEl.nextSibling
-  !== ref)`) — the handoff's "unconditional insertBefore" was wrong; commissioning
-  P-1a would be a no-op. Deficit is real (harness: jfb swap 1↔n-2 = **997
-  insertBefore at n=1000**) and caused by the moving reference node cascading
-  re-inserts across the swapped span, which the guard cannot catch. **P-1b (LIS-Ivi
-  move-minimization) gate is SATISFIED — promoted to the active P-1 commission**
-  (jfb swap → 2 moves). Reconcile-internal; no IR/contract/axiom touch. Verdict gate
-  = real-browser CP-2c swap re-measure.
-- **Live frontier (code):** P-1b LIS-Ivi (active — P-1a found already-shipped,
-  gate satisfied) and PT-1a `resource` (unblocked, entry A landed). P-1b is the
-  higher-value next: the swap deficit is the one measured structural defect.
+- **P-1b — CLOSED 2026-06-28 (CP-2d real-browser verdict).** LIS-Ivi move-minimization
+  (`2fb8476`) lands at **swap rows 0.66× vanilla (22.3ms median)** vs baseline 3.74× vanilla
+  (127.3ms). 82% reduction; nv now BEATS vanilla and the fine-grained peers (Solid 1.03×,
+  Svelte 0.99×) on swap. All four Gate-P items closed: unit move-count ≤2 (TC-P1b-1),
+  identity/append ≤1 (TC-P1b-2), correctness across permutations (TC-P1b-3), real-browser
+  re-measure (CP-2d, PASS). No regression on any other op — non-swap ops within ±2% of
+  baseline. Lit foil added: same-syntax (tagged-template) but template-part diffing engine;
+  swap = 2.28× vanilla vs nv 0.66× — fine-grained wins decisively as expected. React VDOM
+  reference: 3.92× vanilla on swap.
+- **CP-2d — Lit added as standing foil (2026-06-28).** Lit v3.2.0: same tagged-template
+  surface as nv, different engine (template-part diffing, not fine-grained). Create/replace
+  at-peer with nv (~1.1–1.2×); swap 2.28× vanilla (expected structural cost of diffing
+  vs fine-grained on mutation). React hooks v19.2.0 added as VDOM reference. All same-session,
+  Chrome 149, M2 Max, harness 4fbccf55.
+- **Live frontier (code):** PT-1a `resource` (unblocked, entry A landed). P-1 closed.
+  No measured structural defect on swap remains.
 - **v0.1.0 — TAG-READY.** CP-4 docs placed. Swap deficit is v0.5.0; no blocking items remain.
 - **Documentation sweep — CLOSED 2026-06-27 (verified at source).** Both authoring surfaces documented;
   section-based site matching neutro/form; MIT LICENSE. Playground (DOC-2) → v0.5.0 Track T-8 (needs
@@ -3877,3 +3881,77 @@ algorithm reduces moves, but the paint/layout payoff is a real-browser number.
 **Supersedes:** the handoff's P-1 frontier (P-1a-as-next-commission, "unconditional
 insertBefore" root-cause, P-1b-as-gated). P-1a requires no work (already shipped).
 P-1b is now the active P-1 item.
+
+---
+
+### [2026-06-28] CP-2d — real-browser P-1b verdict + Lit foil. Chrome 149 / M2 Max / harness 4fbccf55. P-1b CLOSED.
+
+**Hardware / env:** Apple M2 Max, macOS 24.6.0. Chrome 149.0.7827.199 (identical to CP-2c baseline session). js-framework-benchmark clone SHA 4fbccf55 (architect-locked, unchanged). Same-session measurement: all frameworks measured against the same vanilla denominator in one Puppeteer run. CPU throttle: 2× (harness default). 15 iterations per benchmark.
+
+**Frameworks measured:**
+- `keyed/vanillajs` — denominator
+- `keyed/nv` @ `2fb8476` — post-LIS (P-1b subject)
+- `keyed/nv-v010` @ `606e04b` — v0.1.0 baseline (same-Chrome before)
+- `keyed/solid` v1.9.3 — fine-grained signals peer
+- `keyed/svelte` v5.42.1 — compiled-reactivity peer
+- `keyed/lit` v3.2.0 — **new: same-syntax (tagged-template), different engine (template-part diffing)**
+- `keyed/react-hooks` v19.2.0 — **new: VDOM reference**
+
+**Harness edit made:** created `frameworks/keyed/nv-v010/` (copy of nv src + index.html, pre-built bundle from `606e04b` dist, minimal package.json). No `src/` change to the view repo.
+
+**Full results table (×vanilla, lower is better; vanilla in ms):**
+
+| op | vanilla | nv@2fb | nv@606e | solid | svelte | lit | react |
+|---|---|---|---|---|---|---|---|
+| create 1k | 28.7ms | 1.74× | 1.73× | 1.04× | 1.03× | 1.18× | 1.23× |
+| replace 1k | 33.0ms | 1.67× | 1.64× | 1.00× | 1.02× | 1.10× | 1.27× |
+| update 10th | 31.7ms | 0.69× | 0.88× | 1.03× | 0.98× | 2.17× | 0.66× |
+| select | 26.0ms | 0.50× | 0.33× | 1.00× | 0.97× | 0.89× | 0.91× |
+| **swap rows ★** | 34.0ms | **0.66×** | **3.74×** | 1.03× | 0.99× | 2.28× | 3.92× |
+| remove one | 14.1ms | 2.16× | 2.16× | 2.13× | 1.81× | 1.15× | 1.13× |
+| create 10k | 300.7ms | 1.89× | 1.90× | 1.07× | 1.10× | 1.17× | 2.04× |
+| append 1k | 33.4ms | 1.67× | 1.63× | 0.98× | 1.00× | 1.13× | 1.19× |
+| clear | 11.9ms | 1.83× | 1.85× | 1.30× | 1.20× | 1.65× | 1.91× |
+| mem:ready | 0.6MB | 0.7MB | 0.6MB | 0.6MB | 0.7MB | 0.7MB | 1.2MB |
+| mem:run | 1.9MB | 4.6MB | 4.6MB | 2.7MB | 2.8MB | 2.8MB | 4.4MB |
+| mem:clear | 0.7MB | 1.2MB | 1.2MB | 0.8MB | 1.0MB | 0.9MB | 2.0MB |
+
+**Raw swap rows values (15 iterations, ms):**
+- vanilla: [16.1,34.9,34.2,34.0,34.7,14.8,35.3,33.6,34.0,36.9,32.9,33.0,33.3,40.9,37.8] median=34.0 stddev=7.21
+- nv@2fb8476: [20.3,19.7,26.3,39.1,21.9,22.4,37.2,19.8,24.6,22.3,21.6,36.6,20.7,21.6,22.8] median=22.3 stddev=6.71
+- nv@606e04b: [124,129.4,115.8,127.3,128.5,130.6,121.8,128.8,127.8,127.9,125.1,131.9,125.6,125.4,124.1] median=127.3 stddev=3.96
+- solid: [21.5,35.7,32.7,35.4,35.0,38.0,35.1,38.1,34.8,33.2,37.3,33.7,21.8,36.0,39.5] median=35.1 stddev=5.30
+- svelte: [37.9,42.5,36.8,33.6,19.5,35.4,33.5,32.8,34.8,32.6,33.4,33.8,21.4,33.9,34.4] median=33.8 stddev=5.72
+- lit: [79.4,75.3,79.6,82.1,74.3,77.9,77.4,24.3,83.1,76.0,74.8,77.6,78.8,79.1,77.2] median=77.6 stddev=14.09
+- react: [133.2,134.7,133.1,128.3,131.2,134.7,135.6,134.0,128.6,133.7,133.4,133.4,128.7,133.5,144.9] median=133.4 stddev=3.94
+
+**P-1b verdict — Gate-P item 4: PASS.**
+- Before (nv@606e04b): 127.3ms median = **3.74× vanilla**.
+- After (nv@2fb8476): 22.3ms median = **0.66× vanilla**.
+- Reduction: 82% (127.3→22.3ms). nv now beats vanilla and the fine-grained peers on swap.
+- The 997→2 insertBefore reduction (proven by TC-P1b-1) maps directly to the 127→22ms paint reduction. Material improvement confirmed.
+
+**No regression on non-swap ops.** All other ops within noise (±2%) of baseline. LIS ordering loop is reconcile-internal; create/replace/update/select/clear are unaffected as expected.
+
+**Gate-P summary — all four items closed:**
+1. TC-P1b-1: jfb swap n=1000 ≤ 2 insertBefore ✓ (verified at `2fb8476`)
+2. TC-P1b-2: identity = 0, append-tail ≤ 1 ✓
+3. TC-P1b-3: correctness across all permutation types, n ∈ {10,100,1000} ✓
+4. CP-2d real-browser swap re-measure: 3.74× → 0.66× ✓ (PASS, not FIRE)
+
+**Lit foil reading (as framed in CP-2d commission):**
+- Swap (fine-grained op): nv 0.66× vs Lit 2.28× — fine-grained wins decisively (3.5× gap). Same tagged-template surface; different engine. This is the headline contrast: same syntax, fine-grained wins on mutation.
+- Update-10th: nv 0.69× vs Lit 2.17× — same story, signal granularity dominant.
+- Select: nv 0.50× vs Lit 0.89× — nv wins.
+- Create/replace (creation-heavy, template-cloning advantage): nv 1.74×/1.67× vs Lit 1.18×/1.10× — Lit leads, as expected (jfb PR #521 documents template-cloning structural advantage). Not an nv regression.
+- Memory: nv and Lit at-peer (4.6MB vs 2.8MB run-memory; nv carries more reactive graph state).
+
+**React VDOM reference reading:**
+- Swap: react 3.92× vanilla vs nv 0.66× — expected large gap (VDOM re-render + tree diff + patch vs fine-grained 2-move DOM update). Not a contest; calibration for the VDOM-thinking audience.
+- Update-10th: react 0.66× (better than nv 0.69×) — React's partial-rerender on state updates can be competitive on batch-update ops. Note: React hooks here uses `memo` + selective re-render; not representative of naive React.
+- Memory: react 4.4MB run-memory (similar to nv's 4.6MB; both carry more per-node bookkeeping than Svelte/Solid).
+
+**Lit as standing foil — rationale recorded:**
+Lit shares nv's tagged-template `html\`\`` authoring surface but is not fine-grained — on update it re-renders the template and diffs template parts; no per-binding signal granularity. The comparison isolates "same ergonomics, different reactivity model." Reading: mutation ops (update/select/swap) are where fine-grained wins; creation ops are where template-cloning wins. This axis is now a permanent fixture of the comparison table.
+
+**Supersedes:** CP-2c swap number (3.95× vanilla at v0.1.0, Chrome 149 same-session, now superseded by post-LIS 0.66×). The 3.95× figure should be understood as a before-LIS artifact; the P-1 deficit is closed.

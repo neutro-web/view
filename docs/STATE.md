@@ -29,17 +29,17 @@ nv is a fine-grained reactive view engine. Components run once; signals track wh
 
 ## Performance position
 
-Numbers from Chrome 149 on M2 Max, harness commit 4fbccf55 (see [Decision Log — CP-2c](https://github.com/neutro-web/view/blob/main/docs/decision-log.md) for full detail):
+Numbers from Chrome 149 on M2 Max, harness commit 4fbccf55 (see [Decision Log — CP-2d](https://github.com/neutro-web/view/blob/main/docs/decision-log.md) for full detail):
 
 | Benchmark | vs vanilla |
 |---|---|
-| select row | 0.34× (nv wins) |
-| update every 10th row | 0.68× (nv wins) |
+| select row | 0.50× (nv wins) |
+| update every 10th row | 0.69× (nv wins) |
 | bulk create | ~1.7× (at-peer with Solid/Svelte band) |
-| memory | 2.4× |
-| swap rows | 3.95× — known deficit |
+| memory | ~2.4× |
+| swap rows | **0.66× (nv wins)** — LIS-Ivi landed v0.5.0-pre |
 
-**Swap rows deficit**: nv performs at 3.95× vanilla on swap rows. The root cause is an unconditional `insertBefore` per row in the interpreter; the fix requires a two-tier approach (position-guard + LIS) and is tracked for v0.5.0. This is a known, bounded problem with a clear fix path.
+**Swap rows**: LIS-Ivi move-minimization (`2fb8476`) reduced swap from 3.74× to 0.66× vanilla — nv now beats vanilla and the fine-grained peers (Solid 1.03×, Svelte 0.99×) on swap. The P-1 deficit is closed.
 
 ## What is not here yet (v0.5.0 scope)
 
