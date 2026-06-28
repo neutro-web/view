@@ -1,4 +1,4 @@
-# nv Reactive Core — Runtime Contract (v0.4.2)
+# nv Reactive Core — Runtime Contract (v0.4.3)
 
 > **Status:** Design contract. Pins the reactive-core semantics that everything
 > else in `@neutro/view` (nv) depends on. This document is the fixed target for
@@ -427,6 +427,44 @@ ownership still tracks only its own reads. This is why owner redirection is a §
 (lifetime) concern, not a §4/§5 (observation) one, and adds no new reactive
 primitive — these are peers of `createRoot`/`onCleanup`, not of the four locked
 primitives (§1).
+
+### 6.2 Inert-effect harvest (`harvestInertChildren`)
+
+An **inert effect** is one that has completed its first run and tracked zero
+reactive sources (`firstSource === null`), owns no child scope
+(`firstChild === null`), has not errored, and is not already disposed. An inert
+effect has no source or observer edges (effects are graph leaves — nothing reads
+them), so it has already exited the reactive propagation graph after its first
+run.
+
+`harvestInertChildren(owner)` sweeps the direct children of `owner`. For each
+inert effect found it performs a **partial (deferred-cleanup) disposal**: removes
+the node from the owner tree (`removeFromParent`), marks it `isDisposed = true`,
+and **promotes** its `onCleanup` callbacks to `owner.cleanups` rather than
+running them immediately. The cleanups fire when `owner` is disposed (prepended
+in execution order — promoted cleanups run before `owner`'s own cleanups, since
+they are appended to `owner.cleanups` and `runCleanups` iterates LIFO).
+
+This differs from full §6 disposal in one way: cleanups are deferred to the
+owner, not run at the point of detachment. This is safe because: (a) inert
+effects own no reactive children (predicate guarantees `firstChild === null` and
+`firstSource === null`), so there is nothing to cascade; (b) all harvestable
+cleanups in current wire\* bindings are order-independent DOM ops. A harvested
+node with `isDisposed = true` satisfies §6's propagation-graph invariants (no
+source/observer edges) but its cleanup contract is fulfilled at `owner` disposal,
+not immediately.
+
+**Soundness:** the predicate is a positive observation of zero tracking after the
+effect has run — not a static prediction. An effect that read a signal will have
+`firstSource !== null` and is never harvested. There is no false-static case.
+
+**Scope:** removes a node from the owner tree; adds no reactive primitive, relaxes
+no propagation invariant. The closure axiom and single-current-value invariant are
+untouched.
+
+**When to call:** after the owner's subtree has had its first flush. The condition
+`state === CLEAN` guards against sweeping an effect that has not yet run (DIRTY
+effects are skipped; a missed sweep is a perf miss only, not a correctness issue).
 
 ---
 
