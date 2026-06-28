@@ -86,8 +86,34 @@ _Last updated: 2026-06-28 (CP-2d / P-1b closure). Contract **v0.4.2** · Templat
   at-peer with nv (~1.1–1.2×); swap 2.28× vanilla (expected structural cost of diffing
   vs fine-grained on mutation). React hooks v19.2.0 added as VDOM reference. All same-session,
   Chrome 149, M2 Max, harness 4fbccf55.
+- **CP-2d deficit analysis — creation/teardown cost identified as next perf frontier.**
+  nv's primary value proposition is performance. CP-2d confirms the mutation story is now
+  strong (swap/select/update-10th all beat vanilla). The remaining measured deficits are
+  structural and consistent:
+  - **Create 1k/10k (~1.7–1.9×), replace 1k (~1.7×), append 1k (~1.7×):** per-item
+    reactive graph setup cost (two signals + effect + dispose closure + Map record per
+    row). Vanilla writes DOM directly; nv builds a graph first. Lit (template-cloning,
+    1.18× create) confirms this is a reactive-graph cost, not a DOM-walking cost.
+  - **Remove one (2.16×):** single-item reactive teardown — owner-tree walk, edge
+    severing, `onCleanup` fire, Map delete. More expensive than vanilla's `element.remove()`.
+    Solid (2.13×) and Svelte (1.81×) show some of this is inherent to reactive engines,
+    but the gap vs Svelte suggests a faster dispose path may exist.
+  - **Memory at 4.6MB run vs vanilla 1.9MB (~2.4×):** reactive graph state per node
+    (signal + effect + owner slot per row). Structural; not addressable without changing
+    the model. At-peer with React (4.4MB); above Solid (2.7MB) and Svelte (2.8MB).
+  **Pattern:** nv pays a per-item cost at mount and teardown, earns it back at mutation.
+  The engine is optimal for long-lived, frequently-mutating lists; structurally penalized
+  for lists that are created and thrown away. This is the correct tradeoff for the stated
+  value proposition — but create/remove performance is a real gap vs Solid/Svelte that
+  deserves an active workstream, not just a watch-item. **CC suggestion:** open P-2
+  (creation/teardown cost) as the next perf commission after PT-1a resource lands.
+  Candidate levers: cheaper per-item record layout (reduce signal-node width at list
+  scope), faster dispose path (avoid full owner-tree walk for list records, which have
+  known structure), or deferred graph construction for static list bodies (body doesn't
+  change → no effect needed, just mount). Each needs a gate-P measurement before
+  landing. None touch the mutation model — they are mount/teardown-path only.
 - **Live frontier (code):** PT-1a `resource` (unblocked, entry A landed). P-1 closed.
-  No measured structural defect on swap remains.
+  Creation/teardown gap identified; P-2 commission suggested pending architect ruling.
 - **v0.1.0 — TAG-READY.** CP-4 docs placed. Swap deficit is v0.5.0; no blocking items remain.
 - **Documentation sweep — CLOSED 2026-06-27 (verified at source).** Both authoring surfaces documented;
   section-based site matching neutro/form; MIT LICENSE. Playground (DOC-2) → v0.5.0 Track T-8 (needs
@@ -3955,3 +3981,47 @@ P-1b is now the active P-1 item.
 Lit shares nv's tagged-template `html\`\`` authoring surface but is not fine-grained — on update it re-renders the template and diffs template parts; no per-binding signal granularity. The comparison isolates "same ergonomics, different reactivity model." Reading: mutation ops (update/select/swap) are where fine-grained wins; creation ops are where template-cloning wins. This axis is now a permanent fixture of the comparison table.
 
 **Supersedes:** CP-2c swap number (3.95× vanilla at v0.1.0, Chrome 149 same-session, now superseded by post-LIS 0.66×). The 3.95× figure should be understood as a before-LIS artifact; the P-1 deficit is closed.
+
+---
+
+### [2026-06-28] CP-2d deficit analysis — creation/teardown cost; P-2 commission suggestion
+
+**Context:** CP-2d closed P-1 (swap). Full table read against nv's stated value proposition: performance first. The mutation story is now strong. The following is a structured reading of where nv is behind and what it means.
+
+**nv's performance identity.** nv is a fine-grained reactive engine. The bet is: pay a per-item setup cost at mount, earn it back as zero-diff targeted updates at every subsequent mutation. This is the correct bet for long-lived, frequently-mutating UIs. The CP-2d numbers confirm the mutation half is working (swap 0.66×, select 0.50×, update-10th 0.69× — all beat vanilla). The question is whether the mount/teardown half is acceptable or improvable.
+
+**Deficit 1 — Creation cost (~1.7–1.9× vanilla).**
+- Create 1k: 50ms vs vanilla 29ms. Create 10k: 568ms vs 301ms. Replace 1k: 55ms vs 33ms.
+- Cause: per-item reactive graph setup. Each row allocates two `WritableSignal` nodes (value + index), one effect node, one dispose closure, one `ItemRecord` in the `records` Map, and runs `createRoot` + `mountFragment` + `onCleanup` registration. Vanilla writes DOM directly.
+- Evidence it's graph cost, not DOM cost: Lit (template-cloning, no reactive graph) creates at 1.18× vanilla with the same tagged-template surface. The ~0.5× gap between Lit and nv on create is the reactive graph setup cost in isolation.
+- Solid creates at 1.04× vanilla. Solid also uses fine-grained signals. The gap between Solid (1.04×) and nv (1.74×) on create is meaningful and suggests nv's per-item record is heavier than necessary.
+
+**Deficit 2 — Remove one (2.16× vanilla).**
+- 30ms vs vanilla 14ms for a single-item removal.
+- Cause: reactive teardown — owner-tree walk, signal edge severing (N edges per effect), `onCleanup` fire, DOM remove, Map delete.
+- Solid is 2.13× (nearly identical), Svelte 1.81×. The Solid parity suggests some of this cost is inherent to fine-grained reactivity's disposal model. The Svelte gap (compiler eliminates runtime graph entirely for static templates) suggests a compiler-informed dispose path could be cheaper.
+- This is the most surprising deficit by op: removing one item from a 1,000-item list takes 2× longer than vanilla. In practice remove-one is rarely on a hot path, but it signals that the dispose path is heavier than it needs to be.
+
+**Deficit 3 — Memory (~2.4× vanilla run-memory).**
+- 4.6MB vs vanilla 1.9MB under a 1k-row live list.
+- Cause: `ReactiveNode` width (each signal/effect carries owner, sources, observers, value, runId, etc.) × 3 nodes per row × 1,000 rows = ~3,000 reactive nodes alive simultaneously.
+- Solid: 2.7MB (fine-grained, leaner node width). nv at 4.6MB is 1.7× above Solid on the same model class. `ReactiveNode` width is locked (field order is cache-load-bearing), but there may be a list-scope optimization: list items' signals and effects could use a leaner record type (no `pubsub`, no `errorBoundary` slot) at the cost of some generality.
+- React hooks: 4.4MB (VDOM carries per-fiber bookkeeping). nv/React at-peer here is ironic — it means nv's reactive graph carries about as much per-row overhead as React's fiber tree. That is a concrete target to beat.
+
+**The Lit contrast is the clearest framing.**
+Lit: create 1.18×, swap 2.28×. nv: create 1.74×, swap 0.66×. This is the tradeoff made concrete. Lit is cheaper to build; nv is cheaper to update. The crossover point — how many mutations make nv's higher setup cost worth it — is not yet measured. For most real UIs (lists that render once and then get sorted/filtered/updated repeatedly) nv wins. For lists that are created and destroyed on every interaction (e.g. autocomplete dropdowns, virtualized long-lists with aggressive recycling) the create cost matters more.
+
+**Suggestion to architect — P-2 commission (creation/teardown cost).**
+nv is first and foremost about performance. The mutation numbers are now strong. The creation/teardown gap vs Solid (~1.7× vs 1.0×) is the next measured structural gap. Candidate levers (each needs isolated measurement before landing; none touch the mutation model):
+
+1. **List-scope leaner record.** `ItemRecord` currently stores `valueSig` + `indexSig` as full `WritableSignal` nodes (each a `ReactiveNode` with the full width). A list-local signal type that omits unused fields (pubsub bus, error slot) could reduce per-row allocations. Risk: breaks the contract guarantee that `WritableSignal` is the universal writable type; requires a narrower internal type behind the same external interface.
+
+2. **Faster dispose path for list items.** Currently `dispose()` calls `disposeNodeFull(root)` which walks the owner tree generically. List item roots have known structure (one effect, two signals, one DOM onCleanup). A list-specific teardown that skips the generic walk and directly severs the known edges could be 2–3× faster on remove. This is reconcile-internal; no contract change.
+
+3. **Deferred/static list body detection.** If the item template is provably static (no reactive reads in the body — only the value/index signals), no per-item effect is needed post-mount. The compiler can detect this and emit a simpler binding. Reduces per-item node count from 3 to 1 for static list bodies. This requires a compiler change and a new IR hint; non-trivial scope.
+
+Lever 1 and 2 are reconcile-internal and lower risk. Lever 3 is a compiler/IR concern and should be ruled separately.
+
+**Proposed gate for P-2:** same harness, same Chrome, before/after on create-1k, create-10k, and remove-one. Target: create-1k ≤1.3× vanilla (closing to Solid's band), remove-one ≤1.5× vanilla. Swap/select/update-10th must not regress.
+
+**This is a suggestion, not a commission.** Architect rules whether P-2 opens, which lever to try first, and the gate values. CC does not open this workstream unilaterally.
