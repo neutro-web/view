@@ -450,8 +450,16 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
   // re-run, destroying per-item reactive signals before op 3/4 could update them.
   const listOwner = getOwner()
 
+  // Tracks the key sequence from the previous reconcile in DOM order.
+  // Map insertion order never reorders, so this must be maintained separately.
+  let prevOrder: Array<string | number> = []
+
   effect(() => {
     const next = binding.items() // the only tracked read in this effect
+
+    // prevOrder holds the key sequence as it was after the last reconcile (= current DOM order).
+    // Used by the LIS ordering pass to derive each kept node's prior relative position.
+    const prevKeyOrder = prevOrder
 
     // Key collision detection: duplicate key in one snapshot → error-route (§4.4)
     const nextKeys = new Map<string | number, number>()
@@ -537,20 +545,89 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
       }
     }
 
-    // DOM ordering: walk next in reverse, insertBefore to enforce sequence.
-    // Each item's rootEl is the single-root element (e.g. <li>) of its mounted fragment.
-    // O(N) moves worst-case; correct for add/remove/reorder (LIS-Ivi move-minimization deferred).
+    // DOM ordering: LIS-Ivi move-minimization.
+    // Keeps the longest stable subsequence of kept nodes in place; only nodes
+    // outside the LIS (and newly-mounted nodes) are repositioned with insertBefore.
+    // A jfb swap (index 1 ↔ n-2) costs 2 moves instead of ~N.
+    //
+    // Position source: prevKeyOrder (snapshot taken at top of this effect, before
+    // Op 2/1 mutate records). Maps each key → its prior relative index in records.
+    // New keys (Op 1) have no prior index — they are never in the stable run.
+
+    // Build prev-index map from the snapshot.
+    const prevIndex = new Map<string | number, number>()
+    for (let i = 0; i < prevKeyOrder.length; i++) {
+      // biome-ignore lint/style/noNonNullAssertion: bounded by prevKeyOrder.length
+      prevIndex.set(prevKeyOrder[i]!, i)
+    }
+
+    // For each position in next, record its previous index (-1 = new key, always moved).
+    const n = next.length
+    const pos = new Array<number>(n)
+    for (let i = 0; i < n; i++) {
+      // biome-ignore lint/style/noNonNullAssertion: bounded by next.length
+      const k = binding.key(next[i]!, i)
+      pos[i] = prevIndex.get(k) ?? -1
+    }
+
+    // O(n log n) patience-sort LIS over pos[], ignoring new keys (pos === -1).
+    // tails[i] = smallest tail value of any increasing subsequence of length i+1.
+    // pred[i] = predecessor index in next[] for reconstructing the LIS.
+    const tails: number[] = []
+    const tailIdx: number[] = [] // index into next[] for each tail
+    const pred = new Array<number>(n).fill(-1)
+    const posInLis = new Array<number>(n).fill(-1) // tails[] slot this next-position occupies
+
+    for (let i = 0; i < n; i++) {
+      const p = pos[i]
+      if (p === undefined || p === -1) continue // new key — not eligible for stable run
+
+      // Binary search for leftmost tail >= p
+      let lo = 0
+      let hi = tails.length
+      while (lo < hi) {
+        const mid = (lo + hi) >>> 1
+        // biome-ignore lint/style/noNonNullAssertion: tails[mid] set above; mid is in-bounds by binary search
+        if ((tails[mid] ?? 0) < p) lo = mid + 1
+        else hi = mid
+      }
+      tails[lo] = p
+      tailIdx[lo] = i
+      posInLis[i] = lo
+      if (lo > 0) {
+        const prevTailIdx = tailIdx[lo - 1]
+        if (prevTailIdx !== undefined) pred[i] = prevTailIdx
+      }
+    }
+
+    // Reconstruct the LIS index set (indices into next[]).
+    const lisSet = new Set<number>()
+    const lastTailIdx = tailIdx[tails.length - 1]
+    if (tails.length > 0 && lastTailIdx !== undefined) {
+      let idx: number = lastTailIdx
+      while (idx !== -1) {
+        lisSet.add(idx)
+        const nextIdx = pred[idx]
+        if (nextIdx === undefined) break
+        idx = nextIdx
+      }
+    }
+
+    // Reverse walk: insertBefore nodes NOT in the LIS that aren't already in position.
     let ref: Node = anchorNode
-    for (let i = next.length - 1; i >= 0; i--) {
+    for (let i = n - 1; i >= 0; i--) {
       // biome-ignore lint/style/noNonNullAssertion: bounded by next.length
       const k = binding.key(next[i]!, i)
       // biome-ignore lint/style/noNonNullAssertion: key was just set above (op1) or existed
       const rec = records.get(k)!
-      if (rec.rootEl.nextSibling !== ref) {
+      if (!lisSet.has(i) && rec.rootEl.nextSibling !== ref) {
         parent.insertBefore(rec.rootEl, ref)
       }
       ref = rec.rootEl
     }
+
+    // Record the new DOM sequence for the next reconcile's LIS position lookup.
+    prevOrder = next.map((item, i) => binding.key(item, i))
   })
 
   // Parent teardown: dispose all item roots when the list region unmounts (§6 cascade)

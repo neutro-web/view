@@ -1512,6 +1512,152 @@ test('TC-10j  nested ListBinding: disposal cascades to inner list', () => {
   rmParent(parent)
 })
 
+// ── TC-P1b: LIS move-minimization Gate-P ─────────────────────────────────────
+//
+// Gate-P items (architect commission 2026-06-27):
+//   1. Move-count: jfb swap (1↔n-2) at n=1000 ≤ 2 insertBefore calls.
+//   2. Move-count: identity = 0, append-tail = 1.
+//   3. Correctness: final DOM order === next for all permutation types across n.
+//
+// Move-count tests spy insertBefore on the real parent node from wireList.
+// Correctness tests assert child order by reading querySelectorAll after each op.
+
+/** Build a list IR + signal for Gate-P tests. */
+function makeSimpleListIR(items: () => readonly Item[]): TemplateIR {
+  return makeListIR(items, liTextTemplate)
+}
+
+/** Read the text content of every <li> under parent in DOM order. */
+function liOrder(parent: Element): string[] {
+  return Array.from(parent.querySelectorAll('li')).map((el) => el.textContent ?? '')
+}
+
+/** Spy insertBefore on node, returning { count } that increments per real move. */
+function spyInsertBefore(node: Node): { count: number; restore: () => void } {
+  const spy = { count: 0, restore: () => {} }
+  const orig = node.insertBefore.bind(node)
+  // biome-ignore lint/suspicious/noExplicitAny: spy override
+  ;(node as any).insertBefore = (child: Node, ref: Node | null) => {
+    spy.count++
+    return orig(child, ref)
+  }
+  spy.restore = () => {
+    // biome-ignore lint/suspicious/noExplicitAny: restore
+    ;(node as any).insertBefore = orig
+  }
+  return spy
+}
+
+test('TC-P1b-1  LIS move-count: jfb swap (1↔n-2) at n=1000 ≤ 2 insertBefore', () => {
+  const n = 1000
+  const initial: Item[] = Array.from({ length: n }, (_, i) => ({ id: i, label: String(i) }))
+  const items = signal<Item[]>(initial)
+  const ir = makeSimpleListIR(() => items())
+  const parent = mkParent()
+  const dispose = mount(ir, parent, document)
+  flushSync()
+
+  // Spy AFTER initial mount (only count reconcile moves, not initial DOM build).
+  const spy = spyInsertBefore(parent.querySelector('ul')!)
+
+  const swapped = initial.slice()
+  const tmp = swapped[1]!
+  swapped[1] = swapped[n - 2]!
+  swapped[n - 2] = tmp
+  items.set(swapped)
+  flushSync()
+
+  spy.restore()
+
+  expect(spy.count, 'jfb swap at n=1000 must cost ≤ 2 insertBefore').toBeLessThanOrEqual(2)
+
+  dispose()
+  rmParent(parent)
+})
+
+test('TC-P1b-2  LIS move-count: identity = 0, append-tail = 1', () => {
+  const initial: Item[] = [
+    { id: 1, label: 'A' },
+    { id: 2, label: 'B' },
+    { id: 3, label: 'C' },
+  ]
+  const items = signal<Item[]>(initial)
+  const ir = makeSimpleListIR(() => items())
+  const parent = mkParent()
+  const dispose = mount(ir, parent, document)
+  flushSync()
+
+  const ul = parent.querySelector('ul')!
+
+  // Identity: same array → 0 moves
+  const spyId = spyInsertBefore(ul)
+  items.set(initial.slice())
+  flushSync()
+  spyId.restore()
+  expect(spyId.count, 'identity: 0 insertBefore').toBe(0)
+
+  // Append-tail: one new item added at end → 1 move (new item only)
+  const spyAppend = spyInsertBefore(ul)
+  items.set([...initial, { id: 4, label: 'D' }])
+  flushSync()
+  spyAppend.restore()
+  expect(spyAppend.count, 'append-tail: ≤ 1 insertBefore').toBeLessThanOrEqual(1)
+
+  dispose()
+  rmParent(parent)
+})
+
+test('TC-P1b-3  LIS correctness: swap, reverse, shuffle, append, prepend, remove, identity', () => {
+  const sizes = [10, 100, 1000]
+
+  for (const n of sizes) {
+    const base: Item[] = Array.from({ length: n }, (_, i) => ({ id: i, label: String(i) }))
+    const items = signal<Item[]>(base)
+    const ir = makeSimpleListIR(() => items())
+    const parent = mkParent()
+    const dispose = mount(ir, parent, document)
+    flushSync()
+
+    const ul = parent.querySelector('ul')!
+
+    const check = (label: string, arr: Item[]) => {
+      items.set(arr)
+      flushSync()
+      const got = liOrder(ul)
+      const want = arr.map((it) => it.label)
+      expect(got, `n=${n} ${label}: DOM order matches next`).toEqual(want)
+    }
+
+    // jfb swap (1 ↔ n-2)
+    const swapped = base.slice()
+    ;[swapped[1], swapped[n - 2]] = [swapped[n - 2]!, swapped[1]!]
+    check('jfb-swap', swapped)
+
+    // full reverse
+    check('reverse', base.slice().reverse())
+
+    // restore base
+    check('restore', base.slice())
+
+    // append-tail
+    check('append', [...base, { id: n, label: String(n) }])
+
+    // prepend
+    check('prepend', [{ id: n + 1, label: 'NEW' }, ...base, { id: n, label: String(n) }])
+
+    // remove-middle
+    const mid = Math.floor(n / 2)
+    const removed = base.filter((_, i) => i !== mid)
+    check('remove-middle', removed)
+
+    // identity (restore)
+    check('identity', base.slice())
+
+    dispose()
+    rmParent(parent)
+  }
+})
+
 // ── TC-MR: Multi-root template support ───────────────────────────────────────
 //
 // Back-ends previously only removed the first child of a mounted template on
