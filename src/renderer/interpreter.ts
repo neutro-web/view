@@ -44,6 +44,7 @@ import {
   createRoot,
   effect,
   getOwner,
+  harvestInertChildren,
   onCleanup,
   pubsub,
   runWithOwner,
@@ -453,6 +454,7 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
   // Tracks the key sequence from the previous reconcile in DOM order.
   // Map insertion order never reorders, so this must be maintained separately.
   let prevOrder: Array<string | number> = []
+  const pendingSweep: Array<ReturnType<typeof getOwner>> = []
 
   effect(() => {
     const next = binding.items() // the only tracked read in this effect
@@ -497,8 +499,10 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
         const indexSig = signal<number>(i)
         let mountedRoot!: Node
 
+        let itemRootOwner: ReturnType<typeof getOwner> = null
         const dispose = runWithOwner(listOwner, () =>
           createRoot((d) => {
+            itemRootOwner = getOwner()
             const itemIR = binding.itemTemplate(valueSig, indexSig)
             const { roots } = mountFragment(itemIR, parent, doc, anchorNode)
             // Strip whitespace-only text nodes — well-formatted templates have them
@@ -529,6 +533,7 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
           rootEl: mountedRoot,
           dispose,
         })
+        if (itemRootOwner !== null) pendingSweep.push(itemRootOwner)
       } else {
         // Op 3: value changed (immutable-item contract; compare by reference, not valueSig() read)
         // NOT reading valueSig() here — that would subscribe the reconcile effect to per-item
@@ -628,6 +633,14 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
 
     // Record the new DOM sequence for the next reconcile's LIS position lookup.
     prevOrder = next.map((item, i) => binding.key(item, i))
+
+    // P-2c-A1: schedule post-flush harvest of inert per-binding effects.
+    if (pendingSweep.length > 0) {
+      const toSweep = pendingSweep.splice(0)
+      queueMicrotask(() => {
+        for (const owner of toSweep) harvestInertChildren(owner)
+      })
+    }
   })
 
   // Parent teardown: dispose all item roots when the list region unmounts (§6 cascade)

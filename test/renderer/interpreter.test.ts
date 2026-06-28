@@ -1088,6 +1088,50 @@ test('TC-06h  parent region dispose while branch mounted: full cleanup', () => {
 
 type Item = { id: number; label: string }
 
+// ── TC-A1: DIFF-CONF smoke — harvest does not drop reactive effects ─────────
+
+test('TC-A1-DIFF-CONF  reactive binding still updates after harvest sweep', async () => {
+  // This test verifies that a list row with a REACTIVE text binding (reads valueSig)
+  // still updates correctly after the post-flush harvest sweep has run.
+  // A false-harvest (harvesting a reactive effect) would leave the text stale.
+  const parent = document.createElement('div')
+  document.body.appendChild(parent)
+
+  const items = signal<Item[]>([{ id: 1, label: 'A' }])
+
+  const ir = makeListIR(
+    () => items(),
+    (vs, _is) => ({
+      id: 'li-reactive',
+      shape: { html: '<li><!--nv-0--></li>', bindingPaths: [[0, 0]] },
+      bindings: [
+        {
+          kind: 'text',
+          pathIndex: 0,
+          // Reactive: reads valueSig() — must NOT be harvested.
+          expr: () => (vs() as Item).label,
+        } satisfies TextBinding,
+      ],
+    }),
+  )
+
+  const dispose = mount(ir, parent, document)
+  flushSync()
+
+  // Let harvest sweep run (queueMicrotask fires after this await).
+  await Promise.resolve()
+
+  // Mutate via Op 3 — reactive binding must still update.
+  items.set([{ id: 1, label: 'B' }])
+  flushSync()
+
+  const li = parent.querySelector('li')
+  expect(li?.textContent).toBe('B')
+
+  dispose()
+  document.body.removeChild(parent)
+})
+
 /** Outer template whose single binding is a ListBinding. */
 function makeListIR(
   items: () => readonly Item[],
