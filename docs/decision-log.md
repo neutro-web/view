@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-28 (PT-1a resource landed + verified, SHA 9017db2). Contract **v0.4.3** · Template-IR **v0.4.2**._
+_Last updated: 2026-06-28 (P-2c-B gate-held, ceiling probe out). Contract **v0.4.3** · Template-IR **v0.4.2**._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
 > `decision-log-archive.md` (moved 2026-06-21). This snapshot is the resolved
@@ -96,7 +96,7 @@ _Last updated: 2026-06-28 (PT-1a resource landed + verified, SHA 9017db2). Contr
   and **P-2b** (fast dispose, ~0.35× addressable vs Svelte, mostly inherent) =
   characterized-not-commissioned. Goal: narrow create gap where provably free; do NOT
   trade mutation speed to chase Solid's create number.
-- **Live frontier (code/ruling):** P-2c-B (reopenable — create-time, compile-time STATIC verdict; design-open if picked up, NOT ruled — needs the full design-gate arc) and PT-1b Suspense+SWR (named open — renderer-gating cost unread). PT-1a `resource` LANDED (SHA 9017db2). P-2c-A1 LANDED (SHA d142919). Contract v0.4.3. P-1b CLOSED. P-2a/b characterized-not-commissioned.
+- **Live frontier (code/ruling):** P-2c-B ceiling probe (Sonnet — harvest-count/row on jfb create; build-or-close pending the number) and PT-1b Suspense+SWR (named open — renderer-gating cost unread). P-2c-B GATE-HELD. Index-elision named (B redirect). PT-1a `resource` + P-2c-A1 LANDED. Contract v0.4.3. P-1b CLOSED. P-2a/b characterized-not-commissioned.
 - **v0.1.0 — TAG-READY.** CP-4 docs placed. Swap deficit is v0.5.0; no blocking items remain.
 - **Documentation sweep — CLOSED 2026-06-27 (verified at source).** Both authoring surfaces documented;
   section-based site matching neutro/form; MIT LICENSE. Playground (DOC-2) → v0.5.0 Track T-8 (needs
@@ -185,13 +185,24 @@ _Last updated: 2026-06-28 (PT-1a resource landed + verified, SHA 9017db2). Contr
   (§6.2). **CP-2d PASS:** memory 2.50× → **2.33×** vanilla (< 2.4× target); remove-one
   0.62×; no mutation regression; create flat (1.78×, allocation not saved). Single
   back-end (no IR change). Verified by source-read at SHA, not green-counts.
-- **P-2c-B — compile-time STATIC verdict → elide `effect()` allocation — REOPENABLE
-  [2026-06-28].** A1 re-measure gate cleared. Attacks the still-open create-time deficit
-  (1.78× vanilla) that A1 leaves flat: a stricter analyzer verdict (provably reads no
-  reactive source transitively, distinct from PLAIN's prove-failure conflation) lets the
-  emitter emit a non-effect one-shot binding, saving the allocation. Compiled-path-only;
-  narrow initial coverage (`getOuterThunkBody` bails on non-inlined fns, `resolveId` nulls
-  across param boundaries). Not yet commissioned — design-open if picked up.
+- **P-2c-B — compile-time STATIC verdict → elide `effect()` allocation — GATE-HELD
+  [2026-06-28], SHA `3cffb7b`.** Design-gate read complete: (1) PLAIN cannot be the
+  predicate — safety direction inverts (erasure: over-wiring safe; B: over-eliding =
+  stale-DOM FIRE), so B needs a NEW positive DECLINE-biased STATIC verdict, full-visibility-
+  gated. (2) Scope is three coupled changes — new verdict + verdict→emitter plumbing (does
+  not exist today) + new one-shot leaf shape the interpreter mounts → Template-IR additive
+  bump. (3) Reach is narrow — provably-static leaves ⊆ A1's inert set (typical row binding
+  reads `value()` → reactive); the fixed valueSig/indexSig/createRoot triple is untouched.
+  **RULING: measure the ceiling before building** — A1 harvest-count/row on jfb create is an
+  upper bound on B's reach (static ⊆ inert). Sonnet probe commissioned (`__test` harvest
+  counter + locked jfb harness). **< ~5% of create → close B, redirect to index-elision**
+  (elide `indexSig` when the row never reads index — fixed-cost, higher reach, simpler);
+  **meaningful fraction → build B.** Build-or-close pending the probe number.
+- **Index-elision (elide `indexSig` for rows that never read index) — NAMED [2026-06-28],
+  not commissioned.** The P-2c-B redirect target if B's ceiling proves too low. Fixed-cost
+  reduction (1 of the per-row `2+1` triple), reaches every qualifying row regardless of K,
+  row-level "reads index?" predicate simpler than per-leaf static proof. Characterize
+  alongside / after the B ceiling probe.
 - **PT-1a-syntax — async-read compile-time lowering — DESIGN-OPEN [2026-06-27].**
   Resource read in template position auto-lowers to loading/error/data control-flow
   (the nv-shaped ergonomic win: compiler exploits resource-vs-signal info Solid
@@ -3812,6 +3823,70 @@ untouched. Contract v0.4.3.** Carried open for PT-1b: a `derived()`-scope call p
 `getOwner()` guard but is semantically wrong (the internal effect would be disposed/re-created
 each `derived` re-eval); JSDoc warns, a runtime guard would need an owner-kind check the core
 doesn't currently expose — note for PT-1b, not a PT-1a defect.
+
+---
+
+### [2026-06-28] P-2c-B (compile-time STATIC verdict → effect-allocation elision) — design-gate analysis: GATE-HOLD, not ruled-to-commission. PLAIN cannot be the predicate (firm); scope is three coupled changes; reach is narrow (same set A1 characterized). Measure the ceiling via A1 harvest-count before building. Read at SHA `3cffb7b`.
+
+**Workstream:** WS2 compiler + WS3 renderer/IR. Architect read the analyzer + emitter +
+verdict-routing seams at `3cffb7bfb9794eb884fb576ccae193993387f2a3`. P-2c-B was named
+"reopenable" after A1; this session reads the code and rules on whether to build it.
+
+**Finding 1 (firm) — PLAIN cannot be B's predicate; the safety direction inverts.**
+`hasNvSignalReadInOuterThunk` (analyzer) bails to "no read" (→ PLAIN) in three analyzable-
+failure cases: `getOuterThunkBody` returns null for any expr it can't unwrap; the visitor
+does not recurse into nested functions; it follows only one identifier→initializer hop.
+The header states it: a missed reactive read "surfaces as PLAIN rather than ACCEPT." For
+**erasure** (current use) PLAIN is safe — the binding is still wired as an effect, so a wrong
+PLAIN just fails to optimize (ACCEPT-biased: over-wiring safe). For **B** (elide the
+allocation), a wrong PLAIN → one-shot write that never re-runs → stale DOM → CORRECTNESS
+FIRE (DECLINE-biased: over-eliding fatal). **B requires a NEW positive STATIC verdict** —
+"provably reads no reactive source AND complete analyzer visibility" — where absence-of-read
+is a *proof*, not a *failure to find*. Full-visibility-gated; any gap ⇒ keep the effect
+(§10 prove-and-skip).
+
+**Finding 2 — scope is three coupled changes, not one.** Erasure verdicts currently route
+ONLY to `check-program` for diagnostics; `nv-emitter` consumes no verdict (grep:
+`erasure|verdict|PLAIN` in emitter = nothing). The emitter emits every leaf hole as a
+reactive thunk regardless of verdict. So B = (1) new STATIC verdict + (2) build the
+verdict→emitter plumbing that does not exist + (3) a new emitted leaf shape
+(`{kind:'text',expr,static:true}`) the **interpreter** mounts as a one-shot write (one mount
+path serves both front-ends, per A1) → **Template-IR additive bump** (leaf `static?: boolean`,
+contract-adjacent — surface; ClassListBinding/StyleVarBinding additive precedent). The
+emitter's existing `kind:'static'` classlist path (one-shot, no thunk slot) is the proven
+pattern B generalizes — the plumbing-from-analyzer is the genuinely new part.
+
+**Finding 3 — reach is narrow, and it is the SAME set A1 characterized.** Create cost/row =
+`2 + 1 + K` (valueSig + indexSig + createRoot + K binding-effects). B shaves a subset of K.
+But the typical row binding reads `value()` (valueSig is a signal param) → ACCEPT (reactive),
+NOT static. Genuinely-static leaves read neither value/index nor any outer signal — rare in
+the create-dominant case. This is what A1's small memory reclaim (−0.317 MB) already showed
+empirically: few row effects are inert because most read `value`. **B optimizes a subset of
+A1's inert set** (provably-static ⊆ inert), saving the allocation (not just A1's retention)
+on the compiled path only. The fixed valueSig/indexSig/createRoot triple — dominant when K
+is small — is untouched by B.
+
+**RULING — GATE-HOLD.** Do not commission B. Measure its ceiling first, cheaply: A1's
+`harvestInertEffect` returns true per inert effect harvested; B's static set ⊆ A1's inert
+set, so **A1's harvest-count-per-row on jfb create is an upper bound on B's reach.** A
+Sonnet-scoped probe adds a `__test` harvest counter (precedent: `__test.enablePerNode()`)
+and runs the locked jfb create harness, returning harvests/row and harvests/row ÷ (2+1+K).
+- **< ~5% of create-time** → close B as characterized-not-worth-building; redirect to
+  **index-elision** (a row provably never reading `index` elides `indexSig` — a *fixed-cost*
+  reduction reaching every such row regardless of K, simpler than a per-leaf static proof;
+  likely higher reach than B). Index-elision is named as the redirect, not yet commissioned.
+- **meaningful fraction** → proceed to full B design (STATIC verdict + plumbing + IR bump),
+  gated on same-session create re-measure.
+"Named next ≠ needed next": B is queued; the code says its reach is narrow; the harvest
+counter bounds the win for the cost of a probe before any build.
+
+**Contract.** No change from this analysis (B *would* bump Template-IR v0.4.2→v0.4.3 additive
+IF built — not yet). Reactive-core contract untouched either way; B is composition/emit-layer.
+Closure axiom intact (B removes effects where provable; adds no primitive).
+
+**Status: P-2c-B GATE-HELD — Sonnet ceiling probe commissioned (`p-2c-b-ceiling-probe-
+commission.md`). Build-or-close ruling pending the harvest-count number. Index-elision named
+as the redirect target if B closes.**
 
 ---
 
