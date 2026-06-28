@@ -178,12 +178,14 @@ test('TC-R-4: prior AbortController is aborted when source changes', async () =>
 
   flushSync()
   expect(signals).toHaveLength(1)
-  expect(signals[0].aborted).toBe(false)
+  // biome-ignore lint/style/noNonNullAssertion: array length asserted above
+  expect(signals[0]!.aborted).toBe(false)
 
   src.set('b')
   flushSync()
 
-  expect(signals[0].aborted).toBe(true) // first fetch aborted
+  // biome-ignore lint/style/noNonNullAssertion: array length asserted above
+  expect(signals[0]!.aborted).toBe(true) // first fetch aborted
   expect(signals).toHaveLength(2) // second fetch started
 
   dispose()
