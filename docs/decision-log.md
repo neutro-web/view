@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-28 (CP-2d / P-1b closure). Contract **v0.4.2** · Template-IR **v0.4.2**._
+_Last updated: 2026-06-28 (P-2 open / P-2c-static-body design-open). Contract **v0.4.2** · Template-IR **v0.4.2**._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
 > `decision-log-archive.md` (moved 2026-06-21). This snapshot is the resolved
@@ -86,34 +86,19 @@ _Last updated: 2026-06-28 (CP-2d / P-1b closure). Contract **v0.4.2** · Templat
   at-peer with nv (~1.1–1.2×); swap 2.28× vanilla (expected structural cost of diffing
   vs fine-grained on mutation). React hooks v19.2.0 added as VDOM reference. All same-session,
   Chrome 149, M2 Max, harness 4fbccf55.
-- **CP-2d deficit analysis — creation/teardown cost identified as next perf frontier.**
-  nv's primary value proposition is performance. CP-2d confirms the mutation story is now
-  strong (swap/select/update-10th all beat vanilla). The remaining measured deficits are
-  structural and consistent:
-  - **Create 1k/10k (~1.7–1.9×), replace 1k (~1.7×), append 1k (~1.7×):** per-item
-    reactive graph setup cost (two signals + effect + dispose closure + Map record per
-    row). Vanilla writes DOM directly; nv builds a graph first. Lit (template-cloning,
-    1.18× create) confirms this is a reactive-graph cost, not a DOM-walking cost.
-  - **Remove one (2.16×):** single-item reactive teardown — owner-tree walk, edge
-    severing, `onCleanup` fire, Map delete. More expensive than vanilla's `element.remove()`.
-    Solid (2.13×) and Svelte (1.81×) show some of this is inherent to reactive engines,
-    but the gap vs Svelte suggests a faster dispose path may exist.
-  - **Memory at 4.6MB run vs vanilla 1.9MB (~2.4×):** reactive graph state per node
-    (signal + effect + owner slot per row). Structural; not addressable without changing
-    the model. At-peer with React (4.4MB); above Solid (2.7MB) and Svelte (2.8MB).
-  **Pattern:** nv pays a per-item cost at mount and teardown, earns it back at mutation.
-  The engine is optimal for long-lived, frequently-mutating lists; structurally penalized
-  for lists that are created and thrown away. This is the correct tradeoff for the stated
-  value proposition — but create/remove performance is a real gap vs Solid/Svelte that
-  deserves an active workstream, not just a watch-item. **CC suggestion:** open P-2
-  (creation/teardown cost) as the next perf commission after PT-1a resource lands.
-  Candidate levers: cheaper per-item record layout (reduce signal-node width at list
-  scope), faster dispose path (avoid full owner-tree walk for list records, which have
-  known structure), or deferred graph construction for static list bodies (body doesn't
-  change → no effect needed, just mount). Each needs a gate-P measurement before
-  landing. None touch the mutation model — they are mount/teardown-path only.
-- **Live frontier (code):** PT-1a `resource` (unblocked, entry A landed). P-1 closed.
-  Creation/teardown gap identified; P-2 commission suggested pending architect ruling.
+- **P-2 creation/teardown — OPEN 2026-06-28; CC lever analysis CORRECTED at source.**
+  Create ~1.7×, remove 2.16×, memory 2.4× vanilla — real deficit, but optimization
+  within a confirmed-correct tradeoff (nv pays at mount, wins at mutation; Lit's 1.18×
+  create proves it's reactive-graph-setup cost, structural to fine-grained). Split:
+  **P-2c-static-body = live lever** (compiler effect-skip, design-open below);
+  **P-2a** (allocation-count reduction, reframed — CC's "strip node fields" refuted:
+  ReactiveNode is single-shape by design, already pay-for-use; ceiling single-digit-%)
+  and **P-2b** (fast dispose, ~0.35× addressable vs Svelte, mostly inherent) =
+  characterized-not-commissioned. Goal: narrow create gap where provably free; do NOT
+  trade mutation speed to chase Solid's create number.
+- **Live frontier (code/ruling):** P-2c-static-body (design-open compiler ruling —
+  resolve 4 sub-questions → spec → commission) and PT-1a `resource` (ruled, commission
+  unwritten). P-1b CLOSED. P-2a/b characterized-not-commissioned.
 - **v0.1.0 — TAG-READY.** CP-4 docs placed. Swap deficit is v0.5.0; no blocking items remain.
 - **Documentation sweep — CLOSED 2026-06-27 (verified at source).** Both authoring surfaces documented;
   section-based site matching neutro/form; MIT LICENSE. Playground (DOC-2) → v0.5.0 Track T-8 (needs
@@ -191,6 +176,15 @@ _Last updated: 2026-06-28 (CP-2d / P-1b closure). Contract **v0.4.2** · Templat
   fix [2026-06-25] / a6cafbd): nested styled components stamp `data-nv-s-<hash>` + inject
   CSS on mount through a parent binding; transitive through conditionals/lists. Regression-gated
   by G7 (browser).
+- **P-2c-static-body — compiler skip-effect for static list rows — DESIGN-OPEN
+  [2026-06-28].** Primary P-2 create lever. Skip the per-item effect node when a list
+  row body is provably static (no reactive reads beyond value/index) — removes ~1 of
+  ≥3 ReactiveNodes/row, the real slice of the 1.74× create cost. Extension of existing
+  `exprReadsSignal`/`_compilerSources` static analysis; axiom-clean (removes an
+  effect, adds no primitive); **soundness fallback mandatory** (unsure ⇒ keep the
+  effect; false-static = correctness bug). 4 open sub-questions incl. whether it bumps
+  Template-IR (IR carrier) and interpreter-back-end parity. Reactive-core contract
+  unchanged regardless.
 - **PT-1a-syntax — async-read compile-time lowering — DESIGN-OPEN [2026-06-27].**
   Resource read in template position auto-lowers to loading/error/data control-flow
   (the nv-shaped ergonomic win: compiler exploits resource-vs-signal info Solid
@@ -229,6 +223,9 @@ _Last updated: 2026-06-28 (CP-2d / P-1b closure). Contract **v0.4.2** · Templat
   carries a compile-time width-threshold fallback, threshold gated on real-app evidence.
 
 ### Forward queue (named, not blocking)
+- **P-2 creation/teardown — OPEN 2026-06-28; split into P-2a/b/c.** P-2c-static-body
+  is the live lever (design-open above). P-2a/b characterized-not-commissioned until
+  P-2c lands and re-measures. See Log entry A 2026-06-28.
 - **PT-1a async `resource` — RULED 2026-06-27 (shape 1, composition).** `signal`
   triple (data/loading/error) + one source-tracking `effect` that settle-writes via
   `.set()` (external-event write, §8.6 precedent — no `sync`, cycle-impossible by
@@ -4025,3 +4022,146 @@ Lever 1 and 2 are reconcile-internal and lower risk. Lever 3 is a compiler/IR co
 **Proposed gate for P-2:** same harness, same Chrome, before/after on create-1k, create-10k, and remove-one. Target: create-1k ≤1.3× vanilla (closing to Solid's band), remove-one ≤1.5× vanilla. Swap/select/update-10th must not regress.
 
 **This is a suggestion, not a commission.** Architect rules whether P-2 opens, which lever to try first, and the gate values. CC does not open this workstream unilaterally.
+
+---
+
+### [2026-06-28] P-2 creation/teardown — OPEN; lever analysis CORRECTED at source; split into P-2a/P-2b/P-2c. No contract change.
+
+**Workstream:** WS3 reconcile (P-2a/b) + WS2 compiler/IR (P-2c). Origin: CP-2d
+deficit analysis (create ~1.7×, remove 2.16×, memory 2.4× vanilla). CC suggested
+three levers and correctly halted for an architect ruling rather than self-
+authorizing. **The struct/mount/IR read at `112dd6d` changes CC's lever ordering.**
+
+**P-2 opens.** Creation/teardown is a real, measured deficit and the correct next
+perf frontier after P-1b closed the mutation story. **But it is optimization within a
+confirmed-correct tradeoff, not a defect:** nv pays per-item at mount/teardown and
+earns it back at mutation (P-1b: swap 0.66×, select 0.34×, beating all peers). The
+Lit contrast (create 1.18× via template-cloning, swap 2.28×) proves the create cost
+is **reactive-graph-setup cost, not DOM-walking cost** — it is structural to the
+fine-grained model. P-2's honest goal is "narrow the create gap where provably
+free," NOT "match Solid's 1.04× create" (which the model cannot do without
+surrendering the mutation lead that is the actual value proposition).
+
+**Lever analysis CORRECTED (CC's model was inaccurate — stated plainly).**
+CC proposed lever 1 = "strip unused fields from list-scoped signal nodes (no pubsub
+bus, no error slot)." **Reading `ReactiveNode` (core.ts §2.1, L93) refutes the
+premise:**
+- The struct is **single-shape by explicit design** ("shared across all kinds, not a
+  class hierarchy," L90). A second "lean node" type is the degraded-second-path trap
+  (slot subsystem bitten 4×); it is architecturally inadmissible, not merely risky.
+- **There is no pubsub-bus field** (pubsub is out-of-graph — correctly absent). The
+  `error` field is one `unknown` interleaved with `value`, used by signals. The
+  "slots to strip" largely **do not exist.**
+- The optional/cold fields a list signal doesn't use (`errorHandler`, `syncTarget`,
+  `externalUnsub`, `cleanups`-null, and the `_compiler*?`/`_diverged?` tail) are
+  already designed to **"pay zero on every hot-path call"** (tail-placement rule,
+  L160). The struct is already pay-for-what-you-use.
+
+**Where the create cost actually lives (mount-path read, interpreter.ts L496–531):**
+each row builds **≥3 ReactiveNodes** — `valueSig` (signal) + `indexSig` (signal) +
+the `createRoot` owner/root + whatever effects the item template creates — plus the
+`ItemRecord`, the `dispose` closure, and a Map entry. **Create cost is node COUNT +
+allocation per row, not field WIDTH on any one node.** This inverts CC's risk/value
+ordering: the "safe small win" (strip fields) is near-empty; the "big coupled win"
+(skip a node per row) targets the real cost.
+
+**The split (corrected):**
+
+- **P-2a — allocation-count reduction (reconcile-internal). REFRAMED, low ceiling,
+  NOT commissioned now.** Not "strip node fields" (refuted above) but "reduce per-row
+  *allocations*": fold the `dispose` closure into the `ItemRecord` where structure is
+  known; consider pooling/inlining the record. Honest ceiling: single-digit-% on
+  create. Characterized, not commissioned — chasing this while P-2c is unruled is
+  motion over momentum.
+- **P-2b — fast list dispose (reconcile-internal). Gated, low ceiling.** Remove-one
+  2.16× vs Solid 2.13× (near-parity → mostly inherent to reactive teardown) vs Svelte
+  1.81×. Addressable headroom ~0.35× and possibly compiled-teardown nv structurally
+  can't match. Gated on P-2c landing + re-measure; measure before investing.
+- **P-2c-static-body — skip the per-item effect for static rows (compiler + IR).
+  PRIMARY create lever. Promoted to its own design-open ruling (entry B).** This
+  removes ~1 of the ≥3 nodes per row at the source — the only lever that attacks the
+  real create cost. WS2, carries a soundness obligation, independent of P-2a/b (does
+  not gate behind them).
+
+**Net ruling.** P-2 open. **P-2c-static-body is the live lever** (entry B, design-
+open). P-2a/P-2b are characterized-not-commissioned, named for when P-2c re-measures.
+No contract change in this entry. **The create gap is mostly structural to fine-
+grained; do not trade mutation speed to chase it.**
+
+**Supersedes:** CC's CP-2d lever ordering (lever 1 "strip fields" first). Refuted at
+source; lever 3 (effect-skip) promoted to primary.
+
+---
+
+### [2026-06-28] P-2c-static-body — compiler skip-effect for static list rows: DESIGN-OPEN. Closure axiom upheld; soundness fallback mandatory. May bump Template-IR (flagged).
+
+**Workstream:** WS2 compiler specialization + Template-IR. The primary P-2 create
+lever (entry A).
+
+**The opportunity.** A keyed list row currently always builds a per-item effect (to
+re-run the body's DOM-write closures on value/index change). But many rows are
+**static** — their body has no reactive reads at all, or reads only `valueSig`/
+`indexSig` through bindings that are themselves the only reactive surface. For such
+rows the per-item effect is dead weight: nothing it tracks ever changes the structure
+beyond what the value/index bindings already handle directly. **Skipping the effect
+node for provably-static rows removes ~1 of the ≥3 ReactiveNodes per row** (entry A
+mount-path count) — the largest addressable slice of the 1.74× create cost.
+
+**Why this is nv-shaped and sound.** The Template IR already carries a **static/
+dynamic split** (template-ir.md §2.2, L94): `TemplateShape` owns "everything that
+never changes"; reactivity lives entirely in the `bindings` array and its effect
+closures (L132: "all reactivity is in the effects"). So "static row" has a **precise,
+already-computable IR meaning:** the `TemplateIR` returned by `ListBinding.
+itemTemplate` (§3.7, the `(valueSig, indexSig) => TemplateIR` factory) has a
+`bindings` array whose expressions read **nothing reactive beyond valueSig/indexSig**.
+The compiler already does erasure-context source tracking (`exprReadsSignal`, ACCEPT-
+biased; `_compilerSources` union oracle). This is an **extension of existing static
+analysis, not new machinery.**
+
+**Closure-axiom check.** Adds **no** primitive. It *removes* an effect where provably
+unnecessary. The four-primitive closure, `derived` purity, `sync`/`pubsub` guarantees
+— all untouched. This is the compiler's "skip only provable work" license (Locked
+§Compiler) applied to effect elision. **Fully axiom-clean.**
+
+**Soundness obligation (MANDATORY — the correctness fence).** Per the compiler
+license, **misclassification must cost performance, never correctness.** The skip
+applies ONLY when the body is **provably** static (analysis proves the binding
+expressions read nothing reactive beyond value/index). On any uncertainty —
+`exprReadsSignal` is ACCEPT-biased, so it must **over-report reactivity** here:
+unsure ⇒ "dynamic" ⇒ keep the effect. The fallback is the current behavior (build
+the effect); a false "static" verdict that drops a needed effect is a **correctness
+bug**, so the analysis must be conservative in the safe direction. State the
+provability predicate precisely in the spec before any code.
+
+**Open sub-questions (resolve before commission).**
+1. **Predicate:** exact definition of "static row body" over the IR — empty
+   `bindings`, or bindings reading only valueSig/indexSig, or a graded notion
+   (some bindings static, effect still needed for others)? The graded case may want
+   per-binding effect-elision, not whole-row — scope this.
+2. **valueSig/indexSig handling:** a row that renders `value` but never *re-reads* it
+   reactively (keyed list: value is stable per key) vs one that does. Does index
+   elision (entry A, P-2a overlap) fold in here? Likely yes — index is often unread.
+3. **IR carrier:** does the static verdict need a new IR field (e.g.
+   `ListBinding.itemStatic?: boolean` or a per-itemTemplate flag), or is it a pure
+   compiler-internal decision invisible to the IR? If it crosses the IR seam it is a
+   **Template-IR version bump** (additive, like ClassListBinding/StyleVarBinding
+   precedent) and must keep both back-ends welded (§8 differential conformance). If
+   compiler-internal only, no IR change. **Read whether the interpreter back-end also
+   needs the verdict** — if only the compiler emits the skip, the interpreter keeps
+   building the effect and the two back-ends diverge on node count (acceptable? or
+   must both skip? — differential conformance question).
+4. **Interpreter parity:** can the interpreter back-end also skip at runtime (cheap
+   static check on the returned IR's bindings), or is this compiler-only? If
+   compiler-only, the create win exists only on emitted code, not interpreted —
+   state this so the perf claim is scoped to the compiler back-end.
+
+**Verdict gate (when commissioned).** Differential conformance (§8) must still pass —
+both back-ends produce semantically identical DOM regardless of effect-skip. Real-
+browser create re-measure (CP-2d venue) shows create-cost reduction on static-row
+lists. A static row that needed its effect (false-static) is caught by conformance =
+correctness FIRE.
+
+**Status: design-open, primary P-2 lever. No code. May bump Template-IR (sub-question
+3 — flagged, not decided).** Resolve the four sub-questions into a spec, architect-
+approve, then commission. Contract (reactive-core) unchanged regardless — this is
+compiler/IR, not core.
