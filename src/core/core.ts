@@ -245,6 +245,9 @@ const nodesWithUserEquals = new WeakSet<ReactiveNode>()
 // Test-only instrumentation counter (§B1 fuzzer). Incremented in runRecompute.
 let _recomputeCount = 0
 
+// P-2c-B ceiling probe counter. Incremented in harvestInertEffect on each true return.
+let _harvestCount = 0
+
 // ── test-only per-node recompute instrumentation ──
 // Enabled only by __test.enablePerNode(); off in production (single bool check).
 let _perNodeOn = false
@@ -731,6 +734,7 @@ function harvestInertEffect(node: ReactiveNode): boolean {
   removeFromParent(node)
   node.isDisposed = true
 
+  _harvestCount++ // P-2c-B probe counter (test-only; no production branch added)
   return true
 }
 
@@ -1343,6 +1347,14 @@ export const __test = {
   resetCounts(): void {
     _recomputeCount = 0
     if (_perNodeOn) _perNodeCounts = new WeakMap()
+  },
+
+  /** P-2c-B ceiling probe: total harvestInertEffect() true-returns since last resetHarvestCount(). */
+  get harvestCount(): number {
+    return _harvestCount
+  },
+  resetHarvestCount(): void {
+    _harvestCount = 0
   },
 
   /** Turn on per-node counting and start a fresh measurement window. */
