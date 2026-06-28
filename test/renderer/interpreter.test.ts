@@ -29,6 +29,7 @@ import {
   derived,
   errorBoundary,
   flushSync,
+  getOwner,
   signal,
 } from '../../src/core/core.js'
 import { structurallyEqual } from '../../src/renderer/comparator.js'
@@ -1090,26 +1091,51 @@ type Item = { id: number; label: string }
 
 // ── TC-A1: DIFF-CONF smoke — harvest does not drop reactive effects ─────────
 
-test('TC-A1-DIFF-CONF  reactive binding still updates after harvest sweep', async () => {
-  // This test verifies that a list row with a REACTIVE text binding (reads valueSig)
-  // still updates correctly after the post-flush harvest sweep has run.
-  // A false-harvest (harvesting a reactive effect) would leave the text stale.
+test('TC-A1-DIFF-CONF  reactive effects survive harvest; inert effects are removed', async () => {
+  // This test verifies TWO things:
+  // 1. A REACTIVE binding (reads a signal) is NOT harvested — DOM still updates after sweep.
+  // 2. An INERT binding (reads no signal) IS harvested — item root childCount drops from 2→1.
   const parent = document.createElement('div')
   document.body.appendChild(parent)
 
   const items = signal<Item[]>([{ id: 1, label: 'A' }])
 
+  // Capture the item root owner from inside the reactive binding's effect.
+  // Inside an effect callback, getOwner() returns the Effect node; .owner is the
+  // enclosing createRoot scope (= itemRootOwner inside wireList).
+  let itemRootOwner: ReturnType<typeof getOwner> = null
+
   const ir = makeListIR(
     () => items(),
     (vs, _is) => ({
-      id: 'li-reactive',
-      shape: { html: '<li><!--nv-0--></li>', bindingPaths: [[0, 0]] },
+      id: 'li-both',
+      // Two comment anchors: nv-0 (reactive text), nv-1 (static text).
+      shape: {
+        html: '<li><!--nv-0--><!--nv-1--></li>',
+        bindingPaths: [
+          [0, 0],
+          [0, 1],
+        ],
+      },
       bindings: [
         {
           kind: 'text',
           pathIndex: 0,
-          // Reactive: reads valueSig() — must NOT be harvested.
-          expr: () => (vs() as Item).label,
+          // Reactive: reads vs() — must NOT be harvested.
+          expr: () => {
+            if (itemRootOwner === null) {
+              // Effect node's .owner is the enclosing createRoot owner.
+              itemRootOwner = (getOwner() as unknown as { owner: ReturnType<typeof getOwner> })
+                .owner
+            }
+            return (vs() as Item).label
+          },
+        } satisfies TextBinding,
+        {
+          kind: 'text',
+          pathIndex: 1,
+          // Inert: reads no signal — MUST be harvested after first flush.
+          expr: () => 'static',
         } satisfies TextBinding,
       ],
     }),
@@ -1118,15 +1144,21 @@ test('TC-A1-DIFF-CONF  reactive binding still updates after harvest sweep', asyn
   const dispose = mount(ir, parent, document)
   flushSync()
 
-  // Let harvest sweep run (queueMicrotask fires after this await).
+  // Both effects have run once; item root should have 2 child effects.
+  expect(__test.childCount(itemRootOwner), 'before sweep: 2 effects (reactive + inert)').toBe(2)
+
+  // Let harvest sweep run (scheduled via queueMicrotask / Promise microtask).
   await Promise.resolve()
 
-  // Mutate via Op 3 — reactive binding must still update.
+  // After sweep: inert effect harvested → only reactive effect remains.
+  expect(__test.childCount(itemRootOwner), 'after sweep: 1 effect (inert harvested)').toBe(1)
+
+  // Reactive binding must still update after sweep (assertion 1 from original test).
   items.set([{ id: 1, label: 'B' }])
   flushSync()
 
   const li = parent.querySelector('li')
-  expect(li?.textContent).toBe('B')
+  expect(li?.textContent).toBe('Bstatic')
 
   dispose()
   document.body.removeChild(parent)
