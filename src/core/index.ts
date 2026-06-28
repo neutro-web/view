@@ -14,6 +14,7 @@ export {
   onCleanup,
   flushSync,
   harvestInertChildren,
+  __setHarvestDisabled,
 } from './core.js'
 
 export type {

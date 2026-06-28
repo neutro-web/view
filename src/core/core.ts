@@ -743,8 +743,15 @@ function harvestInertEffect(node: ReactiveNode): boolean {
  * Safe to call after the owner's subtree has had its first flush.
  * Called from wireList post-flush to reclaim inert per-binding effects.
  */
+// Internal harness affordance for same-session before/after CP-2d measurement.
+// Not a public API; no contract entry. Default false (harvest active).
+let _harvestDisabled = false
+export function __setHarvestDisabled(v: boolean): void {
+  _harvestDisabled = v
+}
+
 export function harvestInertChildren(owner: Owner | null): void {
-  if (owner === null) return
+  if (_harvestDisabled || owner === null) return
   const node = owner as unknown as ReactiveNode
   let child = node.firstChild
   while (child !== null) {
