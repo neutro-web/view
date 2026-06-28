@@ -118,6 +118,12 @@ _Last updated: 2026-06-27 (PT-1a async ruling). Contract **v0.4.2** · Template-
 - **Two standing gates:** `tsc --strict` (DOM lib in scope) and the test suite are
   separate gates. "Done means committed and on main." Verify by reading placed files.
 - **PK = documentation only; GitHub authoritative for code.**
+- **Single-current-value invariant (§5):** a signal holds exactly one current value;
+  no computation observes a different value based on context/membership
+  mid-propagation. Multi-version reactivity is refused by construction (Log
+  2026-06-27, entry C) — it would break `derived` purity and compiler soundness.
+  Admitting it is a reversal, logged as such. Peer guardrail to the four-primitive
+  closure.
 
 ### Open design decisions (chosen later; not blocking)
 - Compile-time vs. runtime split beyond the read/write transform (scheduling,
@@ -190,13 +196,18 @@ _Last updated: 2026-06-27 (PT-1a async ruling). Contract **v0.4.2** · Template-
   construction) + `onCleanup` abort + epoch guard for stale settles. Zero graph
   primitives; closure axiom upheld; no contract change (v0.4.2). CC commission
   (factory + abort/epoch + tests, WS1/WS3) gated on this ruling, not yet written.
-- **PT-1b Suspense-equivalent — NAMED OPEN [2026-06-27], not ruled.** Multi-resource
-  coordination boundary; structurally the `errorBoundary` owner-scope precedent
-  (§5.4.4) but its **renderer-gating cost (withhold-mount of pending subtrees,
-  `<each>` interaction) must be read at source before ruling.** Do not fold into
-  PT-1a. Single-resource ergonomics are served by PT-1a-syntax, not PT-1b.
-- **Async transitions — OUT of v0.5.0 [2026-06-27].** Touch mid-propagation
-  observation → locked §1 → contract-level if ever raised; not an async ruling.
+- **PT-1b Suspense-equivalent + stale-while-revalidate — NAMED OPEN [2026-06-27],
+  not ruled.** Multi-resource coordination boundary (errorBoundary owner-scope
+  precedent §5.4.4) PLUS the SWR behavior (keep last resolved content instead of
+  fallback during pending refetch — the conforming half of "transitions",
+  single-valued + deferred DOM swap). **Renderer-gating cost (withhold-mount of
+  pending subtrees, `<each>` interaction) must be read at source before ruling.**
+  Do not fold into PT-1a.
+- **Async transitions — SPLIT [2026-06-27].** Stale-while-revalidate is IN (PT-1b
+  behavior, above). **Multi-version reactivity is REFUSED by construction** (entry C
+  — dissolves single-current-value §5 → breaks `derived` purity + compiler
+  soundness; a reusable closure-axiom-class guardrail). Time-slicing/interruptible
+  computation OUT (synchronous graph-coloring; no paused node).
 - **Slots — design APPROVED (2026-06-22), Path B phasing:** Increments 1 + 1.5 LANDED
   (2026-06-22). Increment 2 (queued, `cc-handoff-scoped-slots.md`) = scoped-slot IR shape
   (`SlotEntry.content` → factory + `SlotOutletBinding.props?`) + `let={...}` authoring;
@@ -3632,13 +3643,31 @@ whole performance story. Ergonomics is the second-order axis (entry B).
   renderer-coupled and interacts with the `<each>` reconciler. Its renderer-gating
   cost MUST be read at source before ruling. Do not fold it into PT-1a. ("named
   next ≠ needed next.")
+  PT-1b also carries the **stale-while-revalidate** behavior (render previous
+  resolved content instead of fallback during a pending refetch) — the conforming
+  half of "transitions." Single-valued reactivity + deferred DOM swap; no new
+  primitive. This is the honest, axiom-clean version of the transition ergonomic
+  (no fallback flash on refetch). Still gated on reading PT-1b's renderer-gating
+  cost at source before ruling — SWR shares the withhold-mount machinery.
 - **Single-resource ergonomics do not need Suspense.** They are reachable from
   control-flow nv is already building (PT-3 `<when>`) over one resource's
   `loading`/`error`/`data` — see entry B. Multi-resource coordination is the only
   thing that genuinely needs PT-1b.
-- **Transitions — OUT of v0.5.0.** Concurrent/deferred updates influence
-  mid-propagation observation → locked §1 territory → separate contract-level
-  question if ever raised. An async ruling must not drag it in.
+- **Transitions — SPLIT, not flatly out.** "Transition" conflates two shapes that
+  the axioms treat oppositely:
+  - **Stale-while-revalidate (keep-old-UI-while-pending) — IN v0.5.0, as a PT-1b
+    behavior.** Render the previously-resolved content instead of a fallback while a
+    refetch is pending. This is single-valued reactivity (the graph only ever holds
+    the new value) + a renderer choice to defer the DOM swap until settle —
+    structurally Suspense with "stale instead of fallback." Axiom-clean; no new
+    primitive, no scheduler change. Folded into PT-1b (entry B).
+  - **Multi-version reactivity (transition readers see new, others see old, at the
+    signal level) — REFUSED by construction.** See entry C. This is not a scope
+    deferral; it cannot conform — it dissolves the single-current-value invariant
+    (§5) the compiler's soundness rests on.
+  - **Time-slicing / interruptible computation — OUT.** nv propagation is
+    synchronous graph-coloring; there is no paused half-computed node. Not a
+    v0.5.0 question; not pursued.
 
 **Closure-axiom check (mandatory for every parity target).** Adds **zero** graph
 primitives. Uses `signal` + `effect` + `onCleanup` + owner teardown, all extant.
@@ -3710,3 +3739,56 @@ inside the closure axiom trivially (it adds no primitive at all).
 commission (entry A) — raw `resource` ships usable with manual branching; this
 lowering is the ergonomic layer on top. Reopen/advance when the PT-3 `<when>` IR
 shape is read and a spelling is chosen. No contract change (v0.4.2).
+
+---
+
+### [2026-06-27] Multi-version reactivity — REFUSED by construction (closure-axiom protection of the single-current-value invariant). No contract change (v0.4.2).
+
+**Workstream:** WS4 architect (invariant protection). Companion to the closure axiom
+(four-primitive closure) — this names and protects a *second* load-bearing invariant
+under the same discipline.
+
+**The refused shape.** A "transition" implementation in which a single `signal`,
+after a write, presents **two values at once at the graph level**: readers inside
+the transition observe the new value; readers outside observe the old value, until
+the transition commits. (React-concurrent-class multi-version / MVCC-in-the-graph.)
+
+**Why it is refused, and why this is a closure-axiom call — not a scope deferral.**
+nv's propagation holds **exactly one current value per signal** (§5: write marks
+observers Dirty; read pulls the current value). Multi-version reactivity requires
+the graph to hold two truths simultaneously, with **which value a computation
+observes depending on transition membership mid-propagation.** That has three fatal
+consequences for the locked model:
+1. **`derived` purity breaks.** A derived's value would depend on *who is asking*
+   (transition membership), not solely on its sources. `derived` purity is ironclad
+   (Locked §Primitives) precisely so the compiler can reason about it; this dissolves
+   that.
+2. **Compiler soundness breaks.** The compiler's "skip only provable work" license
+   assumes a computation's output is a function of its tracked sources. A
+   reader-dependent value makes that assumption false — misclassification could then
+   cost *correctness*, violating the compiler license (Locked §Compiler).
+3. **The single-current-value invariant (§5) is the foundation both of the above
+   rest on.** Breaching it is not a feature addition; it is a reversal of the model.
+
+**This is logged as a refusal, not a "later," for the same reason the closure axiom
+is:** it is a reusable guardrail. The next time async/transition pressure suggests
+"just let the transition readers see the new value early," the answer is already
+on record with its rationale. Any future proposal to admit multi-version reactivity
+is a **reversal of the single-current-value invariant** and must be logged as such
+(new dated entry citing this one), exactly as a new graph primitive would be logged
+as a reversal of the closure axiom.
+
+**What is NOT refused (so this entry is not over-read).** The *user-visible*
+transition ergonomic — "don't flash a fallback; keep showing the last good UI while
+refetching" — is fully available and IN v0.5.0 as **stale-while-revalidate**, a
+PT-1b renderer behavior over single-valued reactivity (see PT-1b / entry B). nv
+delivers the observable benefit honestly; it refuses only the one *implementation
+strategy* that would quietly make the compiler unsound. Feature parity is served,
+not reduced, by this distinction.
+
+**Closure-axiom check.** Refusing this *protects* the four-primitive closure and
+`derived` purity. Adds nothing. No contract change (v0.4.2) — the invariant being
+protected is already §5; this entry names it as a guarded line.
+
+**Supersedes:** the coarse "transitions OUT of v0.5.0" note in
+`[2026-06-27] PT-1a … RULED` (replaced by the SPLIT fence in that entry).
