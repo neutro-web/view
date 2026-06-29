@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-28 (index-elision Commission 1 landed at `a495716`; Template-IR **v0.4.3**, reactive-core **v0.4.2**). Design docs now in-repo under `docs/design/`._
+_Last updated: 2026-06-28 (index-elision Commission 1 landed at `a495716`; Template-IR **v0.4.3**, reactive-core contract **v0.4.3**). Design docs in-repo under `docs/design/`._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
 > `decision-log-archive.md` (moved 2026-06-21). This snapshot is the resolved
@@ -96,7 +96,8 @@ _Last updated: 2026-06-28 (index-elision Commission 1 landed at `a495716`; Templ
   and **P-2b** (fast dispose, ~0.35× addressable vs Svelte, mostly inherent) =
   characterized-not-commissioned. Goal: narrow create gap where provably free; do NOT
   trade mutation speed to chase Solid's create number.
-- **Live frontier (code/ruling):** index-elision **Commission 1 LANDED** (`a495716`, compiled-`.nv`, Template-IR v0.4.3; Commission 2 / T2-1 reorder-heavy perf measurement open as next benchmark-venue task). PT-1b Suspense+SWR named open. P-2c-B CLOSED. PT-1a `resource` + P-2c-A1 LANDED. Contract v0.4.2 (unchanged by index-elision). P-1b CLOSED.
+- **Live frontier (code/ruling):** index-elision **Commission 1 LANDED** (`a495716`, compiled-`.nv`, Template-IR v0.4.3; Commission 2 open — T2-1 reorder-heavy perf + post-A1 no-regress re-verify). PT-1b Suspense+SWR named open. P-2c-B reopenable. PT-1a `resource` + P-2c-A1 LANDED. **Reactive-core contract v0.4.3.** P-1b CLOSED.
+- **Standing CP-2d board (current = post-A1 CP-2d-REMEASURE, L4633):** create-1k 1.78×, swap 0.29×, select 0.27×, update-10th 0.18×, remove-one 0.62×, memory 2.33× — all mutation ops win; create is the open deficit.
 - **v0.1.0 — TAG-READY.** CP-4 docs placed. Swap deficit is v0.5.0; no blocking items remain.
 - **Documentation sweep — CLOSED 2026-06-27 (verified at source).** Both authoring surfaces documented;
   section-based site matching neutro/form; MIT LICENSE. Playground (DOC-2) → v0.5.0 Track T-8 (needs
@@ -3828,21 +3829,21 @@ doesn't currently expose — note for PT-1b, not a PT-1a defect.
 
 ---
 
-### [2026-06-28] Index-elision Commission 1 LANDED at `a495716`. Compiled-`.nv` index-elision live. Tier-1 green (763/763 incl. 12+5 corpus), no-regress ±2% on CP-2d board, Template-IR v0.4.3. Verified by source-read + local suite at SHA, not the delivery report.
+### [2026-06-28] Index-elision Commission 1 LANDED at `a495716`. Compiled-`.nv` index-elision live. Tier-1 green (763/763 incl. 12+5 corpus), no-regress ±2% (vs P-1b CP-2d baselines; post-A1 re-verify folded into Commission 2), Template-IR v0.4.3. Reactive-core contract v0.4.3 (unchanged by this lever). Verified by source-read + local suite at SHA, not the delivery report.
 
 **Workstream:** WS3 renderer/IR + WS2 compiler predicate. Lands the `src/` lever from `spec-index-elision.md` (split Commission 1 of 2). Architect-verified at `a4957166` against placed source: predicate (`nv-parser.ts` L607, `exprReadsSignal`, body-holes-only, ACCEPT-biased); branch-hoist (`interpreter.ts` L448–563, `updateIndex` closure hoisted, no per-row branch); emitter fork (`nv-emitter.ts` L179–189, elided `(valueSig)` factory, no `indexSig`, carrier explicit); tagged-template untouched (`html-tag.ts` L740/L969, carrier never set, `indexSig!()` conservative-allocate); oracle carrier NOT compared (`ir-equivalence.ts` L141, arity-only deviation at `785af9d`, invariant preserved).
 
-**Carrier:** `ListBinding.itemReadsIndex?` (additive; absent|true ⇒ allocate, false ⇒ elide). Reactive-core contract unchanged (still v0.4.2). **Template-IR v0.4.2 → v0.4.3** (placed, `bbaed36`). Closure axiom clean — removed a `signal` where provably unused; no primitive added.
+**Carrier:** `ListBinding.itemReadsIndex?` (additive; absent|true ⇒ allocate, false ⇒ elide). **Template-IR v0.4.2 → v0.4.3** (placed, `bbaed36`). **Reactive-core contract unchanged — remains v0.4.3** (set by P-2c-A1; index-elision touches no primitive). Closure axiom clean.
 
-**Gate result:** Tier-1 all green (T1-1 FIRE corpus incl. nested-each propagation, attr, conditional-expr, key-not-a-body-read; T1-2 emitted-module `indexSig` absence; T1-4 carrier excluded from equivalence; T1-5 conservative fallback; T1-6 tagged-template allocates). T1-3 no-regress: 11/11 browser correctness probes pass, all 9 CP-2d ops within ±2% (create flat ~1.74×/1.89× as expected — allocation not the create bottleneck; lever lands on correctness + memory per the Tier-1-suffices ruling).
+**Gate result:** Tier-1 all green (T1-1 FIRE corpus incl. nested-each propagation, attr, conditional-expr, key-not-a-body-read; T1-2 emitted-module `indexSig` absence; T1-4 carrier excluded from equivalence; T1-5 conservative fallback; T1-6 tagged-template allocates). T1-3 no-regress: 11/11 browser correctness probes pass, all CP-2d ops within ±2% **of the P-1b CP-2d baselines** (swap 0.66×, select 0.50×, etc.). NOTE: the current board is the post-A1 CP-2d-REMEASURE (swap 0.29×, select 0.27×, update-10th 0.18×, remove 0.62×, memory 2.33×); re-verification against those tighter baselines is folded into Commission 2. Create flat (~1.78×) as expected — allocation not the create bottleneck; lever lands on correctness + memory per the Tier-1-suffices ruling.
 
 **Build-quality residue fixed in-commission (per delivery report, accepted):** `?? 0` swallow-fallback removed from tagged-template factories (`e89c632`); Task-2 worktree branched from wrong base, cherry-pick conflicts manually resolved; Biome `useTemplate` lint blocker; T1-1 corpus gap (nested/attr/expr added, `ccfccd8`). None touched core/contract.
 
 **Process convention resolved:** design docs (spec + design-gate analysis) now live in-repo under `docs/design/` (placed this session). Standing convention; supersedes the A1/PT-1a log-only precedent.
 
-**Open → Commission 2 (benchmark-venue):** the reorder-heavy T2-1 performance measurement (was the lever's Tier-2 *claim*) is NOT yet run — Commission 1 deliberately scoped to no-regress only. T2-1 (reverse/shuffle ~1000 rows, same-session elided-vs-non-elided), create-10k non-linearity characterization, and the memory-delta (~1000 fewer nodes vs 2.4× baseline) are deferred to a separate venue commission. The deletion is landed; the perf claim is unmeasured.
+**Open → Commission 2 (benchmark-venue):** reorder-heavy T2-1 measurement, create-10k non-linearity, memory-delta (~1000 fewer nodes vs 2.33× baseline), AND post-A1 no-regress re-verification against tighter baselines (swap 0.29×, select 0.27×, etc.). The deletion is landed; the perf claim and the tight-baseline re-verify are Commission 2.
 
-**Cites:** spec-approved entry [2026-06-28 index-elision design gate].
+**Cites:** spec-approved entry [2026-06-28 index-elision design gate]; CP-2d-REMEASURE [2026-06-28 P-2c-A1 LANDED] for current baselines.
 
 ---
 
