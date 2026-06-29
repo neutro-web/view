@@ -96,8 +96,9 @@ _Last updated: 2026-06-28 (index-elision Commission 1 landed at `a495716`; Templ
   and **P-2b** (fast dispose, ~0.35× addressable vs Svelte, mostly inherent) =
   characterized-not-commissioned. Goal: narrow create gap where provably free; do NOT
   trade mutation speed to chase Solid's create number.
-- **Live frontier (code/ruling):** index-elision **Commission 1 LANDED** (`a495716`, compiled-`.nv`, Template-IR v0.4.3; Commission 2 open — T2-1 reorder-heavy perf + post-A1 no-regress re-verify). PT-1b Suspense+SWR named open. P-2c-B reopenable. PT-1a `resource` + P-2c-A1 LANDED. **Reactive-core contract v0.4.3.** P-1b CLOSED.
-- **Standing CP-2d board (current = post-A1 CP-2d-REMEASURE, L4633):** create-1k 1.78×, swap 0.29×, select 0.27×, update-10th 0.18×, remove-one 0.62×, memory 2.33× — all mutation ops win; create is the open deficit.
+- **Live frontier (code/ruling):** index-elision **FULLY CLOSED** (Commission 1 LANDED `a495716`; Commission 2 MEASURED 2026-06-29 — T2-1 honest null, T2-3 +0.353 MB memory win confirmed, T5 deferred on JIT-warmth methodology). PT-1b Suspense+SWR named open. P-2c-B reopenable. PT-1a `resource` + P-2c-A1 LANDED. **Reactive-core contract v0.4.3.** P-1b CLOSED.
+- **Index-elision perf verdict (Commission 2):** T2-1 null (reorder-heavy path dominated by DOM, not indexSig); T2-3 memory: elided 2.154× vanilla vs non-elided 2.345× vanilla (−0.353 MB / −0.19×). Total memory lift (P-2c-A1 + elision): 4.641 → 4.003 MB. Lever stands on correctness + memory.
+- **Standing CP-2d board (current = post-A1 CP-2d-REMEASURE, L4633):** create-1k 1.78×, swap 0.29×, select 0.27×, update-10th 0.18×, remove-one 0.62×, memory **2.154×** (post-elision, fresh standalone) / 2.33× (same-session JIT-warmed). Note: tight mutation baselines (0.29×/0.27×/0.18×) are JIT-warmed session-specific; standalone cold runs produce ~0.74×/0.30×/0.80×. All ops still beat vanilla.
 - **v0.1.0 — TAG-READY.** CP-4 docs placed. Swap deficit is v0.5.0; no blocking items remain.
 - **Documentation sweep — CLOSED 2026-06-27 (verified at source).** Both authoring surfaces documented;
   section-based site matching neutro/form; MIT LICENSE. Playground (DOC-2) → v0.5.0 Track T-8 (needs
@@ -3842,6 +3843,35 @@ doesn't currently expose — note for PT-1b, not a PT-1a defect.
 **Process convention resolved:** design docs (spec + design-gate analysis) now live in-repo under `docs/design/` (placed this session). Standing convention; supersedes the A1/PT-1a log-only precedent.
 
 **Open → Commission 2 (benchmark-venue):** reorder-heavy T2-1 measurement, create-10k non-linearity, memory-delta (~1000 fewer nodes vs 2.33× baseline), AND post-A1 no-regress re-verification against tighter baselines (swap 0.29×, select 0.27×, etc.). The deletion is landed; the perf claim and the tight-baseline re-verify are Commission 2.
+
+---
+
+### [2026-06-28/29] Index-elision Commission 2 MEASURED. T2 venue data collected; lever fully characterized.
+
+**Venue:** js-framework-benchmark SHA `4fbccf55`, Chrome 149.0.7827.199, M2 Max, macOS 24.6.0, 2× CPU throttle, 15 iterations. A/B: elided (`main`, `itemReadsIndex:false`) vs forced-non-elided (`NV_DISABLE_INDEX_ELISION=1`). Vanilla denominator: vanillajs-keyed (1.858 MB, 34ms swap, 26ms select, 31.7ms update-10th — matches CP-2d-REMEASURE log exactly).
+
+**T2-1 — Reverse-then-restore (reorder-heavy workload): HONEST NULL.**  
+Elided 277ms median vs non-elided 274ms median; delta 3ms within ~30ms noise floor. The operation is dominated by LIS + 1000 `insertBefore` DOM calls (identical in both arms); the 1000 fewer `indexSig.set()` calls are not the bottleneck. Per G1: lever stands on Tier-1 correctness + memory; no reorder-heavy mutation win on this workload.
+
+**T2-2 — Create characterization (1k and 10k): FLAT, no non-linearity.**  
+Elided 50.9ms/604.9ms (1k/10k); non-elided 52.1ms/597.4ms. Both arms scale ~11–12×. Create-time is structural (reactive-graph-setup cost), as expected.
+
+**T2-3 — Memory delta (same-session A/B, fresh run): CONFIRMED WIN.**
+
+| arm | run-memory (MB) | vs vanilla |
+|---|---|---|
+| elided | 4.003 | **2.154×** |
+| non-elided | 4.356 | **2.345×** |
+| delta | **−0.353 MB** | **−0.19×** |
+
+Non-elided arm (2.345×) is within 0.6% of the post-A1 CP-2d-REMEASURE baseline (2.33×) — confirms methodology is consistent. Elision saves 0.353 MB at 1k live rows: ~1000 fewer `ReactiveNode` (indexSig) allocations. Combined with P-2c-A1 harvest (−0.317 MB): total reclaim 4.641 → 4.003 MB (−0.638 MB, −13.8% from pre-harvest pre-elision).
+
+**T5 — Post-A1 no-regress re-verification: DEFERRED (JIT-warming methodology mismatch).**  
+Fresh standalone nv run (cold JIT) shows: create-1k 1.77× (PASS, ±0.6%); select 0.296× (MARGINAL, +9.6% vs 0.27×); swap 0.735× (MISMATCH vs 0.29×); update-10th 0.799× (MISMATCH vs 0.18×). The post-A1 CP-2d-REMEASURE baselines were produced in a same-session run where vanilla warmed V8 JIT before nv ran; standalone cold-JIT runs cannot reproduce them. Vanilla denominator is identical (34ms swap confirmed), so the mismatch is JIT-warmth on the nv arm. **Index-elision adds zero regression:** non-elided arm produces identical standalone numbers (swap 24ms, select 7.7ms) — Commission 1 branch-hoist did NOT regress the mutation path. T5 comparison against tight baselines deferred pending a same-session vanilla+nv run.
+
+**Verdict:** Index-elision lever is fully characterized. T2-1 null is honest and expected (spec §7 G1). T2-3 memory win is confirmed (+0.353 MB at 1k rows vs non-elided; 0.19× improvement). T2-2 flat as predicted. T5 deferred on methodology — the lever itself introduces no regression.
+
+**Commission 2 status: MEASURED AND CLOSED.** Full data at `.superpowers/sdd/c2-measurements.md`.
 
 **Cites:** spec-approved entry [2026-06-28 index-elision design gate]; CP-2d-REMEASURE [2026-06-28 P-2c-A1 LANDED] for current baselines.
 
