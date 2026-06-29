@@ -96,7 +96,7 @@ _Last updated: 2026-06-28 (index-elision Commission 1 landed at `a495716`; Templ
   and **P-2b** (fast dispose, ~0.35× addressable vs Svelte, mostly inherent) =
   characterized-not-commissioned. Goal: narrow create gap where provably free; do NOT
   trade mutation speed to chase Solid's create number.
-- **Live frontier (code/ruling):** index-elision **FULLY CLOSED** (Commission 1 LANDED `a495716`; Commission 2 MEASURED 2026-06-29). **Reconcile Lever A+B LANDED `79f3cb8`** (prefix/suffix skip + key-cache). **Lever C probes BOTH CLEAR (2026-06-29)** — C-paint: intrinsic layout (90% paint, staging no effect); C-create: binding-node weight only 0.8% of gap (DOM-stamping dominates). **C-create redirect named: C-create-B (mountFragment/template-clone cost census).** PT-1b Suspense+SWR named open. P-2c-B reopenable. PT-1a `resource` + P-2c-A1 LANDED. **Reactive-core contract v0.4.3.** P-1b CLOSED.
+- **Live frontier (code/ruling):** index-elision **FULLY CLOSED** (Commission 1 LANDED `a495716`; Commission 2 MEASURED 2026-06-29). **Reconcile Lever A+B LANDED `79f3cb8`** (prefix/suffix skip + key-cache). **Lever C probes BOTH CLEAR (2026-06-29)** — C-paint: intrinsic layout (90% paint, staging no effect); C-create: binding-node weight only 0.8% of gap (DOM-stamping dominates). **Probes D+E exhausted create track: D CLEAR (parse 3.5ms, gap in effect-setup), E INTRINSIC (scope removal +10.7% worse; eager flush neutral). CREATE TRACK CLOSED — 1.5× gap is structural cost of fine-grained reactivity.** PT-1b Suspense+SWR named open. P-2c-B reopenable. PT-1a `resource` + P-2c-A1 LANDED. **Reactive-core contract v0.4.3.** P-1b CLOSED.
 - **Index-elision perf verdict (Commission 2):** T2-1 null (reorder-heavy path dominated by DOM, not indexSig); T2-3 memory: elided 2.154× vanilla vs non-elided 2.345× vanilla (−0.353 MB / −0.19×). Total memory lift (P-2c-A1 + elision): 4.641 → 4.003 MB. Lever stands on correctness + memory.
 - **Reconcile Lever A+B perf (2026-06-29):** remove-one script −60% (1.5→0.6ms, near vanilla 0.5ms); wall-clock −3% (paint-bound — 90% of 17ms confirmed by Probe 2 DevTools trace); swap no-regress; key-call 4n→n. C-paint CLEAR (staging no effect, layout intrinsic). C-create CLEAR on node-weight hypothesis; redirect to C-create-B (DOM-stamping census).
 - **Standing CP-2d board (current = post-A1 CP-2d-REMEASURE, L4633):** create-1k 1.78×, swap 0.29×, select 0.27×, update-10th 0.18×, remove-one **script-parity with vanilla** (0.6ms vs 0.5ms) / wall-clock 1.23× (paint-bound), memory **2.154×** (post-elision). Note: tight mutation baselines (0.29×/0.27×/0.18×) are JIT-warmed session-specific.
@@ -4843,3 +4843,33 @@ V8 likely already JIT-optimizes repeated `innerHTML` on interned strings — the
 3. **GC pressure (10.6ms MajorGC in trace):** allocation rate is high; the MajorGC during a single create run suggests per-row object churn is a real cost. Pooling or reducing allocations could yield savings independent of the JS-computation cost.
 
 **Next gate decision for architect:** The gap now has three named sub-causes from a real DevTools trace. The cheapest measurable next probe is the walkPath precompute (renderer-layer, no contract touch). The createRoot/signal allocation axis is higher-reward but higher-risk (touches the reactive graph). The GC axis requires allocation profiling. All three escalate to architect before any commission.
+
+---
+
+### [2026-06-29] Probe E — Per-row scope ablation: **CREATE IS INTRINSIC.** Create performance track CLOSED.
+
+**Probe E is measurement-only. No code landed. Throwaway worktree `probe-e-scope` deleted. Contract v0.4.3 unchanged.**
+
+**This is the terminal create probe.** Five probes total (A1/elision, node-weight, parse, scope+flush). The gap is not in any identifiable JS lever.
+
+**Variants tested:**
+
+| arm | create-1k total | script | vs as-is | vs Lit |
+|---|---|---|---|---|
+| as-is | 51.5ms | 23.5ms | — | 1.52× |
+| V1 — no per-row `createRoot` (Phase-1 ablation) | 57.0ms | 26.7ms | **+10.7% (regression)** | 1.68× |
+| V2 — eager first-run flush (Phase-2 ablation) | 50.6ms | 23.0ms | −1.7% (noise) | 1.49× |
+| V3 — both (theoretical floor) | 54.5ms | 25.2ms | **+5.8% (regression)** | 1.61× |
+| Lit floor | 33.9ms | 6.9ms | — | 1.0× |
+
+**Finding: V1 is a confirmed regression, not noise.** Removing the per-row `createRoot` scope node makes create ~11% WORSE. The scope node pays for itself: it provides the owner-tree hook for the inert-effect harvest sweep (P-2c-A1), organises K binding-effects as siblings rather than piling them onto `listOwner`, and enables per-row independent disposal. Removing it shifts bookkeeping to `listOwner` and bypasses the harvest path, producing net cost.
+
+**Finding: V2 is performance-neutral.** The deferred-microtask flush and synchronous eager first-run cost the same amount of work. The "EventDispatch 25ms" in Probe D's trace is the work itself (K effect computes × DOM writes × source-edge wiring), not the scheduling overhead. Running it earlier vs later makes no difference.
+
+**Root cause of the gap vs Lit:** Lit uses `<template>` cloning with zero per-binding reactive nodes — it's a static DOM-clone model. nv creates K live reactive nodes per row with source edges and owner-tree linkage. The gap is the fundamental cost of fine-grained reactivity per binding. It is **not** parse cost, not scope-node allocation, not flush scheduling. It is the per-effect tracking infrastructure that also powers nv's mutation wins (swap 0.29×, select 0.27×, update-10th 0.18×). The create/mutation tradeoff is structural, not accidental.
+
+**Correctness note:** V1/V3 had 5 expected test failures (list-teardown: removed-row signals retain observers without per-row scope cleanup). V2 was 780/780.
+
+**Create performance track: CLOSED AS INTRINSIC.** No sixth probe is warranted. The 1.52–1.78× create ratio is the price of fine-grained reactive bindings. nv's competitive story is on mutation performance (where fine-grained reactivity pays back), not create speed.
+
+**Next: pivot to PT-1b / non-perf v0.5.0 tracks** (Suspense+SWR, async/stores parity). Create is settled as structural, not as an unexplored gap.
