@@ -3875,6 +3875,8 @@ Fresh standalone nv run (cold JIT) shows: create-1k 1.77× (PASS, ±0.6%); selec
 
 **Cites:** spec-approved entry [2026-06-28 index-elision design gate]; CP-2d-REMEASURE [2026-06-28 P-2c-A1 LANDED] for current baselines.
 
+**[2026-06-29 clarification, citing L3869]** T5 label "DEFERRED" refers only to tight-baseline reproduction — no-regression itself is CONFIRMED: same-session A/B shows elided ≡ non-elided (swap ~24ms both arms, select ~7.7ms both arms); Commission 1 branch-hoist is verified not to regress the mutation path. What remains deferred is matching the JIT-warmed CP-2d numbers (0.29× swap etc.), which requires a same-session vanilla+nv Puppeteer run.
+
 ---
 
 ### [2026-06-28] Index-elision — design gate OPENED + SPEC APPROVED. Verdict: optimization-on-a-correctness-floor, two-tier ordered gate. Predicate = strong (bound-but-unread), parser-computed, ACCEPT-biased. Carrier = `ListBinding.itemReadsIndex?` (Template-IR v0.4.2→v0.4.3, additive; reactive-core contract unchanged). Lands on Tier-1 (correctness) alone; Tier-2 (perf) is a claim, not a landing precondition. Read at SHA `dc4e4a8`.
