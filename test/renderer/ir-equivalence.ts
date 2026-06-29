@@ -144,8 +144,13 @@ function bindingEqual(
       // Recurse into item body: call both itemTemplate with shared stub signals.
       const stubVs = signal<unknown>(null)
       const stubIs = signal<number>(0)
-      const aBody = (a as ListBinding).itemTemplate(stubVs, stubIs)
-      const bBody = bl.itemTemplate(stubVs, stubIs)
+      // Mirror interpreter: only pass indexSig if itemReadsIndex !== false.
+      // JS silently drops extra args, but the conditional call makes the contract explicit.
+      const aLb = a as ListBinding
+      const aReadsIndex = aLb.itemReadsIndex !== false
+      const bReadsIndex = bl.itemReadsIndex !== false
+      const aBody = aReadsIndex ? aLb.itemTemplate(stubVs, stubIs) : aLb.itemTemplate(stubVs)
+      const bBody = bReadsIndex ? bl.itemTemplate(stubVs, stubIs) : bl.itemTemplate(stubVs)
       const bodyRes = irStructurallyEqual(undefined, aBody, bBody)
       if (!bodyRes.equal) return { equal: false, reason: `${p}.itemBody → ${bodyRes.reason}` }
       break
