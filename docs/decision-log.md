@@ -4804,3 +4804,42 @@ Lit uses `<template>` cloning with no per-row reactive graph setup. nv's `mountF
 > *CLEAR / CLEAR → Both axes exhausted. nv is at its architectural performance frontier for this benchmark; the remaining create/remove gaps are intrinsic (DOM-clone, browser layout). Pivot to non-perf v0.5.0 tracks.*
 
 **However:** Probe 1 returned a named redirect (C-create-B), not a dead-end. The create deficit has a plausible addressable cause (DOM-stamping, not reactive overhead) that a further cheap probe could quantify. The decision to commission C-create-B or pivot to PT-1b/stores is the architect's call, now armed with this data.
+
+---
+
+### [2026-06-29] Probe D — Template parse-once cache: CLEAR. Gap lives in wiring/effect-setup, not parsing.
+
+**Probe D is measurement-only. No code landed. Throwaway branch `probe-d-cache` deleted. Contract v0.4.3 unchanged.**
+
+**Question:** Does caching `shape.html` parse (parse once, `cloneNode` per row — Lit's model) recover a material fraction of the 16.5ms create script gap?
+
+**Implementation verified:** `Map<string, HTMLTemplateElement>` keyed by `ir.shape.html` (string, not WeakMap — compiled path emits fresh IR object per row; WeakMap would miss every row and falsely CLEAR). Correctness gate: 779/780 tests pass; 1 failure is the emitter/interpreter ratio characterization test (§7, a performance characterization, not correctness — ratio flipped because the cache sped up jsdom, not a bug).
+
+**Results:**
+
+| arm | create-1k total | script | paint |
+|---|---|---|---|
+| as-is | 53.7ms | 23.9ms | 29.3ms |
+| cached | 52.5ms | 24.1ms | 27.4ms |
+| Lit floor | 33.9ms | 6.9ms | 26.1ms |
+
+Script delta: +0.2ms (reversed, within noise). Create-10k: +4.8ms (within stddev). Cache is a no-op on wall-clock.
+
+**DevTools trace decomposition (cached arm):**
+- `ParseHTML`: 3.5ms total (page-load parse included — per-row parse contribution is near-zero)
+- `EventDispatch`: 25.0ms (all row-creation cost: walkPath traversal + effect wiring + createRoot + signal allocation)
+- `MajorGC`: 10.6ms visible in one 1-run trace (high allocation rate)
+
+V8 likely already JIT-optimizes repeated `innerHTML` on interned strings — the "parse" cost was never the bottleneck the mechanism suggested.
+
+**M4 mutation no-regress:** PASS (update-10th −1.7%, select +8%, swap +15% — run-to-run noise).
+**M5 memory:** 4.066 MB vs 4.003 MB baseline (+1.6%, negligible — 1 retained `HTMLTemplateElement` per unique shape).
+
+**Verdict: CLEAR.** The 16.5ms create script gap is NOT in HTML parsing. It is in per-row effect wiring, walkPath traversal, `createRoot` allocation, and signal setup.
+
+**Redirects named by M3 trace:**
+1. **walkPath cost:** per-row DOM traversal to locate binding slots. Precomputing slot paths once per template shape (a `Map<string, number[][]>`) would save ~N traversals at 1k.
+2. **createRoot + signal allocation per row:** 1000 × (createRoot + K signals) at 1k. Reducing or pooling reactive graph nodes per row is the same axis as C-create-B — now confirmed live by the trace.
+3. **GC pressure (10.6ms MajorGC in trace):** allocation rate is high; the MajorGC during a single create run suggests per-row object churn is a real cost. Pooling or reducing allocations could yield savings independent of the JS-computation cost.
+
+**Next gate decision for architect:** The gap now has three named sub-causes from a real DevTools trace. The cheapest measurable next probe is the walkPath precompute (renderer-layer, no contract touch). The createRoot/signal allocation axis is higher-reward but higher-risk (touches the reactive graph). The GC axis requires allocation profiling. All three escalate to architect before any commission.
