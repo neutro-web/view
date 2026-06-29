@@ -429,9 +429,9 @@ function wireChild(binding: ChildBinding, anchorNode: Node, doc: Document): void
 
 type ItemRecord = {
   valueSig: WritableSignal<unknown>
-  indexSig: WritableSignal<number>
+  indexSig?: WritableSignal<number> // absent when elided (itemReadsIndex === false)
   lastValue: unknown
-  lastIndex: number
+  lastIndex?: number // absent when elided (itemReadsIndex === false)
   rootEl: Node
   dispose: () => void
 }
@@ -442,6 +442,21 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
   if (parent === null) {
     throw new Error('[nv/interpreter] ListBinding: anchor has no parent')
   }
+
+  // Decide once per list instance whether this list reads the index signal.
+  // This is FIXED per binding — not re-evaluated on each reconcile.
+  const readsIndex = binding.itemReadsIndex !== false
+  // Hoist the index-update closure out of the per-row loop.
+  // For elided lists (readsIndex === false) this is a no-op — no compare, no field write, no .set().
+  const updateIndex = readsIndex
+    ? (rec: ItemRecord, i: number) => {
+        if (rec.lastIndex !== i) {
+          // biome-ignore lint/style/noNonNullAssertion: indexSig is allocated when readsIndex === true
+          rec.indexSig!.set(i)
+          rec.lastIndex = i
+        }
+      }
+    : (_rec: ItemRecord, _i: number) => {}
 
   const records = new Map<string | number, ItemRecord>()
 
@@ -496,14 +511,16 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
         // effect (child of the outer mount scope), not a child of the reconcile effect.
         // This prevents preRunCleanup from disposing item roots on every reconcile re-run.
         const valueSig = signal<unknown>(item)
-        const indexSig = signal<number>(i)
+        const indexSig = readsIndex ? signal<number>(i) : undefined
         let mountedRoot!: Node
 
         let itemRootOwner: ReturnType<typeof getOwner> = null
         const dispose = runWithOwner(listOwner, () =>
           createRoot((d) => {
             itemRootOwner = getOwner()
-            const itemIR = binding.itemTemplate(valueSig, indexSig)
+            const itemIR = readsIndex
+              ? binding.itemTemplate(valueSig, indexSig)
+              : binding.itemTemplate(valueSig)
             const { roots } = mountFragment(itemIR, parent, doc, anchorNode)
             // Strip whitespace-only text nodes — well-formatted templates have them
             // around the single root element (e.g. newlines between <each> and <tr>).
@@ -527,9 +544,9 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
 
         records.set(k, {
           valueSig,
-          indexSig,
+          indexSig, // undefined when elided
           lastValue: item,
-          lastIndex: i,
+          lastIndex: readsIndex ? i : undefined, // undefined when elided
           rootEl: mountedRoot,
           dispose,
         })
@@ -542,11 +559,8 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
           existing.valueSig.set(item)
           existing.lastValue = item
         }
-        // Op 4: index changed — update indexSig and record
-        if (existing.lastIndex !== i) {
-          existing.indexSig.set(i)
-          existing.lastIndex = i
-        }
+        // Op 4: index changed — delegate to hoisted updateIndex closure (no per-row branch)
+        updateIndex(existing, i)
       }
     }
 
