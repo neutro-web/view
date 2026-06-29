@@ -1,9 +1,10 @@
-# nv Template IR — Design v0.4.2
+# nv Template IR — Design v0.4.3
  
 **Stream:** (3) Renderer/templating  
 **Contract reference:** nv Reactive Core Runtime Contract v0.4.2  
-**Status:** Approved — v0.4.2 (2026-06-23). `$style` scoping + dynamic lowering landed.  
+**Status:** Approved — v0.4.3 (2026-06-28). ListBinding.itemReadsIndex? index-elision carrier landed.  
 **Changelog:**  
+- v0.4.3 (2026-06-28): ListBinding.itemReadsIndex? (additive, absent⇒allocate) — index-elision, compiled-.nv path only. reactive-core unchanged.
 - v0.2 (2026-06-17): initial approved IR spec — six binding kinds (PoC scope) + two designed-deferred (List, Sync).  
 - v0.2.1 (2026-06-20): multi-root template shapes; list item single-root constraint noted.  
 - v0.3 (2026-06-20): add ComponentBinding, PropEntry, SlotEntry, ComponentRef, PropsObject, SlotFns.
@@ -379,21 +380,40 @@ DOM without touching siblings.
  
 ```typescript
 type ListBinding = BaseBinding & {
-  kind:         'list';
-  items:        ReactiveExpr<readonly unknown[]>;
-  key:          (item: unknown, index: number) => string | number;
+  kind:             'list';
+  items:            ReactiveExpr<readonly unknown[]>;
+  key:              (item: unknown, index: number) => string | number;
+  itemReadsIndex?:  boolean;  // v0.4.3: index-elision hint (compiled-.nv path only)
   // itemTemplate is a FACTORY, not a bare TemplateIR. It is called once per item
-  // with a per-item writable value signal and index signal; it returns a
+  // with a per-item writable value signal and optional index signal; it returns a
   // TemplateIR whose expressions close over those signals. The renderer supplies
   // the signals; the compiler emits references to them. (Variant-A adapter at
   // construction in both front-ends.)
-  itemTemplate: (valueSig: WritableSignal<unknown>, indexSig: WritableSignal<number>) => TemplateIR;
+  itemTemplate: (valueSig: WritableSignal<unknown>, indexSig?: WritableSignal<number>) => TemplateIR;
 };
 
 // Minimal writable-signal interface (structurally compatible with core's
 // SignalAccessor<T>; defined IR-locally to keep the IR DOM-free and core-free):
 interface WritableSignal<T> { (): T; set(v: T): void; }
 ```
+
+**v0.4.3 itemReadsIndex field.** The optional `itemReadsIndex?: boolean` field controls
+whether the renderer allocates an `indexSig` for the item. Semantics:
+
+- **Absent (undefined) or `true`**: renderer MUST allocate and pass `indexSig` to the factory.
+  Conservative default — safe on all paths (tagged-template and compiled-.nv).
+- **`false`**: parser proved that the item body never reads the index; renderer MAY elide
+  `indexSig` allocation and pass `undefined` as the second argument. Only set by the
+  compiled-.nv path (compiler flow can prove index reads statically).
+
+The `itemTemplate` factory's second parameter is **optional**: `(valueSig, indexSig?) => TemplateIR`.
+When `itemReadsIndex === false`, the factory is called with only `valueSig` (i.e., `indexSig` is
+`undefined`). When `itemReadsIndex` is absent or `true`, the factory receives both. The factory
+implementation must handle both forms correctly.
+
+The tagged-template front-end always leaves `itemReadsIndex` absent, triggering the conservative
+allocation. Index elision is a compiled-.nv path optimization, invisible to the tagged-template
+path and the reactive-core contract.
  
 Back-end sketch: one top-level `effect` that observes `items()` and reconciles:
 creates new item roots for new keys, disposes roots for removed keys, reorders DOM
@@ -981,10 +1001,11 @@ type ConditionalBinding = BaseBinding & {
 };
  
 type ListBinding = BaseBinding & {  // LANDED
-  kind:         'list';
-  items:        ReactiveExpr<readonly unknown[]>;
-  key:          (item: unknown, index: number) => string | number;
-  itemTemplate: (valueSig: WritableSignal<unknown>, indexSig: WritableSignal<number>) => TemplateIR;
+  kind:             'list';
+  items:            ReactiveExpr<readonly unknown[]>;
+  key:              (item: unknown, index: number) => string | number;
+  itemReadsIndex?:  boolean;  // v0.4.3: index-elision hint
+  itemTemplate:     (valueSig: WritableSignal<unknown>, indexSig?: WritableSignal<number>) => TemplateIR;
 };
  
 type SyncBinding = BaseBinding & {  // DESIGNED, DEFERRED
