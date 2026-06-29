@@ -96,7 +96,7 @@ _Last updated: 2026-06-28 (index-elision Commission 1 landed at `a495716`; Templ
   and **P-2b** (fast dispose, ~0.35× addressable vs Svelte, mostly inherent) =
   characterized-not-commissioned. Goal: narrow create gap where provably free; do NOT
   trade mutation speed to chase Solid's create number.
-- **Live frontier (code/ruling):** index-elision **FULLY CLOSED** (Commission 1 LANDED `a495716`; Commission 2 MEASURED 2026-06-29). **Reconcile Lever A+B LANDED `79f3cb8`** (prefix/suffix skip + key-cache). **Lever C probes BOTH CLEAR (2026-06-29)** — C-paint: intrinsic layout (90% paint, staging no effect); C-create: binding-node weight only 0.8% of gap (DOM-stamping dominates). **Probes D+E exhausted create track: D CLEAR (parse 3.5ms, gap in effect-setup), E INTRINSIC (scope removal +10.7% worse; eager flush neutral). CREATE TRACK CLOSED — 1.5× gap is structural cost of fine-grained reactivity.** PT-1b Suspense+SWR named open. P-2c-B reopenable. PT-1a `resource` + P-2c-A1 LANDED. **Reactive-core contract v0.4.3.** P-1b CLOSED.
+- **Live frontier (code/ruling):** index-elision **FULLY CLOSED** (Commission 1 LANDED `a495716`; Commission 2 MEASURED 2026-06-29). **Reconcile Lever A+B LANDED `79f3cb8`** (prefix/suffix skip + key-cache). **Lever C probes BOTH CLEAR (2026-06-29)** — C-paint: intrinsic layout (90% paint, staging no effect); C-create: binding-node weight only 0.8% of gap (DOM-stamping dominates). **Probes D/E/F exhausted create track (6 probes): parse 3.5ms, scope removal regresses, flush neutral, effect-count 0.4% recovery. CREATE TRACK FULLY CLOSED — 1.5× gap is irreducible structural cost of fine-grained reactivity.** PT-1b Suspense+SWR named open. P-2c-B reopenable. PT-1a `resource` + P-2c-A1 LANDED. **Reactive-core contract v0.4.3.** P-1b CLOSED.
 - **Index-elision perf verdict (Commission 2):** T2-1 null (reorder-heavy path dominated by DOM, not indexSig); T2-3 memory: elided 2.154× vanilla vs non-elided 2.345× vanilla (−0.353 MB / −0.19×). Total memory lift (P-2c-A1 + elision): 4.641 → 4.003 MB. Lever stands on correctness + memory.
 - **Reconcile Lever A+B perf (2026-06-29):** remove-one script −60% (1.5→0.6ms, near vanilla 0.5ms); wall-clock −3% (paint-bound — 90% of 17ms confirmed by Probe 2 DevTools trace); swap no-regress; key-call 4n→n. C-paint CLEAR (staging no effect, layout intrinsic). C-create CLEAR on node-weight hypothesis; redirect to C-create-B (DOM-stamping census).
 - **Standing CP-2d board (current = post-A1 CP-2d-REMEASURE, L4633):** create-1k 1.78×, swap 0.29×, select 0.27×, update-10th 0.18×, remove-one **script-parity with vanilla** (0.6ms vs 0.5ms) / wall-clock 1.23× (paint-bound), memory **2.154×** (post-elision). Note: tight mutation baselines (0.29×/0.27×/0.18×) are JIT-warmed session-specific.
@@ -4873,3 +4873,43 @@ V8 likely already JIT-optimizes repeated `innerHTML` on interned strings — the
 **Create performance track: CLOSED AS INTRINSIC.** No sixth probe is warranted. The 1.52–1.78× create ratio is the price of fine-grained reactive bindings. nv's competitive story is on mutation performance (where fine-grained reactivity pays back), not create speed.
 
 **Next: pivot to PT-1b / non-perf v0.5.0 tracks** (Suspense+SWR, async/stores parity). Create is settled as structural, not as an unexplored gap.
+
+---
+
+### [2026-06-29] Probe F — Static-hole effect-count reduction: **CLEAR. CREATE TRACK FULLY CLOSED.**
+
+**Probe F is measurement-only. No code landed. Throwaway worktree `probe-f-static` deleted. Contract v0.4.3 unchanged.**
+
+**This is the terminal create probe.** Six probes total (A1/elision, node-weight, parse, scope+flush, effect-count). All CLEAR. Create is intrinsic.
+
+**What was tested:** Elide the `id` TextBinding in the jfb row (K=5 → K=4 effects/row), removing 1000 `makeNode` + `addChild` + `enqueueEffect` calls. The id field is structurally static under jfb's update pattern (same id on the replaced object). Probe constraint: label/class/event effects KEPT (would break update/select if elided). Trap guard confirmed: `__probeOneTime:true` patched onto the correct binding in bundle.js, `wireText` early-return branch confirmed functional, 780/780 tests pass.
+
+**Results:**
+
+| arm | create-1k total | script | vs as-is |
+|---|---|---|---|
+| as-is (K=5) | 50.5ms | 23.3ms | — |
+| probe (K=4, id elided) | 49.7ms | 23.2ms | **−0.1ms script (0.4%)** |
+| Lit floor | 33.9ms | 6.9ms | — |
+
+create-10k: as-is 243.9ms script / probe 243.7ms script (−0.2ms, noise). Memory: 4.079 MB → 4.080 MB (no measurable heap reduction from 1000 fewer nodes — within noise). Mutation no-regress: PASS (all ops within run-to-run variance).
+
+**Proportionality check (M3):** 1-of-5 elision recovers ~0.1ms script at 1k. Extrapolated full K=0 (eliminating all 5 effects): ~0.5–1ms savings = **~6% of the 16.5ms Lit gap**. Effect construction cost is NOT linear in K at this scale — fixed-per-row overhead (valueSig allocation, createRoot, DOM stamp, walkPath) dominates. Even a perfect static-hole classifier that elided every effect would close only ~6% of the create gap.
+
+**Verdict: CLEAR.** Effect count is not the create bottleneck. The dominant cost is per-row fixed overhead (not per-effect reactive cost), consistent with all prior probes.
+
+---
+
+### CREATE TRACK: FULLY CLOSED — SIX PROBES EXHAUSTED
+
+| probe | axis tested | result |
+|---|---|---|
+| A1 + index-elision | indexSig allocation (~1000 fewer nodes at 1k) | CLEAR on create-time (memory win confirmed separately) |
+| Probe C (node-weight) | Per-effect field count (9 dead fields of 29) | CLEAR — 0.8% of gap |
+| Probe D (parse cache) | HTML parse cost per row | CLEAR — ParseHTML 3.5ms total; gap in effect-setup |
+| Probe E (scope ablation) | Per-row `createRoot` + deferred flush | CLEAR — scope removal REGRESSES (+10.7%); flush neutral |
+| Probe F (effect count) | K reduction (5→4 effects/row) | CLEAR — 0.4% recovery; full K=0 extrapolates to ~6% |
+
+**Root cause conclusion:** The 16.5ms create script gap vs Lit is in per-row FIXED cost — DOM stamp, `createRoot` owner-tree wiring, `valueSig` allocation, `walkPath` binding resolution. These are irreducible given nv's fine-grained reactive model. The reactive infrastructure that costs at create is precisely what enables nv's mutation wins (swap/select/update-10th). The create/mutation tradeoff is structural, not accidental.
+
+**Pivot: PT-1b / non-perf v0.5.0 tracks. No further create probes.**
