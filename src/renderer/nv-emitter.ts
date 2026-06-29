@@ -176,7 +176,8 @@ function emitBindingLiteral(
       const bodyLiteral = emitIrLiteral(bodyIR, thunk.bodyThunks, i2)
       // letNames default to ['item', 'index'] if empty; first name maps to valueSig, second to indexSig
       const [itemName = 'item', indexName = 'index'] = thunk.letNames
-      const readsIndex = thunk.itemReadsIndex !== false
+      const readsIndex =
+        process.env.NV_DISABLE_INDEX_ELISION === '1' ? true : thunk.itemReadsIndex !== false
       const slotPropsBody = readsIndex
         ? `{ ${itemName}: () => valueSig(), ${indexName}: () => indexSig() }`
         : `{ ${itemName}: () => valueSig() }`
