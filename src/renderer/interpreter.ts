@@ -530,7 +530,9 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
     }
 
     // Ops 1/3/4: create new items; update value/index for kept items (band only).
-    // Prefix/suffix rows are reference-identical → no value/index change possible.
+    // Prefix rows are reference-identical and at the same absolute positions → no update needed.
+    // Suffix rows are reference-identical in value but their absolute positions shift when the
+    // band inserts or removes rows; index updates are handled after this loop.
     for (let i = start; i <= nextEnd; i++) {
       // biome-ignore lint/style/noNonNullAssertion: bounded by next.length
       const item = next[i]!
@@ -594,6 +596,18 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
         }
         // Op 4: index changed — delegate to hoisted updateIndex closure (no per-row branch)
         updateIndex(existing, i)
+      }
+    }
+
+    // Suffix index fixup: suffix rows keep their values (reference-identical) but their
+    // absolute positions shift by (nextEnd - prevEnd) when the band inserts or removes rows.
+    // Prefix rows are always at positions 0..start-1 on both sides — no fixup needed.
+    if (readsIndex && nextEnd !== prevEnd) {
+      for (let i = nextEnd + 1; i < next.length; i++) {
+        // biome-ignore lint/style/noNonNullAssertion: i is within nextKeys bounds
+        const suffixKey = nextKeys[i]!
+        const rec = records.get(suffixKey)
+        if (rec) updateIndex(rec, i)
       }
     }
 

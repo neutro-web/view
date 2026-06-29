@@ -64,6 +64,46 @@ function makeListIR(
   }
 }
 
+/** Outer <ul> list IR keyed by item.id, with itemReadsIndex: true. */
+function makeListIRWithIndex(
+  items: () => readonly Item[],
+  makeItem: (vs: WritableSignal<unknown>, is?: WritableSignal<number>) => TemplateIR,
+): TemplateIR {
+  return {
+    id: 'skip-list-idx',
+    shape: {
+      html: '<ul><!--nv-0--></ul>',
+      bindingPaths: [[0, 0]],
+    },
+    bindings: [
+      {
+        kind: 'list',
+        pathIndex: 0,
+        items: items as () => readonly unknown[],
+        key: (item) => (item as Item).id,
+        itemTemplate: makeItem,
+        itemReadsIndex: true,
+      } satisfies ListBinding,
+    ],
+  }
+}
+
+/** Per-item <li> template rendering "label:index" — reads both value and index signals. */
+function liIndexTemplate(vs: WritableSignal<unknown>, is?: WritableSignal<number>): TemplateIR {
+  return {
+    id: 'li-skip-idx',
+    shape: { html: '<li><!--nv-0--></li>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'text',
+        pathIndex: 0,
+        // is! safe: only wired to lists with itemReadsIndex: true → interpreter always allocates indexSig
+        expr: () => `${(vs() as Item).label}:${is!()}`,
+      } satisfies TextBinding,
+    ],
+  }
+}
+
 /** Per-item <li> template whose text tracks valueSig().label. */
 function liTextTemplate(vs: WritableSignal<unknown>): TemplateIR {
   return {
@@ -444,4 +484,46 @@ test('T1-4 no-forbidden-diff: prefix/suffix skip changeset confined to interpret
     forbidden,
     `Changeset must not touch src/core/, docs/, or src/renderer/ir.ts. Violating files: ${JSON.stringify(forbidden)}`,
   ).toEqual([])
+})
+
+// ── T1-5 (index-reading list, suffix index staleness guard) ───────────────────
+//
+// When a band operation changes the list length (remove-at-front, prepend),
+// suffix rows retain reference-identical values but shift to new absolute positions.
+// Their indexSig must be updated or index-reading templates show stale indices.
+//
+// Bug: before the fix, suffix rows kept their old lastIndex because the
+// Ops 1/3/4 loop only iterated start..nextEnd, skipping suffix rows entirely.
+
+test('T1-5 suffix-index-staleness: remove-at-front and prepend update suffix row indices', () => {
+  // Initial: 5 rows [a,b,c,d,e] at indices 0..4
+  const a: Item = { id: 1, label: 'a' }
+  const b: Item = { id: 2, label: 'b' }
+  const c: Item = { id: 3, label: 'c' }
+  const d: Item = { id: 4, label: 'd' }
+  const e: Item = { id: 5, label: 'e' }
+
+  const items = signal<Item[]>([a, b, c, d, e])
+  const ir = makeListIRWithIndex(() => items(), liIndexTemplate)
+  const parent = mkParent()
+  const dispose = mount(ir, parent, document)
+  flushSync()
+
+  expect(liOrder(parent)).toEqual(['a:0', 'b:1', 'c:2', 'd:3', 'e:4'])
+
+  // Remove-at-front: [b,c,d,e] — band is index 0 (removed), suffix = [b,c,d,e]
+  // Expected: b→0, c→1, d→2, e→3
+  items.set([b, c, d, e])
+  flushSync()
+  expect(liOrder(parent)).toEqual(['b:0', 'c:1', 'd:2', 'e:3'])
+
+  // Prepend: [z,b,c,d,e] — band is index 0 (new z), suffix = [b,c,d,e]
+  // Expected: z→0, b→1, c→2, d→3, e→4
+  const z: Item = { id: 0, label: 'z' }
+  items.set([z, b, c, d, e])
+  flushSync()
+  expect(liOrder(parent)).toEqual(['z:0', 'b:1', 'c:2', 'd:3', 'e:4'])
+
+  dispose()
+  rmParent(parent)
 })
