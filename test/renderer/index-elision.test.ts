@@ -149,6 +149,53 @@ test('T1-1e  DOM assertion: index values correct when itemReadsIndex === true', 
   rmParent(parent)
 })
 
+// ── T1-1 additional paths: nested-each, attr, expr ───────────────────────────
+
+test('T1-1-nested-each  outer <each let={item,i}><each let={sub}>${i}</each></each> → outer itemReadsIndex === true', () => {
+  const src = `
+    const C = $component(() => {
+      $script(() => { const items = signal([[1,2],[3,4]]) })
+      $render(() => html\`<ul><each .of="\${items}" key="\${(_, i) => i}" let={item, i}><each .of="\${item}" key="\${(sub) => sub}" let={sub}><li>\${i}</li></each></each></ul>\`)
+    })
+  `
+  const results = parseNvFile(src, 'test.nv', document)
+  const ir = results[0]!.ir
+  const outerList = ir.bindings.find((b) => b.kind === 'list') as ListBinding
+  expect(outerList, 'outer ListBinding found').toBeDefined()
+  expect(
+    outerList.itemReadsIndex,
+    'inner each body reads outer i → outer itemReadsIndex === true',
+  ).toBe(true)
+})
+
+test('T1-1-attr  <each let={item,i}><div data-x="${i}"></div></each> → itemReadsIndex === true', () => {
+  const src = `
+    const C = $component(() => {
+      $script(() => { const items = signal(['a', 'b']) })
+      $render(() => html\`<ul><each .of="\${items}" key="\${(_, i) => i}" let={item, i}><li data-x="\${i}">\${item}</li></each></ul>\`)
+    })
+  `
+  const results = parseNvFile(src, 'test.nv', document)
+  const ir = results[0]!.ir
+  const list = ir.bindings.find((b) => b.kind === 'list') as ListBinding
+  expect(list, 'ListBinding found').toBeDefined()
+  expect(list.itemReadsIndex, 'attribute binding reads i → true').toBe(true)
+})
+
+test("T1-1-expr  <each let={item,i}><span class=\"${i > 0 ? 'after' : 'first'}\"></span></each> → itemReadsIndex === true", () => {
+  const src = `
+    const C = $component(() => {
+      $script(() => { const items = signal(['a', 'b', 'c']) })
+      $render(() => html\`<ul><each .of="\${items}" key="\${(_, i) => i}" let={item, i}><li class="\${i > 0 ? 'after' : 'first'}">\${item}</li></each></ul>\`)
+    })
+  `
+  const results = parseNvFile(src, 'test.nv', document)
+  const ir = results[0]!.ir
+  const list = ir.bindings.find((b) => b.kind === 'list') as ListBinding
+  expect(list, 'ListBinding found').toBeDefined()
+  expect(list.itemReadsIndex, 'conditional expr reads i → true').toBe(true)
+})
+
 // ── T1-2: itemReadsIndex === false → itemTemplate called without indexSig ─────
 
 test('T1-2  itemReadsIndex === false: itemTemplate factory receives no indexSig (or undefined)', () => {
