@@ -355,6 +355,50 @@ test('T1-2 op-corpus: shuffle (n=100, odd-indices-reversed then even-indices-for
   rmParent(parent)
 })
 
+// ── T2-4 (key-call count) ─────────────────────────────────────────────────────
+//
+// Wraps binding.key in a counting proxy and asserts it's called exactly n times
+// during a reconcile (once per item in nextKeys pass), not ~4n as in naive impls.
+
+test('T2-4 key-call count: reconcile calls key exactly n times (n=100)', () => {
+  const n = 100
+  const base: Item[] = Array.from({ length: n }, (_, i) => ({ id: i, label: `item-${i}` }))
+  const items = signal<Item[]>(base)
+
+  let keyCallCount = 0
+  const ir = makeListIR(
+    () => items(),
+    (vs) => liTextTemplate(vs),
+  )
+
+  // Patch the key function on the list binding to count calls
+  const listBinding = ir.bindings[0] as ListBinding
+  const originalKey = listBinding.key
+  listBinding.key = (item, i) => {
+    keyCallCount++
+    return originalKey(item, i)
+  }
+
+  const parent = mkParent()
+  const dispose = mount(ir, parent, document)
+  flushSync()
+
+  // Initial render: should call key n times
+  const initialCount = keyCallCount
+  expect(initialCount, 'initial render: key called n times').toBe(n)
+
+  // Reconcile: same keys, different content (new object refs, same ids, new labels)
+  keyCallCount = 0
+  const next = base.map((it) => ({ id: it.id, label: `updated-${it.label}` }))
+  items.set(next)
+  flushSync()
+
+  expect(keyCallCount, 'reconcile: key called exactly n times (not ~4n)').toBe(n)
+
+  dispose()
+  rmParent(parent)
+})
+
 // ── T1-3 (degenerate) ─────────────────────────────────────────────────────────
 //
 // First reconcile: prevKeys is empty, so the band is [0, n-1] (full scan).
