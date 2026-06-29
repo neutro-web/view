@@ -738,7 +738,8 @@ function buildSlotContentIR(
       items,
       key,
       itemTemplate: (valueSig, indexSig?) =>
-        factory({ item: () => valueSig(), index: () => indexSig?.() ?? 0 }),
+        // biome-ignore lint/style/noNonNullAssertion: interpreter always provides indexSig for tagged-template lists
+        factory({ item: () => valueSig(), index: () => indexSig!() }),
     } satisfies ListBinding)
   }
 
@@ -966,7 +967,8 @@ export function createHtmlTag(document: Document) {
         items,
         key,
         itemTemplate: (valueSig, indexSig?) =>
-          factory({ item: () => valueSig(), index: () => indexSig?.() ?? 0 }),
+          // biome-ignore lint/style/noNonNullAssertion: interpreter always provides indexSig for tagged-template lists
+          factory({ item: () => valueSig(), index: () => indexSig!() }),
       } satisfies ListBinding)
     }
 
