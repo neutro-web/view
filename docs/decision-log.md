@@ -96,9 +96,10 @@ _Last updated: 2026-06-28 (index-elision Commission 1 landed at `a495716`; Templ
   and **P-2b** (fast dispose, ~0.35× addressable vs Svelte, mostly inherent) =
   characterized-not-commissioned. Goal: narrow create gap where provably free; do NOT
   trade mutation speed to chase Solid's create number.
-- **Live frontier (code/ruling):** index-elision **FULLY CLOSED** (Commission 1 LANDED `a495716`; Commission 2 MEASURED 2026-06-29 — T2-1 honest null, T2-3 +0.353 MB memory win confirmed, T5 deferred on JIT-warmth methodology). PT-1b Suspense+SWR named open. P-2c-B reopenable. PT-1a `resource` + P-2c-A1 LANDED. **Reactive-core contract v0.4.3.** P-1b CLOSED.
+- **Live frontier (code/ruling):** index-elision **FULLY CLOSED** (Commission 1 LANDED `a495716`; Commission 2 MEASURED 2026-06-29). **Reconcile Lever A+B LANDED `79f3cb8`** (prefix/suffix skip + key-cache; staggered-program checkpoint reached — Lever C gated on reassessment). PT-1b Suspense+SWR named open. P-2c-B reopenable. PT-1a `resource` + P-2c-A1 LANDED. **Reactive-core contract v0.4.3.** P-1b CLOSED.
 - **Index-elision perf verdict (Commission 2):** T2-1 null (reorder-heavy path dominated by DOM, not indexSig); T2-3 memory: elided 2.154× vanilla vs non-elided 2.345× vanilla (−0.353 MB / −0.19×). Total memory lift (P-2c-A1 + elision): 4.641 → 4.003 MB. Lever stands on correctness + memory.
-- **Standing CP-2d board (current = post-A1 CP-2d-REMEASURE, L4633):** create-1k 1.78×, swap 0.29×, select 0.27×, update-10th 0.18×, remove-one 0.62×, memory **2.154×** (post-elision, fresh standalone) / 2.33× (same-session JIT-warmed). Note: tight mutation baselines (0.29×/0.27×/0.18×) are JIT-warmed session-specific; standalone cold runs produce ~0.74×/0.30×/0.80×. All ops still beat vanilla.
+- **Reconcile Lever A+B perf (2026-06-29):** remove-one script −60% (1.5→0.6ms, near vanilla 0.5ms); wall-clock −3% (paint-bound — 87% of 17ms is browser layout/paint); swap no-regress (−5.6% improvement); update-10th no-regress (0.0%); key-call 4n→n. Lever C compute headroom is exhausted; any further remove-one gain requires addressing the paint/DOM-mutation axis, not reconcile-compute.
+- **Standing CP-2d board (current = post-A1 CP-2d-REMEASURE, L4633):** create-1k 1.78×, swap 0.29×, select 0.27×, update-10th 0.18×, remove-one **script-parity with vanilla** (0.6ms vs 0.5ms) / wall-clock 1.23× (paint-bound), memory **2.154×** (post-elision). Note: tight mutation baselines (0.29×/0.27×/0.18×) are JIT-warmed session-specific.
 - **v0.1.0 — TAG-READY.** CP-4 docs placed. Swap deficit is v0.5.0; no blocking items remain.
 - **Documentation sweep — CLOSED 2026-06-27 (verified at source).** Both authoring surfaces documented;
   section-based site matching neutro/form; MIT LICENSE. Playground (DOC-2) → v0.5.0 Track T-8 (needs
@@ -4705,3 +4706,37 @@ in any test; the `state === CLEAN` guard correctly skipped DIRTY effects.
 STATIC verdict) now reopenable — its re-measure gate is cleared (A1's memory win is real
 but bounded; B attacks the still-open 1.78× create deficit). Closure axiom +
 single-current-value invariant untouched.**
+
+---
+
+### [2026-06-29] Reconcile Lever A+B LANDED at `79f3cb8`. Prefix/suffix skip + key-cache live. Staggered-program checkpoint reached.
+
+**Workstream:** WS3 renderer. Commission: `2026-06-29-reconcile-prefix-suffix-skip.md`. Single `src/` file changed: `src/renderer/interpreter.ts`. No contract, no IR, no core-primitive change (G0 clean). Reconcile-local as designed.
+
+**What landed (6 commits, `47d376a`–`79f3cb8`):**
+
+- **Lever B (key-cache, `47d376a`):** `binding.key()` now called exactly n times per reconcile (one pass at top building `nextKeys[]`). Prior: ~4n separate passes. `prevItems: readonly unknown[]` retained for reference-equality skip. `prevOrder` renamed `prevKeys`.
+- **Lever A (band skip, `421a61f`):** Before Op2, compute band `[start, prevEnd/nextEnd]` using BOTH key AND reference equality. All structural passes (Op2 removal, Ops1/3/4, LIS, reverse-walk, insertBefore) run over the band only. Degenerate (empty prevKeys): band = [0, n-1] = full scan. Ref-node boundary for reverse-walk: `records.get(prevKeyOrder[prevEnd+1])?.rootEl` or `anchorNode`; uses `prevKeyOrder` snapshot (pre-mutation) — not the post-reassignment `prevKeys`.
+- **Critical fix (`79f3cb8`):** Suffix rows shift absolute position when list length changes (remove-at-front, prepend, mid-band insert/remove). The Ops loop narrowing missed calling `updateIndex` for suffix rows. Fixed: after Ops loop, when `readsIndex && nextEnd !== prevEnd`, walk `nextEnd+1..next.length-1` and call `updateIndex(rec, i)`. Prefix rows are immune (same absolute positions on both sides by construction). Guard `nextEnd !== prevEnd` precisely gates shift-nonzero; `lastIndex !== i` inside `updateIndex` makes it a no-op when position truly unchanged.
+
+**Correctness fence:** Skip uses BOTH key AND reference equality — a key-only skip would miss content-changed rows (new object, same key). T1-1 FIRE test guards this at 1000 rows, boundary-0 and boundary-999. T1-5 guards suffix index staleness (remove-at-front, prepend on index-reading list). T1-2 op corpus (15 ops, n ∈ {10,100,1000}), T1-3 degenerate, T1-4 no-forbidden-diff (pinned SHA `421a61f`). 780/780 vitest + 2/2 Playwright.
+
+**Perf results (standalone cold-JIT; same relative comparison valid within session):**
+
+| op | pre-skip | post-skip | delta | vanilla | verdict |
+|---|---|---|---|---|---|
+| remove-one script | 1.5ms | **0.6ms** | −60% | 0.5ms | script-parity with vanilla |
+| remove-one total | 17.8ms | 17.3ms | −3% | 14.1ms | **paint-bound** |
+| swap | 25.0ms | 23.6ms | −5.6% | 34.0ms | no-regress ✅ |
+| update-10th | 25.3ms | 25.3ms | 0.0% | 31.7ms | no-regress ✅ (no skip engagement, disjoint intervals) |
+| select | 7.7ms | 8.0ms | +3.9% | 26.0ms | noise-within-variance (0.38σ, no mechanistic path) ✅ |
+| key-call count | ~4n | **n** | −75% | — | T2-4 confirmed |
+| append (08) | 60.0ms | 60.0ms | 0.0% | 33.4ms | creation-bound, no skip benefit |
+
+**Staggered-program checkpoint (before Lever C, per commission §Reassessment):**
+
+1. **Did remove-one approach vanilla?** YES at the script level: 0.6ms nv vs 0.5ms vanilla = near-parity. NO at wall-clock: 17.3ms vs 14.1ms — the residual gap is browser layout/paint (~15ms), not reconcile-compute. Lever A+B exhausted the reconcile-compute headroom.
+2. **Did append improve? Did key-call cut materialize?** Append: no (creation-bound). Key-call: yes, confirmed n vs ~4n.
+3. **Lever C decision gate:** The compute lever is exhausted. Any further remove-one wall-clock improvement requires attacking the paint/DOM-mutation axis (fewer/batched DOM writes, document-fragment staging, detach-reattach) — which is architecturally adjacent to the binding-effect model (G0 HALT territory). Lever C-probe is NOT commissioned here. Commission only after architect + Kofi reassessment and a ceiling-probe scoped to the paint axis specifically.
+
+**No contract change. No IR change. Reactive-core contract v0.4.3 unchanged.**
