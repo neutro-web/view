@@ -72,6 +72,7 @@ function variantAAdapter(
     // Body factory only sees read-only thunks — it cannot call .set()
     const props = {
       item: () => vs(),
+      // is! safe: variantAAdapter is only used with lists that allocate indexSig (itemReadsIndex !== false)
       index: () => is!(),
     }
     return bodyFactory(props)
@@ -134,6 +135,7 @@ function liIndexBodyB(vs: WritableSignal<unknown>, is?: WritableSignal<number>):
       {
         kind: 'text',
         pathIndex: 0,
+        // is! safe: liIndexBodyB is only wired to lists where itemReadsIndex !== false → interpreter always allocates indexSig
         expr: () => `${(vs() as Item).label}#${is!()}`,
       } satisfies TextBinding,
     ],

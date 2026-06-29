@@ -738,7 +738,7 @@ function buildSlotContentIR(
       items,
       key,
       itemTemplate: (valueSig, indexSig?) =>
-        // biome-ignore lint/style/noNonNullAssertion: interpreter always provides indexSig for tagged-template lists
+        // biome-ignore lint/style/noNonNullAssertion: tagged-template path never sets itemReadsIndex: false, so interpreter always allocates indexSig (§6 conservative-allocate default)
         factory({ item: () => valueSig(), index: () => indexSig!() }),
     } satisfies ListBinding)
   }
@@ -967,7 +967,7 @@ export function createHtmlTag(document: Document) {
         items,
         key,
         itemTemplate: (valueSig, indexSig?) =>
-          // biome-ignore lint/style/noNonNullAssertion: interpreter always provides indexSig for tagged-template lists
+          // biome-ignore lint/style/noNonNullAssertion: tagged-template path never sets itemReadsIndex: false, so interpreter always allocates indexSig (§6 conservative-allocate default)
           factory({ item: () => valueSig(), index: () => indexSig!() }),
       } satisfies ListBinding)
     }

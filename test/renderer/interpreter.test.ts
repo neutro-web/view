@@ -1212,6 +1212,7 @@ function liIndexTemplate(vs: WritableSignal<unknown>, is?: WritableSignal<number
       {
         kind: 'text',
         pathIndex: 0,
+        // is! safe: this helper is only wired to lists where itemReadsIndex !== false → interpreter always allocates indexSig
         expr: () => `${(vs() as Item).label}#${is!()}`,
       } satisfies TextBinding,
     ],
