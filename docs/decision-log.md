@@ -96,7 +96,7 @@ _Last updated: 2026-06-28 (index-elision Commission 1 landed at `a495716`; Templ
   and **P-2b** (fast dispose, ~0.35× addressable vs Svelte, mostly inherent) =
   characterized-not-commissioned. Goal: narrow create gap where provably free; do NOT
   trade mutation speed to chase Solid's create number.
-- **Live frontier (code/ruling):** index-elision **FULLY CLOSED** (Commission 1 LANDED `a495716`; Commission 2 MEASURED 2026-06-29). **Reconcile Lever A+B LANDED `79f3cb8`** (prefix/suffix skip + key-cache). **Lever C probes BOTH CLEAR (2026-06-29)** — C-paint: intrinsic layout (90% paint, staging no effect); C-create: binding-node weight only 0.8% of gap (DOM-stamping dominates). **Probes D/E/F exhausted create track (6 probes): parse 3.5ms, scope removal regresses, flush neutral, effect-count 0.4% recovery. CREATE TRACK FULLY CLOSED — 1.5× gap is irreducible structural cost of fine-grained reactivity.** PT-1b Suspense+SWR named open. P-2c-B reopenable. PT-1a `resource` + P-2c-A1 LANDED. **Reactive-core contract v0.4.3.** P-1b CLOSED.
+- **Live frontier (code/ruling):** index-elision **FULLY CLOSED** (Commission 1 LANDED `a495716`; Commission 2 MEASURED 2026-06-29). **Reconcile Lever A+B LANDED `79f3cb8`** (prefix/suffix skip + key-cache). **Lever C probes BOTH CLEAR (2026-06-29)** — C-paint: intrinsic layout (90% paint, staging no effect); C-create: binding-node weight only 0.8% of gap (DOM-stamping dominates). **Probes D/E/F/G exhausted create track (7 probes): parse 3.5ms, scope removal regresses, flush neutral, effect-count 0.4% recovery, lean-mount (D2+D3) zero signal. CREATE TRACK FULLY CLOSED — 1.49× gap is irreducible structural cost of fine-grained reactivity on these mechanics.** PT-1b Suspense+SWR named open. P-2c-B reopenable. PT-1a `resource` + P-2c-A1 LANDED. **Reactive-core contract v0.4.3.** P-1b CLOSED.
 - **Index-elision perf verdict (Commission 2):** T2-1 null (reorder-heavy path dominated by DOM, not indexSig); T2-3 memory: elided 2.154× vanilla vs non-elided 2.345× vanilla (−0.353 MB / −0.19×). Total memory lift (P-2c-A1 + elision): 4.641 → 4.003 MB. Lever stands on correctness + memory.
 - **Reconcile Lever A+B perf (2026-06-29):** remove-one script −60% (1.5→0.6ms, near vanilla 0.5ms); wall-clock −3% (paint-bound — 90% of 17ms confirmed by Probe 2 DevTools trace); swap no-regress; key-call 4n→n. C-paint CLEAR (staging no effect, layout intrinsic). C-create CLEAR on node-weight hypothesis; redirect to C-create-B (DOM-stamping census).
 - **Standing CP-2d board (current = post-A1 CP-2d-REMEASURE, L4633):** create-1k 1.78×, swap 0.29×, select 0.27×, update-10th 0.18×, remove-one **script-parity with vanilla** (0.6ms vs 0.5ms) / wall-clock 1.23× (paint-bound), memory **2.154×** (post-elision). Note: tight mutation baselines (0.29×/0.27×/0.18×) are JIT-warmed session-specific.
@@ -4913,3 +4913,50 @@ create-10k: as-is 243.9ms script / probe 243.7ms script (−0.2ms, noise). Memor
 **Root cause conclusion:** The 16.5ms create script gap vs Lit is in per-row FIXED cost — DOM stamp, `createRoot` owner-tree wiring, `valueSig` allocation, `walkPath` binding resolution. These are irreducible given nv's fine-grained reactive model. The reactive infrastructure that costs at create is precisely what enables nv's mutation wins (swap/select/update-10th). The create/mutation tradeoff is structural, not accidental.
 
 **Pivot: PT-1b / non-perf v0.5.0 tracks. No further create probes.**
+
+---
+
+### [2026-06-29] Probe G — Lean mount path (D2 inline first-run + D3 event delegation): **STAYS ~1.49×. CREATE INTRINSIC — CONSTRUCTION-LEVEL CONFIRMED.**
+
+**Probe G is measurement-only. No code landed. Throwaway worktree `probe-g-lean` deleted. Contract v0.4.3 unchanged.**
+
+**Premise:** Six prior probes tuned components (parse, scope, flush, effect count). Probe G asked the construction-mechanics question: can nv recompose mount mechanics like Solid does (1.04× create) and recover the gap without touching the reactive topology?
+
+**D1 (lean leaf node)** ruled OUT before measurement — single-shape ReactiveNode is architecturally inadmissible (prior ruling stands).
+
+**D2 — Inline first-run for wireText leaf bindings (fence-gated):**
+Replaced `effect() + enqueueEffect + scheduleFlush` with `_probeEagerEffect()` (runs compute inline, builds source edges, leaves node CLEAN). Applied to wireText only (id, label); classlist and wireEvent kept deferred. Trap guard CONFIRMED: `_probeEagerEffect` present and activated in bundle.
+
+Result: **zero signal**. Script time 23.5ms vs as-is 23.3ms — within noise. Scheduler enqueue overhead for 5000 effects is immaterial at 1k rows. Flush-timing is not the bottleneck (consistent with Probe E V2, which was also neutral at −1.7%).
+
+**D3 — Event delegation (2 delegated listeners replacing 2000 per-row addEventListener calls):**
+Replaced per-row `wireEvent` (1 effect + 1 addEventListener per handler) with `_probeDelegateEvent` routing through a single delegated listener at `<tbody>`. Trap guard CONFIRMED: both event bindings patched with `__probeDelegated:true`, delegation function confirmed present in bundle.
+
+Result: **zero signal + correctness regression**. V-G script = 23.3ms, identical to as-is. Eliminating 2000 `addEventListener` calls saves no detectable time. Additionally, D3 introduces a select correctness failure: benchmark 04 fails (`checkElementHasClass` returns `undefined`) because delegation traversal doesn't correctly route the `<a>` select click target. D3 is not commissionable.
+
+**M1: create-1k**
+| arm | total | script | vs as-is |
+|---|---|---|---|
+| as-is (K=5, 2000 addEventListener) | 50.5ms | 23.3ms | — |
+| V-D2 (eager wireText, events unchanged) | 51.0ms | 23.5ms | +1.0% (noise) |
+| V-G (D2+D3: 1 effect/row, 2 delegated listeners) | 50.5ms | 23.3ms | 0.0% |
+| Lit floor | 33.9ms | 6.9ms | — |
+
+Update-10th and swap: no regression (label remains reactive post-D2; source edges built correctly inline).
+
+**Probe G completes the create track exhaustion — 7 probes, all CLEAR:**
+| Probe | Axis | Verdict |
+|---|---|---|
+| C-paint | DOM staging / layout | CLEAR — 90% paint, intrinsic |
+| C-create | Binding-node weight | CLEAR — 0.8% of gap |
+| D (template cache) | parse-once WeakMap→Map | CLEAR — 3.5ms parse recovered; effect setup is the floor |
+| E (scope ablation) | createRoot per-row cost | INTRINSIC — removal regresses +10.7% |
+| F (effect count) | K reduction 5→4 | CLEAR — 0.4% recovery |
+| G D2 (inline first-run) | Flush scheduling overhead | CLEAR — zero signal |
+| G D3 (event delegation) | addEventListener count | CLEAR + correctness regression |
+
+**Root cause confirmed at construction-mechanics level:** The 16ms script gap is not in flush scheduling, effect count, event wiring, template parsing, scope allocation, or Solid-equivalent construction recomposition. It is in the irreducible per-row cost of fine-grained reactive graph wiring (node allocation, owner-tree linkage, source-edge building). D1 (node shape reduction) is the one remaining mechanical lever — and it is architecturally inadmissible.
+
+**"Create intrinsic" is now EARNED**, not assumed. Prior claim (after 6 probes) was premature; Probe G closes the construction-mechanics axis that six component probes couldn't reach. With D1 inadmissible and D2/D3 null, the 1.49× gap is structural and locked.
+
+**Pivot confirmed: PT-1b / non-perf tracks. P-2c-B reopenable for compile-time binding-count reduction (different axis — reducing IR binding count, not per-binding cost).**
