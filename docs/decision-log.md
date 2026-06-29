@@ -96,9 +96,9 @@ _Last updated: 2026-06-28 (index-elision Commission 1 landed at `a495716`; Templ
   and **P-2b** (fast dispose, ~0.35× addressable vs Svelte, mostly inherent) =
   characterized-not-commissioned. Goal: narrow create gap where provably free; do NOT
   trade mutation speed to chase Solid's create number.
-- **Live frontier (code/ruling):** index-elision **FULLY CLOSED** (Commission 1 LANDED `a495716`; Commission 2 MEASURED 2026-06-29). **Reconcile Lever A+B LANDED `79f3cb8`** (prefix/suffix skip + key-cache; staggered-program checkpoint reached — Lever C gated on reassessment). PT-1b Suspense+SWR named open. P-2c-B reopenable. PT-1a `resource` + P-2c-A1 LANDED. **Reactive-core contract v0.4.3.** P-1b CLOSED.
+- **Live frontier (code/ruling):** index-elision **FULLY CLOSED** (Commission 1 LANDED `a495716`; Commission 2 MEASURED 2026-06-29). **Reconcile Lever A+B LANDED `79f3cb8`** (prefix/suffix skip + key-cache). **Lever C probes BOTH CLEAR (2026-06-29)** — C-paint: intrinsic layout (90% paint, staging no effect); C-create: binding-node weight only 0.8% of gap (DOM-stamping dominates). **C-create redirect named: C-create-B (mountFragment/template-clone cost census).** PT-1b Suspense+SWR named open. P-2c-B reopenable. PT-1a `resource` + P-2c-A1 LANDED. **Reactive-core contract v0.4.3.** P-1b CLOSED.
 - **Index-elision perf verdict (Commission 2):** T2-1 null (reorder-heavy path dominated by DOM, not indexSig); T2-3 memory: elided 2.154× vanilla vs non-elided 2.345× vanilla (−0.353 MB / −0.19×). Total memory lift (P-2c-A1 + elision): 4.641 → 4.003 MB. Lever stands on correctness + memory.
-- **Reconcile Lever A+B perf (2026-06-29):** remove-one script −60% (1.5→0.6ms, near vanilla 0.5ms); wall-clock −3% (paint-bound — 87% of 17ms is browser layout/paint); swap no-regress (−5.6% improvement); update-10th no-regress (0.0%); key-call 4n→n. Lever C compute headroom is exhausted; any further remove-one gain requires addressing the paint/DOM-mutation axis, not reconcile-compute.
+- **Reconcile Lever A+B perf (2026-06-29):** remove-one script −60% (1.5→0.6ms, near vanilla 0.5ms); wall-clock −3% (paint-bound — 90% of 17ms confirmed by Probe 2 DevTools trace); swap no-regress; key-call 4n→n. C-paint CLEAR (staging no effect, layout intrinsic). C-create CLEAR on node-weight hypothesis; redirect to C-create-B (DOM-stamping census).
 - **Standing CP-2d board (current = post-A1 CP-2d-REMEASURE, L4633):** create-1k 1.78×, swap 0.29×, select 0.27×, update-10th 0.18×, remove-one **script-parity with vanilla** (0.6ms vs 0.5ms) / wall-clock 1.23× (paint-bound), memory **2.154×** (post-elision). Note: tight mutation baselines (0.29×/0.27×/0.18×) are JIT-warmed session-specific.
 - **v0.1.0 — TAG-READY.** CP-4 docs placed. Swap deficit is v0.5.0; no blocking items remain.
 - **Documentation sweep — CLOSED 2026-06-27 (verified at source).** Both authoring surfaces documented;
@@ -4740,3 +4740,67 @@ single-current-value invariant untouched.**
 3. **Lever C decision gate:** The compute lever is exhausted. Any further remove-one wall-clock improvement requires attacking the paint/DOM-mutation axis (fewer/batched DOM writes, document-fragment staging, detach-reattach) — which is architecturally adjacent to the binding-effect model (G0 HALT territory). Lever C-probe is NOT commissioned here. Commission only after architect + Kofi reassessment and a ceiling-probe scoped to the paint axis specifically.
 
 **No contract change. No IR change. Reactive-core contract v0.4.3 unchanged.**
+
+---
+
+### [2026-06-29] Lever C disambiguation probes — both CLEAR. C-create-B named as next gated probe.
+
+**Both probes are measurement-only. No code landed. No contract change. Reactive-core contract v0.4.3 unchanged.**
+
+---
+
+#### Probe 2 — C-paint CLEAR
+
+**Question:** Is remove-one's wall-clock gap reducible by DOM-mutation staging?
+
+**M3 (DOM work):** nv already issues the theoretical minimum: exactly 1 `removeChild`, 0 `insertBefore`. The suffix fixup loop (`interpreter.ts` L605–611) calls `updateIndex(rec, i)` 996 times — reactive signal writes only, zero DOM mutations. The LIS/insertBefore loop does not execute (band is empty for a single-deletion with stationary suffix).
+
+**M2 (staging variants):**
+| variant | remove-one wall-clock | delta |
+|---|---|---|
+| as-is (baseline) | 16.3ms | — |
+| detach tbody / mutate / reattach | 63.1ms | +287% (catastrophically worse — full 999-row repaint on reattach) |
+| display:none during mutation | 16.4ms | +0.6% (noise) |
+
+Detach-reattach makes things nearly 4× worse. The browser must repaint all 999 remaining rows on reattach — which is more work than the reflow-in-place of a single removal. display:none has no effect because the browser defers layout to the next frame regardless.
+
+**M1 (decomposition):** Script 0.6ms (3.7%) / Paint+Layout 14.7ms (90.2%) / Other ~1ms. A+B report's "87% paint" claim **CONFIRMED** (actual: 90.2%).
+
+**Verdict: CLEAR C-paint.** The layout cost is intrinsic to reflowing 999 rows in a live table. No JS-side lever exists. The A+B report's characterization was correct.
+
+---
+
+#### Probe 1 — C-create CLEAR (node-weight hypothesis); C-create-B named
+
+**Question:** What fraction of the create wall-clock deficit (nv 1.78× vs Lit 1.04×) is recoverable by making binding effects lighter?
+
+**M1 (node census):**
+- 7 ReactiveNodes per jfb row: 1 valueSig + 1 createRoot owner + 5 binding-effects (wireClassList×1, wireText×2, wireEvent×2). K=5.
+- ReactiveNode has 29 mandatory fields. A simple wireText effect uses 20; 9 are structurally dead for this binding class: `value, firstObserver, lastObserver, equals, errorHandler, syncTarget, externalUnsub, _seenBy, _seenRunId`.
+- Slim potential: 9 dead fields × 8 bytes × 5000 effects = ~360 KB in theory. Actual measured: ~140 bytes/node fully allocated.
+
+**M2 (wall-clock attribution):**
+| variant | create-1k | script time |
+|---|---|---|
+| nv as-is | 50.9ms | 23.4ms |
+| stub (wireText/Attr/Prop direct, −2000 effect nodes) | 50.5ms | ~23ms |
+| delta | **−0.4ms (~0.8%)** | negligible |
+| Lit floor | 33.9ms | 6.9ms |
+
+Eliminating ALL 5000 binding effects would save ~1ms — closing only ~6% of the 17ms gap vs Lit. **Binding-node weight is NOT the create bottleneck.**
+
+The gap lives entirely in script time: nv 23.4ms vs Lit 6.9ms = 16.5ms delta. This is DOM-stamping and per-row first-run flush, not reactive node allocation.
+
+**M3 (memory):** Stub saves 0.279 MB for −2000 nodes (~140 bytes/node). Extrapolated full 5-effect elimination: ~0.70 MB (meaningful for memory, not for create speed).
+
+**Redirect named — C-create-B: `mountFragment`/template-clone cost census.**
+Lit uses `<template>` cloning with no per-row reactive graph setup. nv's `mountFragment` stamps fresh DOM per row plus wires K binding-effects (first-run flush). The 16.5ms script gap is here. C-create-B should census: (a) time in `mountFragment` DOM-stamp vs `effect` setup, (b) whether a compile-time `<template>` clone path is feasible without contract change, (c) what first-run flush elimination would cost (requires static-after-first binding classification — potential contract adjacency). C-create-B is a probe, not a commission; escalate to architect before building.
+
+**Verdict: CLEAR C-create (node-weight hypothesis). C-create-B gated on architect reassessment.**
+
+---
+
+**Decision matrix outcome (both probes CLEAR):** Per `probe-lever-c.md` §Decision matrix:
+> *CLEAR / CLEAR → Both axes exhausted. nv is at its architectural performance frontier for this benchmark; the remaining create/remove gaps are intrinsic (DOM-clone, browser layout). Pivot to non-perf v0.5.0 tracks.*
+
+**However:** Probe 1 returned a named redirect (C-create-B), not a dead-end. The create deficit has a plausible addressable cause (DOM-stamping, not reactive overhead) that a further cheap probe could quantify. The decision to commission C-create-B or pivot to PT-1b/stores is the architect's call, now armed with this data.
