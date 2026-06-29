@@ -481,9 +481,9 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
     const prevKeyOrder = prevKeys
 
     // Compute nextKeys once — reused by collision check, Op 2 lookup, pos[] build, and reverse-walk.
-    // A parallel collision-check Map is built in the same pass so duplicate detection stays O(n).
+    // A parallel collision-check Set is built in the same pass so duplicate detection stays O(n).
     const nextKeys: Array<string | number> = new Array(next.length)
-    const nextKeySet = new Map<string | number, number>()
+    const nextKeySet = new Set<string | number>()
     for (let i = 0; i < next.length; i++) {
       // biome-ignore lint/style/noNonNullAssertion: bounded by next.length
       const item = next[i]!
@@ -492,19 +492,46 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
         throw new Error(`[nv/interpreter] ListBinding: duplicate key "${String(k)}" at index ${i}`)
       }
       nextKeys[i] = k
-      nextKeySet.set(k, i)
+      nextKeySet.add(k)
     }
 
-    // Op 2: remove stale records (key absent from next snapshot)
-    for (const [k, rec] of records) {
+    // Band computation: skip unchanged prefix and suffix rows (key AND reference must match).
+    // A key-only skip would silently drop content updates (new object, same key).
+    let start = 0
+    const minLen = Math.min(prevKeys.length, nextKeys.length)
+    while (
+      start < minLen &&
+      prevKeys[start] === nextKeys[start] &&
+      prevItems[start] === next[start]
+    )
+      start++
+    let prevEnd = prevKeys.length - 1
+    let nextEnd = nextKeys.length - 1
+    while (
+      prevEnd >= start &&
+      nextEnd >= start &&
+      prevKeys[prevEnd] === nextKeys[nextEnd] &&
+      prevItems[prevEnd] === next[nextEnd]
+    ) {
+      prevEnd--
+      nextEnd--
+    }
+
+    // Op 2: remove stale records — only band rows can be absent from next.
+    // Prefix/suffix keys are present in next by construction (they matched key+ref above).
+    for (let bi = start; bi <= prevEnd; bi++) {
+      // biome-ignore lint/style/noNonNullAssertion: bi is within prevKeys bounds
+      const k = prevKeys[bi]!
       if (!nextKeySet.has(k)) {
-        rec.dispose()
+        // biome-ignore lint/style/noNonNullAssertion: key was in records from prior reconcile
+        records.get(k)!.dispose()
         records.delete(k)
       }
     }
 
-    // Ops 1/3/4: create new items; update value/index for kept items
-    for (let i = 0; i < next.length; i++) {
+    // Ops 1/3/4: create new items; update value/index for kept items (band only).
+    // Prefix/suffix rows are reference-identical → no value/index change possible.
+    for (let i = start; i <= nextEnd; i++) {
       // biome-ignore lint/style/noNonNullAssertion: bounded by next.length
       const item = next[i]!
       // biome-ignore lint/style/noNonNullAssertion: nextKeys[i] set in the pass above
@@ -586,15 +613,16 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
       prevIndex.set(prevKeyOrder[i]!, i)
     }
 
-    // For each position in next, record its previous index (-1 = new key, always moved).
+    // For each band position in next, record its previous index (-1 = new key, always moved).
+    // Only band rows need ordering; prefix/suffix are already in place.
     const n = next.length
     const pos = new Array<number>(n)
-    for (let i = 0; i < n; i++) {
+    for (let i = start; i <= nextEnd; i++) {
       // biome-ignore lint/style/noNonNullAssertion: nextKeys[i] set in the first pass above
       pos[i] = prevIndex.get(nextKeys[i]!) ?? -1
     }
 
-    // O(n log n) patience-sort LIS over pos[], ignoring new keys (pos === -1).
+    // O(n log n) patience-sort LIS over band portion of pos[], ignoring new keys (pos === -1).
     // tails[i] = smallest tail value of any increasing subsequence of length i+1.
     // pred[i] = predecessor index in next[] for reconstructing the LIS.
     const tails: number[] = []
@@ -602,7 +630,7 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
     const pred = new Array<number>(n).fill(-1)
     const posInLis = new Array<number>(n).fill(-1) // tails[] slot this next-position occupies
 
-    for (let i = 0; i < n; i++) {
+    for (let i = start; i <= nextEnd; i++) {
       const p = pos[i]
       if (p === undefined || p === -1) continue // new key — not eligible for stable run
 
@@ -637,9 +665,16 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
       }
     }
 
-    // Reverse walk: insertBefore nodes NOT in the LIS that aren't already in position.
-    let ref: Node = anchorNode
-    for (let i = n - 1; i >= 0; i--) {
+    // Reverse walk: insertBefore band nodes NOT in the LIS that aren't already in position.
+    // ref starts at the first DOM node of the suffix (prevKeyOrder[prevEnd+1]), or anchorNode
+    // if there is no suffix. Suffix nodes are guaranteed still in records (matched key+ref above).
+    const suffixStartKey = prevEnd + 1 < prevKeyOrder.length ? prevKeyOrder[prevEnd + 1] : undefined
+    let ref: Node =
+      suffixStartKey !== undefined
+        ? // biome-ignore lint/style/noNonNullAssertion: suffix key was present in prev and unchanged
+          records.get(suffixStartKey)!.rootEl
+        : anchorNode
+    for (let i = nextEnd; i >= start; i--) {
       // biome-ignore lint/style/noNonNullAssertion: nextKeys[i] set in the first pass above
       const k = nextKeys[i]!
       // biome-ignore lint/style/noNonNullAssertion: key was just set above (op1) or existed
