@@ -132,6 +132,7 @@ export type ThunkSource =
       keySrc: string
       bodyThunks: ThunkSource[]
       letNames: string[]
+      itemReadsIndex: boolean
     }
   | {
       kind: 'classlist'
@@ -503,6 +504,7 @@ interface NvWalkedEach {
   letNames: string[]
   bodyIR: TemplateIR
   bodyHoleIndices: number[]
+  itemReadsIndex: boolean
 }
 
 interface NvWalkResult {
@@ -600,13 +602,31 @@ function walkNvNodeList(
         )
         for (const idx of bodyHoleIndices) consumed.add(idx)
 
+        // Compute itemReadsIndex: true iff the body (not the key) references the index binding
+        const indexName = letNames[1] // undefined if no second let-binding
+        const itemReadsIndex =
+          indexName === undefined
+            ? false
+            : bodyHoleIndices.some((idx) => {
+                const e = holeExprs[idx]
+                return e !== undefined && exprReadsSignal(e, new Set([indexName]))
+              })
+
         // Replace <template data-nv-each> element with anchor comment
         const listIndex = lists.length
         const anchor = doc.createComment(`nv-list-${listIndex}`)
         eachEl.parentNode?.replaceChild(anchor, eachEl)
         const anchorPath = computePath(anchor, root)
 
-        lists.push({ anchorPath, itemsHoleIdx, keyHoleIdx, letNames, bodyIR, bodyHoleIndices })
+        lists.push({
+          anchorPath,
+          itemsHoleIdx,
+          keyHoleIdx,
+          letNames,
+          bodyIR,
+          bodyHoleIndices,
+          itemReadsIndex,
+        })
         return // don't recurse into <each> body (already processed via .content)
       }
 
@@ -828,6 +848,7 @@ function pushListBinding(
     items: (() => []) as () => readonly unknown[],
     key: ((_item: unknown, i: number) => i) as (item: unknown, i: number) => string | number,
     itemTemplate: (_valueSig, _indexSig?) => wl.bodyIR,
+    itemReadsIndex: wl.itemReadsIndex,
   } satisfies ListBinding)
 }
 
@@ -1053,6 +1074,7 @@ interface PendingNvEachInfo {
   keyHoleIdx: number
   letNames: string[]
   bodyHoleIndices: number[]
+  itemReadsIndex: boolean
 }
 
 interface ProcessResult {
@@ -1240,6 +1262,7 @@ function processHtmlTemplate(
       keyHoleIdx: wl.keyHoleIdx,
       letNames: wl.letNames,
       bodyHoleIndices: wl.bodyHoleIndices,
+      itemReadsIndex: wl.itemReadsIndex,
     })),
     consumedByComponent,
     diagnostics: processdiagnostics,
@@ -2840,6 +2863,7 @@ function computeBindingThunks(
       keySrc,
       bodyThunks,
       letNames: pe.letNames,
+      itemReadsIndex: pe.itemReadsIndex,
     }
   })
 
