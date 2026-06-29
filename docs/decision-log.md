@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-28 (P-2c-B closed, ceiling 0; index-elision opens). Contract **v0.4.3** · Template-IR **v0.4.2**._
+_Last updated: 2026-06-28 (index-elision spec approved, commission-ready; Template-IR v0.4.3 on land). Contract **v0.4.3** · Template-IR **v0.4.2** (→v0.4.3 on index-elision land)._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
 > `decision-log-archive.md` (moved 2026-06-21). This snapshot is the resolved
@@ -96,7 +96,7 @@ _Last updated: 2026-06-28 (P-2c-B closed, ceiling 0; index-elision opens). Contr
   and **P-2b** (fast dispose, ~0.35× addressable vs Svelte, mostly inherent) =
   characterized-not-commissioned. Goal: narrow create gap where provably free; do NOT
   trade mutation speed to chase Solid's create number.
-- **Live frontier (code/ruling):** index-elision (next create-time lever — design-gate-open, read `wireList`/`<each>` IR seams → spec) and PT-1b Suspense+SWR (named open — renderer-gating cost unread). P-2c-B CLOSED (ceiling 0, SHA cce6423). PT-1a `resource` + P-2c-A1 LANDED. Contract v0.4.3. P-1b CLOSED. P-2a/b characterized-not-commissioned.
+- **Live frontier (code/ruling):** index-elision (SPEC APPROVED, commission-ready — two-tier gate, Template-IR v0.4.3, lands on Tier-1 correctness; see Log [2026-06-28]) and PT-1b Suspense+SWR (named open — renderer-gating cost unread). P-2c-B CLOSED (ceiling 0, SHA cce6423). PT-1a `resource` + P-2c-A1 LANDED. Contract v0.4.3. P-1b CLOSED. P-2a/b characterized-not-commissioned.
 - **v0.1.0 — TAG-READY.** CP-4 docs placed. Swap deficit is v0.5.0; no blocking items remain.
 - **Documentation sweep — CLOSED 2026-06-27 (verified at source).** Both authoring surfaces documented;
   section-based site matching neutro/form; MIT LICENSE. Playground (DOC-2) → v0.5.0 Track T-8 (needs
@@ -192,14 +192,19 @@ _Last updated: 2026-06-28 (P-2c-B closed, ceiling 0; index-elision opens). Contr
   empty. Not built (would cost a new STATIC verdict + emitter plumbing + Template-IR bump to
   elide zero allocations). Counter validated (TC-P2CB-COUNTER-INERT proves it fires; jfb 0 is
   a true zero). Not reopened absent a mostly-static-template workload.
-- **Index-elision (elide `indexSig` for rows that never read index) — NEXT CREATE-TIME LEVER,
-  design-gate-open [2026-06-28].** Promoted from B-redirect to measured-superior: jfb `<each>`
-  binds only `item`, never index, yet `wireList` allocates `indexSig` unconditionally
-  (interpreter.ts L499) + writes it on every reorder (L547). Beats B on three axes — fixed
-  1-of-6 nodes/row for 100% of qualifying rows (vs B's 0-of-6), a mutation-path win (drops the
-  reorder `.set()`), and a simpler row-level "reads index?" predicate. Soundness: elide only
-  when the item template provably never reads index (ACCEPT-biased; unsure ⇒ keep). Design gate
-  not yet opened (read `wireList` + `<each>` IR seams; decide Template-IR carrier). Not specced.
+- **Index-elision (elide `indexSig` for rows that never read index) — SPEC APPROVED, COMMISSION-
+  READY [2026-06-28].** Design gate opened + ruled (see Log). Verdict: optimization on a
+  correctness floor, two-tier ordered gate. **Predicate** = strong (bound-but-unread),
+  parser-computed via `isReactiveExpr` erasure, ACCEPT-biased (`key=`-index is not a body
+  read). **Carrier** = `ListBinding.itemReadsIndex?` (absent|true⇒allocate; false⇒may elide);
+  additive **Template-IR v0.4.3**, reactive-core contract unchanged, closure axiom clean.
+  **Mechanism** = branch-hoist (shorter reconcile body for elided lists; no per-row branch),
+  narrower emitted factory (no `indexSig` mention). **Create ceiling measured-small** (sub-5%
+  of create wall-clock, SPECULATION; redirect for create = the dominant createRoot/wiring sixth
+  vs Lit ~0.56×, or leaner-record vs Solid ~0.70×). **Lands on Tier-1 (correctness) alone**
+  — provably-unread allocation removed, pays down memory deficit (2.4× vanilla); Tier-2 (perf)
+  is a claim on a reorder-heavy workload, not a landing precondition. Spec `spec-index-elision.md`.
+  Not yet commissioned to CC.
 - **PT-1a-syntax — async-read compile-time lowering — DESIGN-OPEN [2026-06-27].**
   Resource read in template position auto-lowers to loading/error/data control-flow
   (the nv-shaped ergonomic win: compiler exploits resource-vs-signal info Solid
@@ -3820,6 +3825,110 @@ untouched. Contract v0.4.3.** Carried open for PT-1b: a `derived()`-scope call p
 `getOwner()` guard but is semantically wrong (the internal effect would be disposed/re-created
 each `derived` re-eval); JSDoc warns, a runtime guard would need an owner-kind check the core
 doesn't currently expose — note for PT-1b, not a PT-1a defect.
+
+---
+
+### [2026-06-28] Index-elision — design gate OPENED + SPEC APPROVED. Verdict: optimization-on-a-correctness-floor, two-tier ordered gate. Predicate = strong (bound-but-unread), parser-computed, ACCEPT-biased. Carrier = `ListBinding.itemReadsIndex?` (Template-IR v0.4.2→v0.4.3, additive; reactive-core contract unchanged). Lands on Tier-1 (correctness) alone; Tier-2 (perf) is a claim, not a landing precondition. Read at SHA `dc4e4a8`.
+
+**Workstream:** WS3 renderer/IR + WS2 compiler predicate. Architect read the seams at
+`dc4e4a88bea58dbe41bbdfaa6f70df1d16d914fe`: `wireList` (interpreter.ts L498/L546–548),
+`ListBinding` (ir.ts L176), parser `<each>` let-handling + `isReactiveExpr` erasure
+(nv-parser.ts L585/L806/L1855), emitter list fork (nv-emitter.ts L177–184), FE-equivalence
+oracle list case (test/renderer/ir-equivalence.ts L141). Branch hygiene confirmed: A1
+(`d142919`), PT-1a (`9017db2`), B-closure (`cce6423`) all on main; HEAD `dc4e4a8`.
+
+**Frontier confirmed by code, not queue.** The queue named index-elision next; the seams
+confirm the premise (jfb `<each>` binds `let={item}`, yet `wireList` allocates `indexSig`
+unconditionally and index-tracks every row every reconcile) and reframe the predicate and
+the gate.
+
+**Predicate (ruled): strong form — bound-but-unread, ACCEPT-biased.** Qualifies for elision
+iff the item template provably never reads index. Computed in the parser: `letNames.length < 2`
+qualifies trivially; `>= 2` runs `isReactiveExpr(hole, {all:{indexName}})` (L1855 erasure)
+over every body hole, qualifies iff none reference index. Erasure over-reports (keeps on
+doubt). Strictly dominates the weak "no second let-name" form — one commission covers both.
+`key=`-uses-index is NOT a body read: `key` runs in the reconcile effect with the live loop
+`i` (L489), never `indexSig` (L506) — so it does not force allocation. Soundness fence
+(FIRE): unsure ⇒ keep `indexSig`; a false-elide renders the wrong index.
+
+**IR carrier (ruled): `ListBinding.itemReadsIndex?: boolean`** — not inferable from placed IR
+(the factory always took both signals; the runtime IR dropped the parser's knowledge).
+Absent|true ⇒ allocate (conservative); `false` ⇒ may elide. Default-absent preserves
+byte-compat and keeps the soundness fence at the IR layer (an old/partial producer never
+false-elides). `itemTemplate`'s second param becomes optional. **Template-IR v0.4.2→v0.4.3,
+additive. Reactive-core contract unchanged — no primitive touched; closure axiom clean.**
+
+**Mechanism (ruled): branch-HOIST, collapse not patch.** Decision is fixed per list
+instance, hoisted out of the per-row loop — no per-row branch added to the reconcile hot
+path. Elided lists run a strictly *shorter* reconcile body (no `lastIndex` compare, no field,
+no `.set()`), byte-identical for non-qualifying lists. Emitter emits a narrower factory
+(`(valueSig) =>` … `{ item: () => valueSig() }`, no `index` key, no `indexSig` mention) —
+the factory shape itself encodes the elision; no sentinel node, no shared global, no nullable
+deref (the body provably never references index). One factory contract, arity agreed between
+emitter and interpreter. The lever is a **compiled-`.nv`-path optimization only**: the tagged-
+template `each()` path has no compile step, cannot run the predicate, and leaves the carrier
+absent (⇒ allocate, unchanged). The benchmarked jfb app is `.nv`-authored (Log 2026-06-26), so
+the lever fires on the measured workload. FE-equivalence oracle **does not** compare
+`itemReadsIndex` — the two front-ends legitimately disagree on it (`.nv` may prove `false`;
+tagged-template leaves it absent); it is an optimization hint, not structural, and excluding it
+cannot mask a real divergence (no carrier value changes rendered output).
+
+**Ceiling — measured-small on create; lever justified off the create axis.** From CP-2d
+real-browser attribution (Log [2026-06-28] CP-2d deficit analysis): create's reactive-graph-
+setup slice is ~0.56× of vanilla (nv 1.74× − Lit 1.18×), containing ~6 reactive nodes/row
+(2 signals + 1 item-root effect + K=3 binding-effects) + createRoot + owner linkage.
+`indexSig` is 1 of the 2 cheapest nodes (a plain value/index signal wires no edges; the
+binding-effects dominate the slice). First-order create ceiling: well under (0.56×÷6) ≈ 0.09×
+of vanilla, i.e. **sub-5% of nv's create wall-clock — and plausibly less** (signals cheaper
+than edge-wiring effects). SPECULATION-tagged: the within-slice split (plain-signal vs
+edge-wiring cost) is unmeasured. **On create alone this is characterize-not-build, like B**;
+the named redirect for create is the dominant sixth — the per-item createRoot/effect-wiring
+slice (~0.56× vs Lit) or the leaner-record direction (~0.70× vs Solid). **Unlike B (create-
+only, ceiling 0), index-elision has a second axis: it removes provably-dead work** (unread
+`indexSig` alloc + per-reconcile index-tracking on 100% of qualifying rows) and a leaner
+reconcile body — aligned with nv's mutation-first identity, and it pays down the named memory
+deficit (2.4× vanilla).
+
+**Verdict (ruled): optimization on a correctness floor; lands on Tier 1.** Steelman of "hold
+create hard" accepted in part — a gate of near-unfailable items is bureaucracy (Gate-P), and
+the reframe must not rest a perf claim on an unmeasured axis. Resolution: **two-tier ordered
+gate.** Correctness is the precondition; performance is measured only after, on a workload
+that actually loads the lever, and the log records the truth (improvement or null) without
+dressing.
+
+- **Tier 1 (correctness — HARD precondition; lever does not land if any fails):** T1-1
+  predicate soundness over a permutation/usage corpus incl. nested-`<each>`/component/slot
+  index reads (none elided) + real-browser index-correctness for read cases (FIRE);
+  T1-2 provable absence (`indexSig` absent in emitted module at SHA; `ItemRecord.indexSig
+  === undefined` interpreter-side); T1-3 full-board no-regress ±2% (a deletion that slows
+  any op = stray hot-path branch); T1-4 FE-equivalence over the corpus; T1-5 soundness
+  fallback (absent carrier ⇒ allocate). **All pass ⇒ lever LANDS, regardless of Tier 2** —
+  removing provably-unread allocation is correct and reduces live node count; the IR surface
+  is justified by correct-deletion-plus-memory alone (architect ruling, this entry).
+- **Tier 2 (performance — claim only, NOT a landing precondition):** standard jfb does not
+  load the index path (swap reorders 2 rows; update-10th reorders none; select is a class
+  change). T2-1 reorder-heavy workload (architect-locked: 1000 rows, reverse-then-restore,
+  ≥25-sample median, warm-up discard 5, Chrome 149/M2/harness `4fbccf55`, same-session
+  elided-vs-non-elided) where index-tracking fires ~1000×/reconcile; T2-2 create
+  characterization at 1k AND 10k (catch GC/allocator non-linearity at scale — characterization,
+  not pass/fail); T2-3 memory delta (~1000 fewer nodes). **Outcomes, all logged honestly:**
+  improvement on T2-1 → logged as a reorder-heavy-workload win (NOT a standard-jfb-swap
+  claim); null on T2-1 → "perf delta below measurement floor on the loading workload; lever
+  lands on Tier 1 (correct deletion + memory)," no perf claim made.
+
+**Why not B-style kill.** B would add machinery to elide *zero* allocations on jfb (reach
+empty). Index-elision *removes* an allocation that demonstrably exists on 100% of jfb rows
+(reach total) and removes per-reconcile index-tracking. Different facts; not special pleading.
+
+**Spec:** `spec-index-elision.md` (APPROVED, this session). **Commission → CC** with the
+two-tier gate; same-session before/after perf gate mandatory; JSDOM/linkedom barred from the
+perf verdict path; deterministic node counts (T2-3) sandbox-valid.
+
+**Open (carried to spec/commission):** within-graph-setup-slice split (plain-signal vs
+edge-wiring cost) unmeasured — the same-session before/after retires it. 10k non-linearity
+genuinely open — T2-2 answers it. **Process:** spec + this design-gate analysis recommended
+to land in `docs/design/` (resolves the A1/PT-1a log-only backfill question); architect-
+process decision, not part of commission correctness.
 
 ---
 
