@@ -1167,7 +1167,7 @@ test('TC-A1-DIFF-CONF  reactive effects survive harvest; inert effects are remov
 /** Outer template whose single binding is a ListBinding. */
 function makeListIR(
   items: () => readonly Item[],
-  makeItem: (vs: WritableSignal<unknown>, is: WritableSignal<number>) => TemplateIR,
+  makeItem: (vs: WritableSignal<unknown>, is?: WritableSignal<number>) => TemplateIR,
 ): TemplateIR {
   return {
     id: 'list-test',
@@ -1189,7 +1189,7 @@ function makeListIR(
 }
 
 /** Item template: <li> with text bound to valueSig().label */
-function liTextTemplate(vs: WritableSignal<unknown>, _is: WritableSignal<number>): TemplateIR {
+function liTextTemplate(vs: WritableSignal<unknown>, _is?: WritableSignal<number>): TemplateIR {
   return {
     id: 'li-text',
     shape: { html: '<li><!--nv-0--></li>', bindingPaths: [[0, 0]] },
@@ -1204,7 +1204,7 @@ function liTextTemplate(vs: WritableSignal<unknown>, _is: WritableSignal<number>
 }
 
 /** Item template: <li> with text bound to valueSig().label + " #" + indexSig() */
-function liIndexTemplate(vs: WritableSignal<unknown>, is: WritableSignal<number>): TemplateIR {
+function liIndexTemplate(vs: WritableSignal<unknown>, is?: WritableSignal<number>): TemplateIR {
   return {
     id: 'li-index',
     shape: { html: '<li><!--nv-0--></li>', bindingPaths: [[0, 0]] },
@@ -1212,7 +1212,7 @@ function liIndexTemplate(vs: WritableSignal<unknown>, is: WritableSignal<number>
       {
         kind: 'text',
         pathIndex: 0,
-        expr: () => `${(vs() as Item).label}#${is()}`,
+        expr: () => `${(vs() as Item).label}#${is!()}`,
       } satisfies TextBinding,
     ],
   }

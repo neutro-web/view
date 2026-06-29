@@ -67,12 +67,12 @@ type ThunkBodyFactory = (
 
 function variantAAdapter(
   bodyFactory: ThunkBodyFactory,
-): (vs: WritableSignal<unknown>, is: WritableSignal<number>) => TemplateIR {
-  return (vs, is) => {
+): (vs: WritableSignal<unknown>, is?: WritableSignal<number>) => TemplateIR {
+  return (vs, is?) => {
     // Body factory only sees read-only thunks — it cannot call .set()
     const props = {
       item: () => vs(),
-      index: () => is(),
+      index: () => is!(),
     }
     return bodyFactory(props)
   }
@@ -112,7 +112,7 @@ function liIndexBodyA(props: { item: () => unknown; index: () => number }): Temp
 
 // ── Variant B body factories (status quo — writable signals exposed directly) ─
 
-function liTextBodyB(vs: WritableSignal<unknown>, _is: WritableSignal<number>): TemplateIR {
+function liTextBodyB(vs: WritableSignal<unknown>, _is?: WritableSignal<number>): TemplateIR {
   return {
     id: 'li-text-b',
     shape: { html: '<li><!--nv-0--></li>', bindingPaths: [[0, 0]] },
@@ -126,7 +126,7 @@ function liTextBodyB(vs: WritableSignal<unknown>, _is: WritableSignal<number>): 
   }
 }
 
-function liIndexBodyB(vs: WritableSignal<unknown>, is: WritableSignal<number>): TemplateIR {
+function liIndexBodyB(vs: WritableSignal<unknown>, is?: WritableSignal<number>): TemplateIR {
   return {
     id: 'li-index-b',
     shape: { html: '<li><!--nv-0--></li>', bindingPaths: [[0, 0]] },
@@ -134,7 +134,7 @@ function liIndexBodyB(vs: WritableSignal<unknown>, is: WritableSignal<number>): 
       {
         kind: 'text',
         pathIndex: 0,
-        expr: () => `${(vs() as Item).label}#${is()}`,
+        expr: () => `${(vs() as Item).label}#${is!()}`,
       } satisfies TextBinding,
     ],
   }
@@ -144,7 +144,7 @@ function liIndexBodyB(vs: WritableSignal<unknown>, is: WritableSignal<number>): 
 
 function makeListIR(
   items: () => readonly Item[],
-  makeItem: (vs: WritableSignal<unknown>, is: WritableSignal<number>) => TemplateIR,
+  makeItem: (vs: WritableSignal<unknown>, is?: WritableSignal<number>) => TemplateIR,
 ): TemplateIR {
   return {
     id: 'list-spike',
@@ -304,7 +304,7 @@ for (const backend of BACKENDS) {
       let removedVsSig: WritableSignal<unknown> | null = null
       const irWithSpy = makeListIR(
         () => items(),
-        (vs, is) => {
+        (vs, is?) => {
           if ((vs() as Item).id === 2) removedVsSig = vs
           return v.liText(vs, is)
         },
@@ -464,7 +464,7 @@ for (const backend of BACKENDS) {
       // wrapping the same adapter pattern
       const externalTemplate = (
         vs: WritableSignal<unknown>,
-        _is: WritableSignal<number>,
+        _is?: WritableSignal<number>,
       ): TemplateIR => ({
         id: 'li-ext',
         shape: { html: '<li><!--nv-0--></li>', bindingPaths: [[0, 0]] },

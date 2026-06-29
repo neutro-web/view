@@ -63,7 +63,7 @@ function makeSharedSignalListIR(
         pathIndex: 0,
         items: items as () => readonly unknown[],
         key: (item) => (item as Item).id,
-        itemTemplate: (_vs: WritableSignal<unknown>, _is: WritableSignal<number>): TemplateIR => ({
+        itemTemplate: (_vs: WritableSignal<unknown>, _is?: WritableSignal<number>): TemplateIR => ({
           id: 'spike-li',
           shape: { html: '<li><!--nv-0--></li>', bindingPaths: [[0, 0]] },
           bindings: [

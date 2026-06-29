@@ -170,14 +170,26 @@ export interface WritableSignal<T> {
 /**
  * Keyed list reconciliation. One reconcile effect + per-item createRoot (§6).
  * itemTemplate is a factory called per item: receives per-item valueSig and
- * indexSig; returns a TemplateIR whose expressions close over those signals.
+ * optional indexSig; returns a TemplateIR whose expressions close over those signals.
  * The renderer supplies the signals; the compiler emits references to them.
  */
 export type ListBinding = BaseBinding & {
   kind: 'list'
   items: ReactiveExpr<readonly unknown[]>
   key: (item: unknown, index: number) => string | number
-  itemTemplate: (valueSig: WritableSignal<unknown>, indexSig: WritableSignal<number>) => TemplateIR
+  /**
+   * Factory called per item. Receives per-item valueSig (always) and optional indexSig.
+   * Returns a TemplateIR whose expressions close over those signals.
+   * See itemReadsIndex for index-elision semantics.
+   */
+  itemTemplate: (valueSig: WritableSignal<unknown>, indexSig?: WritableSignal<number>) => TemplateIR
+  /** v0.4.3 — index-elision. true|absent ⇒ item template may read index;
+   * renderer MUST allocate indexSig (conservative default). false ⇒ parser
+   * proved the body never reads index; renderer MAY elide indexSig.
+   * Absent defaults to the conservative (allocate) branch — preserves byte-compat
+   * for any producer that does not set it, and keeps the soundness fence at the IR layer.
+   */
+  itemReadsIndex?: boolean
 }
 
 // SyncBinding is an external-source sync (§8.5); contributes no §8.5.2 write-graph edge.

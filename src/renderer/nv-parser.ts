@@ -827,7 +827,7 @@ function pushListBinding(
     pathIndex,
     items: (() => []) as () => readonly unknown[],
     key: ((_item: unknown, i: number) => i) as (item: unknown, i: number) => string | number,
-    itemTemplate: (_valueSig, _indexSig) => wl.bodyIR,
+    itemTemplate: (_valueSig, _indexSig?) => wl.bodyIR,
   } satisfies ListBinding)
 }
 

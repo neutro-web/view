@@ -283,7 +283,7 @@ test('TC-EA-06  each(): unmount — no reactive leaks', () => {
 test('TC-EA-G4  fail-shows-teeth: snapshot adapter freezes DOM on value change', () => {
   const items = signal<Item[]>([{ id: 1, label: 'Initial' }])
   // Deliberately WRONG item template: snapshots value at row-creation time instead of reading signal reactively
-  const brokenItemTemplate = (vs: WritableSignal<unknown>, _is: WritableSignal<number>) => {
+  const brokenItemTemplate = (vs: WritableSignal<unknown>, _is?: WritableSignal<number>) => {
     const snapshottedItem = vs() as Item // snapshot at row-creation time — NOT reactive
     return html`<li>${() => snapshottedItem?.label ?? '?'}</li>`
   }

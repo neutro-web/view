@@ -737,8 +737,8 @@ function buildSlotContentIR(
       pathIndex,
       items,
       key,
-      itemTemplate: (valueSig, indexSig) =>
-        factory({ item: () => valueSig(), index: () => indexSig() }),
+      itemTemplate: (valueSig, indexSig?) =>
+        factory({ item: () => valueSig(), index: () => indexSig?.() ?? 0 }),
     } satisfies ListBinding)
   }
 
@@ -965,8 +965,8 @@ export function createHtmlTag(document: Document) {
         pathIndex,
         items,
         key,
-        itemTemplate: (valueSig, indexSig) =>
-          factory({ item: () => valueSig(), index: () => indexSig() }),
+        itemTemplate: (valueSig, indexSig?) =>
+          factory({ item: () => valueSig(), index: () => indexSig?.() ?? 0 }),
       } satisfies ListBinding)
     }
 
