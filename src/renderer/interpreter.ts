@@ -468,31 +468,36 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
 
   // Tracks the key sequence from the previous reconcile in DOM order.
   // Map insertion order never reorders, so this must be maintained separately.
-  let prevOrder: Array<string | number> = []
+  let prevKeys: Array<string | number> = []
+  // Tracks the item array from the previous reconcile; enables reference-compare in prefix/suffix skip (Task 2).
+  let prevItems: readonly unknown[] = []
   const pendingSweep: Array<ReturnType<typeof getOwner>> = []
 
   effect(() => {
     const next = binding.items() // the only tracked read in this effect
 
-    // prevOrder holds the key sequence as it was after the last reconcile (= current DOM order).
+    // prevKeys holds the key sequence as it was after the last reconcile (= current DOM order).
     // Used by the LIS ordering pass to derive each kept node's prior relative position.
-    const prevKeyOrder = prevOrder
+    const prevKeyOrder = prevKeys
 
-    // Key collision detection: duplicate key in one snapshot → error-route (§4.4)
-    const nextKeys = new Map<string | number, number>()
+    // Compute nextKeys once — reused by collision check, Op 2 lookup, pos[] build, and reverse-walk.
+    // A parallel collision-check Map is built in the same pass so duplicate detection stays O(n).
+    const nextKeys: Array<string | number> = new Array(next.length)
+    const nextKeySet = new Map<string | number, number>()
     for (let i = 0; i < next.length; i++) {
       // biome-ignore lint/style/noNonNullAssertion: bounded by next.length
       const item = next[i]!
       const k = binding.key(item, i)
-      if (nextKeys.has(k)) {
+      if (nextKeySet.has(k)) {
         throw new Error(`[nv/interpreter] ListBinding: duplicate key "${String(k)}" at index ${i}`)
       }
-      nextKeys.set(k, i)
+      nextKeys[i] = k
+      nextKeySet.set(k, i)
     }
 
     // Op 2: remove stale records (key absent from next snapshot)
     for (const [k, rec] of records) {
-      if (!nextKeys.has(k)) {
+      if (!nextKeySet.has(k)) {
         rec.dispose()
         records.delete(k)
       }
@@ -502,7 +507,8 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
     for (let i = 0; i < next.length; i++) {
       // biome-ignore lint/style/noNonNullAssertion: bounded by next.length
       const item = next[i]!
-      const k = binding.key(item, i)
+      // biome-ignore lint/style/noNonNullAssertion: nextKeys[i] set in the pass above
+      const k = nextKeys[i]!
       const existing = records.get(k)
 
       if (existing === undefined) {
@@ -584,9 +590,8 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
     const n = next.length
     const pos = new Array<number>(n)
     for (let i = 0; i < n; i++) {
-      // biome-ignore lint/style/noNonNullAssertion: bounded by next.length
-      const k = binding.key(next[i]!, i)
-      pos[i] = prevIndex.get(k) ?? -1
+      // biome-ignore lint/style/noNonNullAssertion: nextKeys[i] set in the first pass above
+      pos[i] = prevIndex.get(nextKeys[i]!) ?? -1
     }
 
     // O(n log n) patience-sort LIS over pos[], ignoring new keys (pos === -1).
@@ -635,8 +640,8 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
     // Reverse walk: insertBefore nodes NOT in the LIS that aren't already in position.
     let ref: Node = anchorNode
     for (let i = n - 1; i >= 0; i--) {
-      // biome-ignore lint/style/noNonNullAssertion: bounded by next.length
-      const k = binding.key(next[i]!, i)
+      // biome-ignore lint/style/noNonNullAssertion: nextKeys[i] set in the first pass above
+      const k = nextKeys[i]!
       // biome-ignore lint/style/noNonNullAssertion: key was just set above (op1) or existed
       const rec = records.get(k)!
       if (!lisSet.has(i) && rec.rootEl.nextSibling !== ref) {
@@ -645,8 +650,10 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
       ref = rec.rootEl
     }
 
-    // Record the new DOM sequence for the next reconcile's LIS position lookup.
-    prevOrder = next.map((item, i) => binding.key(item, i))
+    // Record the new DOM sequence and item array for the next reconcile.
+    // Reuse already-computed nextKeys — avoids a redundant key pass + allocation.
+    prevKeys = nextKeys
+    prevItems = next
 
     // P-2c-A1: schedule post-flush harvest of inert per-binding effects.
     if (pendingSweep.length > 0) {
