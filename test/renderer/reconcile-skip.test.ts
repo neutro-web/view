@@ -330,6 +330,31 @@ test('T1-2 op-corpus: identity (set to same array reference — no-op reconcile)
   rmParent(parent)
 })
 
+test('T1-2 op-corpus: shuffle (n=100, odd-indices-reversed then even-indices-forward)', () => {
+  const n = 100
+  const base: Item[] = Array.from({ length: n }, (_, i) => ({ id: i, label: `item-${i}` }))
+  const items = signal<Item[]>(base)
+  const ir = makeListIR(() => items(), liTextTemplate)
+  const parent = mkParent()
+  const dispose = mount(ir, parent, document)
+  flushSync()
+
+  // Deterministic non-contiguous permutation:
+  // odd indices in reverse order, then even indices in forward order.
+  const odds = base.filter((_, i) => i % 2 !== 0).reverse()
+  const evens = base.filter((_, i) => i % 2 === 0)
+  const next: Item[] = [...odds, ...evens]
+
+  items.set(next)
+  flushSync()
+
+  expect(liOrder(parent), 'shuffle n=100: correct order + content').toEqual(
+    next.map((it) => it.label),
+  )
+  dispose()
+  rmParent(parent)
+})
+
 // ── T1-3 (degenerate) ─────────────────────────────────────────────────────────
 //
 // First reconcile: prevKeys is empty, so the band is [0, n-1] (full scan).
@@ -357,7 +382,7 @@ test('T1-3 degenerate: first reconcile with no prior state renders n=5 items cor
 // Any touch to src/core/, docs/, or src/renderer/ir.ts is a contract violation.
 
 test('T1-4 no-forbidden-diff: prefix/suffix skip changeset confined to interpreter.ts + tests', () => {
-  const raw = execSync('git diff HEAD~1 HEAD --name-only', {
+  const raw = execSync('git diff 421a61f^ 421a61f --name-only', {
     encoding: 'utf8',
     cwd: process.cwd(),
   })
