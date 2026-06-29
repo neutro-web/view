@@ -198,7 +198,7 @@ test("T1-1-expr  <each let={item,i}><span class=\"${i > 0 ? 'after' : 'first'}\"
 
 // ── T1-2: itemReadsIndex === false → itemTemplate called without indexSig ─────
 
-test('T1-2  itemReadsIndex === false: itemTemplate factory receives no indexSig (or undefined)', () => {
+test('T1-2  itemReadsIndex === false: itemTemplate factory called with one arg (no indexSig)', () => {
   const src = `
     const C = $component(() => {
       $script(() => { const items = signal(['x', 'y']) })
@@ -209,11 +209,11 @@ test('T1-2  itemReadsIndex === false: itemTemplate factory receives no indexSig 
   const list = results[0]!.ir.bindings.find((b) => b.kind === 'list') as ListBinding
   expect(list.itemReadsIndex).toBe(false)
 
-  // Call itemTemplate with a stub valueSig and NO indexSig — must not throw
+  // Call itemTemplate with ONE arg (no indexSig) — strict one-arg call, must not throw
   const stubVs = signal<unknown>('hello')
   let receivedIndexSig: WritableSignal<number> | undefined = signal(99) // intentionally non-undefined
   expect(() => {
-    const itemIR = list.itemTemplate(stubVs, undefined)
+    const itemIR = list.itemTemplate(stubVs)
     // Collect what the factory sees; the factory itself cannot expose it, but
     // the fact that it doesn't throw is the primary assertion.
     void itemIR
