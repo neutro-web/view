@@ -979,3 +979,37 @@ const Foo = $component(() => {
     expect(emitted).not.toContain('writeTargetId')
   })
 })
+
+// ── EM-IE: Index-Elision Emitter (Task 4 — Commission 1) ─────────────────────
+
+describe('emitter index-elision narrower-factory fork', () => {
+  test('EM-IE-1  elided list: emitted code has no indexSig and emits itemReadsIndex: false', () => {
+    // no index bound in let destructure → itemReadsIndex = false
+    const source = `
+const List = $component(() => {
+  $script(() => { const items = signal(['a', 'b', 'c']) })
+  $render(() => html\`<ul><each .of="\${items}" key="\${(i) => i}" let={item}><li>\${item}</li></each></ul>\`)
+})`
+    const results = parseNvFileForEmit(source, 'list.nv', document)
+    const emitted = emitModule(results)
+    // T1-2 gate: no indexSig in emitted output
+    expect(emitted).not.toContain('indexSig')
+    // carrier must be explicitly emitted as false
+    expect(emitted).toContain('itemReadsIndex: false')
+  })
+
+  test('EM-IE-2  non-elided list: emitted code has indexSig and emits itemReadsIndex: true', () => {
+    // index bound in let destructure and used in body → itemReadsIndex = true
+    const source = `
+const List = $component(() => {
+  $script(() => { const items = signal(['a', 'b', 'c']) })
+  $render(() => html\`<ul><each .of="\${items}" key="\${(i) => i}" let={item, idx}><li>\${idx}: \${item}</li></each></ul>\`)
+})`
+    const results = parseNvFileForEmit(source, 'list2.nv', document)
+    const emitted = emitModule(results)
+    // index-reading list must keep indexSig in emitted output
+    expect(emitted).toContain('indexSig')
+    // carrier must be explicitly emitted as true
+    expect(emitted).toContain('itemReadsIndex: true')
+  })
+})

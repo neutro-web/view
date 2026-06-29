@@ -176,12 +176,17 @@ function emitBindingLiteral(
       const bodyLiteral = emitIrLiteral(bodyIR, thunk.bodyThunks, i2)
       // letNames default to ['item', 'index'] if empty; first name maps to valueSig, second to indexSig
       const [itemName = 'item', indexName = 'index'] = thunk.letNames
-      const slotPropsBody = `{ ${itemName}: () => valueSig(), ${indexName}: () => indexSig() }`
+      const readsIndex = thunk.itemReadsIndex !== false
+      const slotPropsBody = readsIndex
+        ? `{ ${itemName}: () => valueSig(), ${indexName}: () => indexSig() }`
+        : `{ ${itemName}: () => valueSig() }`
+      const factorySig = readsIndex ? '(valueSig, indexSig)' : '(valueSig)'
       return [
         `{ kind: 'list', ${pathEntry},`,
         `${i2}items: () => (${thunk.itemsSrc}),`,
         `${i2}key: ${thunk.keySrc},`,
-        `${i2}itemTemplate: (valueSig, indexSig) => ((slotProps) => (${bodyLiteral}))(${slotPropsBody}) }`,
+        `${i2}itemReadsIndex: ${readsIndex},`,
+        `${i2}itemTemplate: ${factorySig} => ((slotProps) => (${bodyLiteral}))(${slotPropsBody}) }`,
       ].join('\n')
     }
     case 'classlist': {
