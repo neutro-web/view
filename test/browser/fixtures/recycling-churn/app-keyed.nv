@@ -17,7 +17,7 @@ const AppKeyed = $component(() => {
       <button id="scroll-step" @click="${() => scrollStep()}">Scroll</button>
       <button id="set-n-50" @click="${() => windowN.set(50)}">N=50</button>
       <button id="set-n-100" @click="${() => windowN.set(100)}">N=100</button>
-      <each .of="${() => allRows.slice(windowStart(), windowStart() + windowN())}" key="${(row) => row.id}" let={item}>
+      <each .of="${allRows.slice(windowStart(), windowStart() + windowN())}" key="${(row) => row.id}" let={item}>
         <div class="row" data-id="${item.id}">${item.label}</div>
       </each>
     </div>

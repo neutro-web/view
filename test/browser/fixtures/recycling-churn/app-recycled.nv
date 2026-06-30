@@ -17,7 +17,7 @@ const AppRecycled = $component(() => {
       <button id="scroll-step" @click="${() => scrollStep()}">Scroll</button>
       <button id="set-n-50" @click="${() => windowN.set(50)}">N=50</button>
       <button id="set-n-100" @click="${() => windowN.set(100)}">N=100</button>
-      <recycle .of="${() => allRows.slice(windowStart(), windowStart() + windowN())}" let={item}>
+      <recycle .of="${allRows.slice(windowStart(), windowStart() + windowN())}" let={item, i}>
         <div class="row" data-id="${item.id}">${item.label}</div>
       </recycle>
     </div>
