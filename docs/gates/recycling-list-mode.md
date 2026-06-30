@@ -1,6 +1,6 @@
 # Gate — Recycling List Mode (`<recycle>`)
 
-**Verified against:** nv at landing SHA (fill in at verify time).
+**Verified against:** nv worktree-feat+recycling-list-mode, 787 tests passing, 0 typecheck errors.
 
 ## Acceptance criteria
 

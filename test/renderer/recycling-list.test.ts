@@ -225,3 +225,38 @@ it('T1-7: throws when .of is missing', () => {
   `
   expect(() => parseNvFile(src, 'test.nv', document)).toThrow(/requires \.of/)
 })
+
+// ── T1-8: shrink removes DOM nodes via onCleanup ──
+
+it('T1-8: shrink removes DOM nodes via onCleanup', () => {
+  const items = signal<string[]>(['A', 'B', 'C'])
+  const ir = makeRecycleIR(() => items(), spanTextTemplate)
+  const parent = mkParent()
+  const dispose = mount(ir, parent, document)
+  flushSync()
+
+  const ul = parent.querySelector('ul')!
+
+  // Render 3 items, assert 3 nodes present
+  let lis = ul.querySelectorAll('li')
+  expect(lis.length, '3 items initially').toBe(3)
+  const nodesBefore = Array.from(lis)
+
+  // Shrink to 1 item
+  items.set(['A'])
+  flushSync()
+
+  // Assert only 1 node remains in parent
+  lis = ul.querySelectorAll('li')
+  expect(lis.length, '1 item after shrink').toBe(1)
+
+  // Verify the removed nodes are not in the DOM (parentNode === null)
+  expect(nodesBefore[1]!.parentNode, 'second node removed from DOM').toBe(null)
+  expect(nodesBefore[2]!.parentNode, 'third node removed from DOM').toBe(null)
+
+  // The first node should still be in the DOM
+  expect(nodesBefore[0]!.parentNode, 'first node still in DOM').toBe(ul)
+
+  dispose()
+  rmParent(parent)
+})

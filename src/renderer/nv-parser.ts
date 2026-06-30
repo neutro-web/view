@@ -3016,7 +3016,7 @@ function computeBindingThunks(
     const bodyThunks: ThunkSource[] = pe.bodyHoleIndices.map((holeIdx) => {
       const holeExpr = holeExprs[holeIdx]
       if (holeExpr === undefined)
-        throw new Error(`[nv/recycle] Body hole index ${holeIdx} out of range`)
+        throw new Error(`[nv] <recycle> body hole index ${holeIdx} out of range`)
       return computeThunkSource(
         holeExpr,
         positions[holeIdx] as PosKind,
