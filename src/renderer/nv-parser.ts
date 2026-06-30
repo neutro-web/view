@@ -64,6 +64,7 @@ import type {
   PropBinding,
   PropEntry,
   ReactiveExpr,
+  RecycledListBinding,
   SlotContent,
   SlotEntry,
   SlotOutletBinding,
@@ -133,6 +134,12 @@ export type ThunkSource =
       bodyThunks: ThunkSource[]
       letNames: string[]
       itemReadsIndex: boolean
+    }
+  | {
+      kind: 'recycled-list'
+      itemsSrc: string // erased source text for the items expression
+      bodyThunks: ThunkSource[] // thunks for the item body template holes
+      letNames: [string, string] // [itemName, indexName] — both always present
     }
   | {
       kind: 'classlist'
@@ -507,12 +514,21 @@ interface NvWalkedEach {
   itemReadsIndex: boolean
 }
 
+interface NvWalkedRecycle {
+  anchorPath: NodePath
+  itemsHoleIdx: number
+  letNames: string[]
+  bodyIR: TemplateIR
+  bodyHoleIndices: number[]
+}
+
 interface NvWalkResult {
   holeInfos: NvSlotHoleInfo[]
   holePaths: NodePath[]
   components: NvWalkedComponent[]
   consumed: Set<number>
   lists: NvWalkedEach[]
+  recycledLists: NvWalkedRecycle[]
 }
 
 /**
@@ -535,6 +551,7 @@ function walkNvNodeList(
   const components: NvWalkedComponent[] = []
   const consumed = new Set<number>()
   const lists: NvWalkedEach[] = []
+  const recycledLists: NvWalkedRecycle[] = []
 
   function walk(node: Node): void {
     if (node.nodeType === 8) {
@@ -628,6 +645,72 @@ function walkNvNodeList(
           itemReadsIndex,
         })
         return // don't recurse into <each> body (already processed via .content)
+      }
+
+      // <recycle> element detection — after <each> block, before component detection.
+      if (el.tagName.toLowerCase() === 'template' && el.hasAttribute('data-nv-recycle')) {
+        const recycleEl = el as HTMLTemplateElement
+        // Extract .of hole index (required)
+        let itemsHoleIdx = -1
+        for (let k = 0; k < holeExprs.length; k++) {
+          if (recycleEl.getAttribute(`data-nv-prop-${k}`) === 'of') {
+            itemsHoleIdx = k
+            recycleEl.removeAttribute(`data-nv-prop-${k}`)
+            consumed.add(k)
+          }
+        }
+        if (itemsHoleIdx === -1) {
+          throw new Error('[nv] <recycle> requires .of="${...}" attribute')
+        }
+        // Footgun guard: <recycle key=...> is a hard error.
+        for (let k = 0; k < holeExprs.length; k++) {
+          if (recycleEl.getAttribute(`data-nv-attr-${k}`) === 'key') {
+            throw new Error(
+              '[nv] <recycle> does not take key= (position is identity; use <each key=> for keyed lists)',
+            )
+          }
+        }
+        if (recycleEl.hasAttribute('key')) {
+          throw new Error(
+            '[nv] <recycle> does not take key= (position is identity; use <each key=> for keyed lists)',
+          )
+        }
+
+        // Extract let-bound names — same JSDOM broken-attr reassembly as <each>
+        const rawLet = recycleEl.getAttribute('let') ?? ''
+        const brokenParts: string[] = []
+        for (const attr of Array.from(recycleEl.attributes)) {
+          if (attr.name !== 'let' && attr.name.endsWith('}') && attr.value === '') {
+            brokenParts.push(attr.name.slice(0, -1).trim())
+          }
+        }
+        const fullLetValue =
+          brokenParts.length > 0 ? `${rawLet}, ${brokenParts.join(', ')}` : rawLet
+        const letNames = fullLetValue
+          .replace(/[{}]/g, '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+
+        // Build body IR
+        const bodyNodes = Array.from(recycleEl.content.childNodes)
+        const { ir: bodyIR, holeIndices: bodyHoleIndices } = buildNvSlotContentIR(
+          bodyNodes,
+          holeExprs,
+          doc,
+          `recycle:body:${recycledLists.length}`,
+          signals,
+          letNames,
+        )
+        for (const idx of bodyHoleIndices) consumed.add(idx)
+
+        // Replace element with anchor comment
+        const anchor = doc.createComment(`nv-recycled-list-${recycledLists.length}`)
+        recycleEl.parentNode?.replaceChild(anchor, recycleEl)
+        const anchorPath = computePath(anchor, root)
+
+        recycledLists.push({ anchorPath, itemsHoleIdx, letNames, bodyIR, bodyHoleIndices })
+        return
       }
 
       // Component element detection via data-nv-component sentinel.
@@ -784,7 +867,7 @@ function walkNvNodeList(
   }
 
   for (const n of nodes) walk(n)
-  return { holeInfos, holePaths, components, consumed, lists }
+  return { holeInfos, holePaths, components, consumed, lists, recycledLists }
 }
 
 // ── Slot content IR builder (collapse: uses walkNvNodeList) ────────────────────
@@ -850,6 +933,30 @@ function pushListBinding(
     itemTemplate: (_valueSig, _indexSig?) => wl.bodyIR,
     itemReadsIndex: wl.itemReadsIndex,
   } satisfies ListBinding)
+}
+
+/**
+ * Push one <recycle> list binding into allPaths + bindings.
+ * Standalone — does NOT call pushListBinding.
+ */
+function pushRecycledListBinding(
+  wl: NvWalkedRecycle,
+  allPaths: NodePath[],
+  bindings: Binding[],
+): void {
+  const pathIndex = allPaths.length
+  allPaths.push(wl.anchorPath)
+  const stubExpr = (() => undefined) as ReactiveExpr<unknown>
+  bindings.push({
+    kind: 'recycled-list',
+    pathIndex,
+    items: stubExpr as ReactiveExpr<readonly unknown[]>,
+    itemTemplate: (valueSig, indexSig) => {
+      void valueSig
+      void indexSig
+      return wl.bodyIR
+    },
+  } satisfies RecycledListBinding)
 }
 
 /**
@@ -1077,11 +1184,18 @@ interface PendingNvEachInfo {
   itemReadsIndex: boolean
 }
 
+interface PendingNvRecycleInfo {
+  itemsHoleIdx: number
+  letNames: string[]
+  bodyHoleIndices: number[]
+}
+
 interface ProcessResult {
   ir: TemplateIR
   verdicts: Array<'ACCEPT' | 'PLAIN'>
   pendingComponents: PendingNvComponentInfo[]
   pendingEachItems: PendingNvEachInfo[]
+  pendingRecycleItems: PendingNvRecycleInfo[]
   consumedByComponent: ReadonlySet<number>
   diagnostics: NvDiagnostic[]
   shapeHtml: string // pre-walk authored shape; B3 scopeHash seed
@@ -1104,6 +1218,7 @@ function processHtmlTemplate(
       verdicts: [],
       pendingComponents: [],
       pendingEachItems: [],
+      pendingRecycleItems: [],
       consumedByComponent: new Set<number>(),
       diagnostics: [],
       shapeHtml: template.text,
@@ -1129,6 +1244,8 @@ function processHtmlTemplate(
   const sentinelHtml = rawSentinelHtml
     .replace(/<each(\s[^>]*)?>/g, (_, attrs) => `<template data-nv-each${attrs ?? ''}>`)
     .replace(/<\/each>/g, '</template>')
+    .replace(/<recycle(\s[^>]*)?>/g, (_, attrs) => `<template data-nv-recycle${attrs ?? ''}>`)
+    .replace(/<\/recycle>/g, '</template>')
 
   const tmpl = doc.createElement('template')
   tmpl.innerHTML = sentinelHtml
@@ -1147,6 +1264,7 @@ function processHtmlTemplate(
     components: pendingComponents,
     consumed: consumedByComponent,
     lists: pendingLists,
+    recycledLists: pendingRecycleLists,
   } = walkNvNodeList(Array.from(frag.childNodes), holeExprs, doc, frag, signals, processdiagnostics)
   // Map encounter-order hole paths back to GLOBAL hole indices (top-level convention).
   for (let h = 0; h < holeInfos.length; h++) {
@@ -1199,6 +1317,11 @@ function processHtmlTemplate(
   // Add list bindings from <each> elements via shared helper (D-SS-2: structural identity).
   for (const wl of pendingLists) {
     pushListBinding(wl, allPaths, bindings, processdiagnostics)
+  }
+
+  // Add recycled list bindings from <recycle> elements.
+  for (const wl of pendingRecycleLists) {
+    pushRecycledListBinding(wl, allPaths, bindings)
   }
 
   for (let i = 0; i < holeExprs.length; i++) {
@@ -1263,6 +1386,11 @@ function processHtmlTemplate(
       letNames: wl.letNames,
       bodyHoleIndices: wl.bodyHoleIndices,
       itemReadsIndex: wl.itemReadsIndex,
+    })),
+    pendingRecycleItems: pendingRecycleLists.map((wl) => ({
+      itemsHoleIdx: wl.itemsHoleIdx,
+      letNames: wl.letNames,
+      bodyHoleIndices: wl.bodyHoleIndices,
     })),
     consumedByComponent,
     diagnostics: processdiagnostics,
@@ -2584,6 +2712,7 @@ function computeThunkSource(
         const consequentThunks = computeBindingThunks(
           consequentResult.pendingComponents,
           consequentResult.pendingEachItems,
+          consequentResult.pendingRecycleItems,
           consequentResult.consumedByComponent,
           cHoles.holeExprs,
           cHoles.positions,
@@ -2600,6 +2729,7 @@ function computeThunkSource(
               return computeBindingThunks(
                 altResult.pendingComponents,
                 altResult.pendingEachItems,
+                altResult.pendingRecycleItems,
                 altResult.consumedByComponent,
                 aHoles.holeExprs,
                 aHoles.positions,
@@ -2768,6 +2898,7 @@ function extractTemplateHoles(tte: ts.TaggedTemplateExpression): {
 function computeBindingThunks(
   pendingComponents: PendingNvComponentInfo[],
   pendingEachItems: PendingNvEachInfo[],
+  pendingRecycleItems: PendingNvRecycleInfo[],
   consumedByComponent: ReadonlySet<number>,
   holeExprs: ts.Expression[],
   positions: PosKind[],
@@ -2867,6 +2998,39 @@ function computeBindingThunks(
     }
   })
 
+  const recycledListThunks: ThunkSource[] = pendingRecycleItems.map((pe) => {
+    const itemsExpr = holeExprs[pe.itemsHoleIdx] as ts.Expression
+    const itemsSrc = eraseSignalReadsInNode(itemsExpr, symbols.all, propsAccessors)
+
+    const slotPropsParam = 'slotProps'
+    const slotPropsAccessors: Map<string, string> = new Map(
+      pe.letNames.map((n) => [n, `${slotPropsParam}.${n}()`]),
+    )
+    const mergedAccessors = new Map([...(propsAccessors ?? []), ...slotPropsAccessors])
+
+    const bodyThunks: ThunkSource[] = pe.bodyHoleIndices.map((holeIdx) => {
+      const holeExpr = holeExprs[holeIdx]
+      if (holeExpr === undefined)
+        throw new Error(`[nv/recycle] Body hole index ${holeIdx} out of range`)
+      return computeThunkSource(
+        holeExpr,
+        positions[holeIdx] as PosKind,
+        doc,
+        symbols,
+        diagnostics,
+        propsParamName,
+        mergedAccessors,
+      )
+    })
+
+    return {
+      kind: 'recycled-list' as const,
+      itemsSrc,
+      bodyThunks,
+      letNames: pe.letNames as [string, string],
+    }
+  })
+
   const holeThunks = holeExprs
     .map((expr, i) =>
       consumedByComponent.has(i)
@@ -2883,7 +3047,7 @@ function computeBindingThunks(
     )
     .filter((t): t is ThunkSource => t !== null)
 
-  return [...componentThunks, ...listThunks, ...holeThunks]
+  return [...componentThunks, ...listThunks, ...recycledListThunks, ...holeThunks]
 }
 
 /**
@@ -3104,6 +3268,7 @@ export function parseNvFileForEmit(
           bindingThunks = computeBindingThunks(
             pendingComponents,
             renderResult.pendingEachItems,
+            renderResult.pendingRecycleItems,
             consumedByComponent,
             bodyHoleExprs,
             bodyPositions,

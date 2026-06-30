@@ -29,6 +29,7 @@ import type {
   EventBinding,
   ListBinding,
   PropBinding,
+  RecycledListBinding,
   SlotOutletBinding,
   StyleVarBinding,
   SyncBinding,
@@ -188,6 +189,23 @@ function emitBindingLiteral(
         `${i2}key: ${thunk.keySrc},`,
         `${i2}itemReadsIndex: ${readsIndex},`,
         `${i2}itemTemplate: ${factorySig} => ((slotProps) => (${bodyLiteral}))(${slotPropsBody}) }`,
+      ].join('\n')
+    }
+    case 'recycled-list': {
+      if (thunk.kind !== 'recycled-list')
+        throw new Error('[nv/emitter] RecycledListBinding thunk kind mismatch')
+      const i2 = `${indent}  `
+      const stubVs = signal<unknown>(null)
+      const stubIs = signal<number>(0)
+      const bodyIR = (binding as RecycledListBinding).itemTemplate(stubVs, stubIs)
+      const bodyLiteral = emitIrLiteral(bodyIR, thunk.bodyThunks, i2)
+      const [itemName = 'item', indexName = 'i'] = thunk.letNames
+      // indexSig ALWAYS allocated for recycled — no elision, no conditional.
+      const slotPropsBody = `{ ${itemName}: () => valueSig(), ${indexName}: () => indexSig() }`
+      return [
+        `{ kind: 'recycled-list', ${pathEntry},`,
+        `${i2}items: () => (${thunk.itemsSrc}),`,
+        `${i2}itemTemplate: (valueSig, indexSig) => ((slotProps) => (${bodyLiteral}))(${slotPropsBody}) }`,
       ].join('\n')
     }
     case 'classlist': {
