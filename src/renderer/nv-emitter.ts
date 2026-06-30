@@ -195,9 +195,13 @@ function emitBindingLiteral(
       if (thunk.kind !== 'recycled-list')
         throw new Error('[nv/emitter] RecycledListBinding thunk kind mismatch')
       const i2 = `${indent}  `
-      const stubVs = signal<unknown>(null)
-      const stubIs = signal<number>(0)
-      const bodyIR = (binding as RecycledListBinding).itemTemplate(stubVs, stubIs)
+      // Use bodyIR directly — avoids creating stub ReactiveNodes (signal() leak).
+      // bodyIR is set by pushRecycledListBinding on all parse-path bindings.
+      const rlBinding = binding as RecycledListBinding
+      const bodyIR = rlBinding.bodyIR
+      if (bodyIR === undefined) {
+        throw new Error('[nv/emitter] RecycledListBinding has no bodyIR — use parseNvFileForEmit')
+      }
       const bodyLiteral = emitIrLiteral(bodyIR, thunk.bodyThunks, i2)
       const [itemName = 'item', indexName = 'i'] = thunk.letNames
       // indexSig ALWAYS allocated for recycled — no elision, no conditional.

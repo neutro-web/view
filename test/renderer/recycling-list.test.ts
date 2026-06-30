@@ -211,7 +211,9 @@ it('T1-6: throws when fewer than two let-names are provided (emit path guard)', 
     })
   `
   // parseNvFileForEmit triggers computeBindingThunks which enforces the two-name requirement.
-  expect(() => parseNvFileForEmit(src, 'test.nv', document)).toThrow(/requires two let-bound names/)
+  expect(() => parseNvFileForEmit(src, 'test.nv', document)).toThrow(
+    /requires exactly two let-bound names/,
+  )
 })
 
 // ── T1-7: <recycle> with no .of is a parse error ──

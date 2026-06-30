@@ -211,6 +211,12 @@ export type RecycledListBinding = BaseBinding & {
   // NO key — position is identity. <recycle key=> is a parse error.
   itemTemplate: (valueSig: WritableSignal<unknown>, indexSig: WritableSignal<number>) => TemplateIR
   // indexSig is non-optional here (contrast ListBinding where indexSig? is optional for elision).
+  /**
+   * The captured body TemplateIR — present on parse-path bindings (parseNvFile /
+   * parseNvFileForEmit) as a structural shortcut so callers do NOT need to call
+   * itemTemplate with stub signals. Absent on runtime-authored bindings.
+   */
+  bodyIR?: TemplateIR
 }
 
 // SyncBinding is an external-source sync (§8.5); contributes no §8.5.2 write-graph edge.

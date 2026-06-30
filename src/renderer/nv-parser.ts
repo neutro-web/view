@@ -632,7 +632,10 @@ function walkNvNodeList(
         // Replace <template data-nv-each> element with anchor comment
         const listIndex = lists.length
         const anchor = doc.createComment(`nv-list-${listIndex}`)
-        eachEl.parentNode?.replaceChild(anchor, eachEl)
+        if (eachEl.parentNode === null) {
+          throw new Error('[nv] <each> element has no parent — cannot compute binding path')
+        }
+        eachEl.parentNode.replaceChild(anchor, eachEl)
         const anchorPath = computePath(anchor, root)
 
         lists.push({
@@ -710,11 +713,17 @@ function walkNvNodeList(
           signals,
           letNames,
         )
+        // Add body hole indices to consumed so processHtmlTemplate skips the sentinel check
+        // for holes that appear exclusively inside the body (they have no outer sentinel).
+        // The itemsHoleIdx (.of) is already in consumed; body holes are a disjoint subset.
         for (const idx of bodyHoleIndices) consumed.add(idx)
 
         // Replace element with anchor comment
         const anchor = doc.createComment(`nv-recycled-list-${recycledLists.length}`)
-        recycleEl.parentNode?.replaceChild(anchor, recycleEl)
+        if (recycleEl.parentNode === null) {
+          throw new Error('[nv] <recycle> element has no parent — cannot compute binding path')
+        }
+        recycleEl.parentNode.replaceChild(anchor, recycleEl)
         const anchorPath = computePath(anchor, root)
 
         recycledLists.push({ anchorPath, itemsHoleIdx, letNames, bodyIR, bodyHoleIndices })
@@ -833,7 +842,10 @@ function walkNvNodeList(
 
         const compIndex = components.length
         const anchor = doc.createComment(`nv-comp-${compIndex}`)
-        el.parentNode?.replaceChild(anchor, el)
+        if (el.parentNode === null) {
+          throw new Error('[nv] component element has no parent — cannot compute binding path')
+        }
+        el.parentNode.replaceChild(anchor, el)
         const anchorPath = computePath(anchor, root)
         components.push({
           anchorPath,
@@ -946,6 +958,11 @@ function pushListBinding(
 /**
  * Push one <recycle> list binding into allPaths + bindings.
  * Standalone — does NOT call pushListBinding.
+ *
+ * PARSE-PATH ONLY — do not pass to mount().
+ * The binding produced here is structural: itemTemplate throws to prevent accidental
+ * execution outside the emit path. Callers needing the body IR must use .bodyIR
+ * directly (e.g. patchClasslistTokens, emitBindingLiteral).
  */
 function pushRecycledListBinding(
   wl: NvWalkedRecycle,
@@ -958,10 +975,11 @@ function pushRecycledListBinding(
     kind: 'recycled-list',
     pathIndex,
     items: (() => [] as readonly unknown[]) as ReactiveExpr<readonly unknown[]>,
-    itemTemplate: (valueSig, indexSig) => {
-      void valueSig
-      void indexSig
-      return wl.bodyIR
+    bodyIR: wl.bodyIR,
+    itemTemplate: (_valueSig, _indexSig) => {
+      throw new Error(
+        '[nv] RecycledListBinding from parseNvFile is structural-only — use parseNvFileForEmit',
+      )
     },
   } satisfies RecycledListBinding)
 }
@@ -1053,9 +1071,10 @@ function buildNvSlotContentIR(
   for (const wl of slotLists) {
     pushListBinding(wl, allPaths, bindings, diagnostics)
   }
-  // Wire <recycle>-in-slot (Fix: recycledLists was previously dropped — silently ignored).
-  for (const wl of slotRecycledLists) {
-    pushRecycledListBinding(wl, allPaths, bindings)
+  // <recycle> nested inside an <each> body or component slot is a hard error.
+  // Fail early at parse time (before emit path can propagate the invalid IR).
+  if (slotRecycledLists.length > 0) {
+    throw new Error('[nv] <recycle> cannot be nested inside an <each> body or component slot')
   }
 
   const holeIndices = [...holeInfos.map((h) => h.origIdx), ...consumed].filter(
@@ -2180,6 +2199,14 @@ export function patchClasslistTokens(ir: TemplateIR, classRewrites: Map<string, 
       const itemIR = binding.itemTemplate(stubVs, stubIs)
       patchClasslistTokens(itemIR, classRewrites)
     }
+    if (binding.kind === 'recycled-list') {
+      // Use bodyIR directly — itemTemplate on parse-path bindings is structural-only (throws).
+      // Runtime-authored bindings have no bodyIR; skip safely.
+      const rlb = binding as RecycledListBinding
+      if (rlb.bodyIR !== undefined) {
+        patchClasslistTokens(rlb.bodyIR, classRewrites)
+      }
+    }
     // NEW: component case — same pattern as list (stub-call + recurse). Diverges from list in one
     // way: also rewrites static class attrs in slotIR.shape.html (slot content may carry literal
     // class="card" strings, not only classlist bindings; list-item bodies don't have this).
@@ -3011,9 +3038,9 @@ function computeBindingThunks(
   })
 
   const recycledListThunks: ThunkSource[] = pendingRecycleItems.map((pe) => {
-    if (pe.letNames.length < 2) {
+    if (pe.letNames.length !== 2) {
       throw new Error(
-        `[nv] <recycle> requires two let-bound names (e.g. let={item, i}); got: ${JSON.stringify(pe.letNames)}`,
+        `[nv] <recycle> requires exactly two let-bound names (e.g. \`let={item, i}\`); got: ${JSON.stringify(pe.letNames)}`,
       )
     }
 
