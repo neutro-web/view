@@ -64,6 +64,7 @@ import type {
   NodePath,
   PropBinding,
   ReactiveExpr,
+  RecycledListBinding,
   SlotContent,
   SlotOutletBinding,
   StyleVarBinding,
@@ -167,6 +168,10 @@ function wireBinding(
     }
     case 'sync': {
       wireSync(binding as SyncBinding, targetNode)
+      break
+    }
+    case 'recycled-list': {
+      wireRecycledList(binding, targetNode, doc)
       break
     }
     default: {
@@ -426,6 +431,13 @@ function wireChild(binding: ChildBinding, anchorNode: Node, doc: Document): void
 }
 
 // ── ListBinding ───────────────────────────────────────────────────────────────
+
+type RecycledRecord = {
+  valueSig: WritableSignal<unknown>
+  indexSig: WritableSignal<number>
+  rootEl: Node
+  dispose: () => void
+}
 
 type ItemRecord = {
   valueSig: WritableSignal<unknown>
@@ -717,6 +729,69 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
   onCleanup(() => {
     for (const rec of records.values()) rec.dispose()
     records.clear()
+  })
+}
+
+function wireRecycledList(binding: RecycledListBinding, anchorNode: Node, doc: Document): void {
+  const parent = anchorNode.parentNode
+  if (parent === null) {
+    throw new Error('[nv/interpreter] RecycledListBinding: anchor has no parent')
+  }
+
+  const pool: RecycledRecord[] = []
+  const listOwner = getOwner()
+
+  effect(() => {
+    const next = binding.items()
+    const N = next.length
+    const P = pool.length
+
+    // Re-bind existing slots [0, min(N,P)) — pure Op-3. No dispose, no create.
+    for (let i = 0; i < Math.min(N, P); i++) {
+      // biome-ignore lint/style/noNonNullAssertion: i < P = pool.length, in-bounds
+      const rec = pool[i]!
+      rec.valueSig.set(next[i])
+      rec.indexSig.set(i)
+    }
+
+    // Grow [P, N) — create only the delta.
+    // IMPORTANT: mirrors wireList Op-1 exactly (L543–578). indexSig always allocated (no elision).
+    for (let i = P; i < N; i++) {
+      const valueSig = signal<unknown>(next[i])
+      const indexSig = signal<number>(i)
+      let mountedRoot!: Node
+
+      // biome-ignore lint/style/noNonNullAssertion: runWithOwner returns non-null when owner is non-null
+      const dispose = runWithOwner(listOwner, () =>
+        createRoot((d) => {
+          const itemIR = binding.itemTemplate(valueSig, indexSig)
+          const { roots } = mountFragment(itemIR, parent, doc, anchorNode)
+          const contentRoots = roots.filter(
+            (n) => n.nodeType !== 3 /* TEXT_NODE */ || (n.textContent?.trim() ?? '') !== '',
+          )
+          const [root] = contentRoots
+          if (root === undefined || contentRoots.length !== 1) {
+            throw new Error(
+              '[nv] Multi-root list items are not supported in v1. Wrap the item template in a single root element.',
+            )
+          }
+          mountedRoot = root
+          onCleanup(() => {
+            if (mountedRoot.parentNode !== null) mountedRoot.parentNode.removeChild(mountedRoot)
+          })
+          return d
+        }),
+      )!
+
+      pool.push({ valueSig, indexSig, rootEl: mountedRoot, dispose })
+    }
+
+    // Shrink [N, P) — dispose only the delta.
+    for (let i = N; i < P; i++) {
+      // biome-ignore lint/style/noNonNullAssertion: i < P = pool.length, in-bounds
+      pool[i]!.dispose()
+    }
+    if (N < P) pool.length = N
   })
 }
 
