@@ -167,6 +167,7 @@ interface ReactiveNode {
 }
 
 function makeNode(kind: 0 | 1 | 2 | 3): ReactiveNode {
+  _nodeAllocCount++
   return {
     kind,
     state: CLEAN,
@@ -244,6 +245,8 @@ const nodesWithUserEquals = new WeakSet<ReactiveNode>()
 
 // Test-only instrumentation counter (§B1 fuzzer). Incremented in runRecompute.
 let _recomputeCount = 0
+let _nodeAllocCount = 0
+let _nodeFreeCount = 0
 
 // P-2c-B ceiling probe counter. Incremented in harvestInertEffect on each true return.
 let _harvestCount = 0
@@ -648,6 +651,7 @@ function disposeNode(node: ReactiveNode): void {
 function disposeNodeFull(node: ReactiveNode): void {
   if (node.isDisposed) return
   node.isDisposed = true
+  _nodeFreeCount++
 
   runCleanups(node)
   disposeChildrenOf(node)
@@ -1355,6 +1359,17 @@ export const __test = {
   },
   resetHarvestCount(): void {
     _harvestCount = 0
+  },
+
+  get nodeAllocCount(): number {
+    return _nodeAllocCount
+  },
+  get nodeFreeCount(): number {
+    return _nodeFreeCount
+  },
+  resetNodeCounts(): void {
+    _nodeAllocCount = 0
+    _nodeFreeCount = 0
   },
 
   /** Turn on per-node counting and start a fresh measurement window. */
