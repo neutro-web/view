@@ -1,9 +1,10 @@
-# nv Template IR — Design v0.4.3
+# nv Template IR — Design v0.4.4
  
 **Stream:** (3) Renderer/templating  
 **Contract reference:** nv Reactive Core Runtime Contract v0.4.3  
-**Status:** Approved — v0.4.3 (2026-06-28). ListBinding.itemReadsIndex? index-elision carrier landed.  
+**Status:** Approved — v0.4.4 (2026-06-29). RecycledListBinding (kind: 'recycled-list') added.  
 **Changelog:**  
+- v0.4.4 (2026-06-29): Added `RecycledListBinding` (kind: `'recycled-list'`): non-keyed recycled list with position-identity semantics. `itemTemplate` takes `(valueSig: WritableSignal<unknown>, indexSig: WritableSignal<number>)` — `indexSig` non-optional. No `key` field. Forbids `key=` at parse time (throws). See `<recycle>` authoring element.
 - v0.4.3 (2026-06-28): ListBinding.itemReadsIndex? (additive, absent⇒allocate) — index-elision, compiled-.nv path only. reactive-core contract unchanged (remains v0.4.3, set by P-2c-A1).
 - v0.2 (2026-06-17): initial approved IR spec — six binding kinds (PoC scope) + two designed-deferred (List, Sync).  
 - v0.2.1 (2026-06-20): multi-root template shapes; list item single-root constraint noted.  
@@ -158,7 +159,7 @@ anchor `Comment` node; the back-end inserts/removes content before this anchor.
  
 ## 3. Binding Kinds
  
-Twelve kinds total: six in PoC scope, two designed-and-deferred, one added in v0.3, one in v0.3.1, one in v0.4.1, one in v0.4.2.
+Thirteen kinds total: six in PoC scope, two designed-and-deferred, one added in v0.3, one in v0.3.1, one in v0.4.1, one in v0.4.2, one in v0.4.4.
  
 ```typescript
 type Binding =
@@ -173,7 +174,8 @@ type Binding =
   | ComponentBinding   //  ── v0.3 (component API)
   | SlotOutletBinding  //  ── v0.3.1 (slot consumption); v0.3.3 adds optional `fallback?: TemplateIR`
   | ClassListBinding   //  ── v0.4.1 (class-selection; per-key classList.toggle)
-  | StyleVarBinding;   //  ── v0.4.2 ($style factory-form; reactive CSS custom property)
+  | StyleVarBinding    //  ── v0.4.2 ($style factory-form; reactive CSS custom property)
+  | RecycledListBinding; //  ── v0.4.4 (non-keyed recycled list; position-identity)
  
 type BaseBinding = {
   pathIndex: number;   // index into shape.bindingPaths — which node this targets
@@ -420,8 +422,28 @@ creates new item roots for new keys, disposes roots for removed keys, reorders D
 nodes for moved keys. Each item root owns that item's `ChildBinding`/`TextBinding`/
 etc. The reconciliation algorithm itself (LIS-based, Ivi-style) is a back-end
 detail, not an IR concern.
- 
-### 3.7.1 ClassListBinding (v0.4.1)
+
+### 3.7.1 RecycledListBinding (v0.4.4)
+
+```ts
+type RecycledListBinding = BaseBinding & {
+  kind: 'recycled-list'
+  items: ReactiveExpr<readonly unknown[]>
+  itemTemplate: (valueSig: WritableSignal<unknown>, indexSig: WritableSignal<number>) => TemplateIR
+}
+```
+
+Non-keyed recycled list. Row identity follows slot **position**, not data key. Rows are pooled and re-bound via `valueSig.set` / `indexSig.set` (Op-3 path) — zero dispose/create per scroll step.
+
+**Contract:** a recycled row's local DOM state (focus, uncontrolled input, in-flight transition) follows its slot position, not its data. Use only for rows whose entire visible state derives from the bound item data.
+
+**Authoring:** `<recycle .of=${items} let={item, i}>...</recycle>`. `key=` is forbidden (throws at parse time). `indexSig` is always allocated — index-elision does not apply.
+
+**IR kind:** `'recycled-list'`  
+**Interpreter:** `wireRecycledList` (standalone function, not a mode of `wireList`)  
+**Distinct from:** `ListBinding` (keyed, uses key-diff + LIS; `<each key=>` authoring)
+
+### 3.7.2 ClassListBinding (v0.4.1)
 
 Per-key `classList.toggle` lowering for `class={...}` expressions that are object or
 array literals. Additive to the union; `AttrBinding` (whole-attribute reassign) is
@@ -448,7 +470,7 @@ fallback to `AttrBinding` (full-reassign). `classes(...)` tagged-template sentin
 the pre-split entry list; bare object literal in tagged-template still throws (enforcing the
 `.nv`-literal / tagged-sentinel idiom split, matching `<each>` / `each(...)`).
 
-### 3.7.2 StyleVarBinding (v0.4.2)
+### 3.7.3 StyleVarBinding (v0.4.2)
 
 Reactive CSS custom-property write. Produced by `$style` factory-form lowering: a
 reactive value in a `$style` declaration becomes a CSS custom property (`--nv-<hash>`)
@@ -1008,6 +1030,12 @@ type ListBinding = BaseBinding & {  // LANDED
   itemTemplate:     (valueSig: WritableSignal<unknown>, indexSig?: WritableSignal<number>) => TemplateIR;
 };
  
+type RecycledListBinding = BaseBinding & {  // v0.4.4
+  kind:         'recycled-list';
+  items:        ReactiveExpr<readonly unknown[]>;
+  itemTemplate: (valueSig: WritableSignal<unknown>, indexSig: WritableSignal<number>) => TemplateIR;
+};
+ 
 type SyncBinding = BaseBinding & {  // DESIGNED, DEFERRED
   kind:           'sync';
   propName:       string;
@@ -1063,7 +1091,7 @@ type StyleVarBinding = BaseBinding & {
 
 type Binding =
   | TextBinding | AttrBinding | PropBinding | EventBinding
-  | ChildBinding | ConditionalBinding | ListBinding | SyncBinding
+  | ChildBinding | ConditionalBinding | ListBinding | RecycledListBinding | SyncBinding
   | ComponentBinding
   | SlotOutletBinding
   | ClassListBinding
