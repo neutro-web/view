@@ -3023,6 +3023,11 @@ function computeBindingThunks(
       )
     })
 
+    if (pe.letNames.length < 2) {
+      throw new Error(
+        `[nv] <recycle> requires two let-bound names (e.g. let={item, i}); got: ${JSON.stringify(pe.letNames)}`,
+      )
+    }
     return {
       kind: 'recycled-list' as const,
       itemsSrc,

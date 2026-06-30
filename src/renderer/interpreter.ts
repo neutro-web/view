@@ -793,6 +793,10 @@ function wireRecycledList(binding: RecycledListBinding, anchorNode: Node, doc: D
     }
     if (N < P) pool.length = N
   })
+  onCleanup(() => {
+    for (const rec of pool) rec.dispose()
+    pool.length = 0
+  })
 }
 
 // ── ConditionalBinding ────────────────────────────────────────────────────────
