@@ -529,6 +529,10 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
       nextEnd--
     }
 
+    // Capture the active element before any DOM mutations (Op 2 removes nodes, blurring focus).
+    // If the focused element is inside a row being deleted, we restore focus to a sibling row.
+    const activeBefore = doc.activeElement as HTMLElement | null
+
     // Op 2: remove stale records — only band rows can be absent from next.
     // Prefix/suffix keys are present in next by construction (they matched key+ref above).
     for (let bi = start; bi <= prevEnd; bi++) {
@@ -538,6 +542,29 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
         // biome-ignore lint/style/noNonNullAssertion: key was in records from prior reconcile
         records.get(k)!.dispose()
         records.delete(k)
+      }
+    }
+
+    // Focus fallback: if the focused element was inside a disposed row, restore focus.
+    // The disposed element is no longer connected; find the nearest remaining row or fall back.
+    if (activeBefore !== null && !activeBefore.isConnected) {
+      // Try to focus any surviving row in insertion order (first record wins).
+      let focused = false
+      for (const rec of records.values()) {
+        const candidate = rec.rootEl as HTMLElement | null
+        if (candidate !== null && typeof (candidate as HTMLElement).focus === 'function') {
+          ;(candidate as HTMLElement).focus()
+          focused = true
+          break
+        }
+      }
+      // Fall back to the list container (parent), then document.body.
+      if (!focused) {
+        if (typeof (parent as HTMLElement).focus === 'function') {
+          ;(parent as HTMLElement).focus()
+        } else {
+          doc.body?.focus()
+        }
       }
     }
 
@@ -701,10 +728,8 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
           records.get(suffixStartKey)!.rootEl
         : anchorNode
 
-    // Save focused element before any DOM moves — insertBefore on an existing node
-    // first removes it from the DOM, which blurs the focused element. We restore
-    // focus after all moves complete so the keyed contract (focus follows data) holds.
-    const activeBefore = doc.activeElement as HTMLElement | null
+    // activeBefore was captured before Op-2 (above). Re-use it here for the DOM-move
+    // focus-restore path (insertBefore blurs the element being relocated).
     let focusHostMoved: HTMLElement | null = null
 
     for (let i = nextEnd; i >= start; i--) {
@@ -804,11 +829,16 @@ function wireRecycledList(binding: RecycledListBinding, anchorNode: Node, doc: D
     }
 
     // Shrink [N, P) — dispose only the delta.
-    for (let i = N; i < P; i++) {
-      // biome-ignore lint/style/noNonNullAssertion: i < P = pool.length, in-bounds
-      pool[i]!.dispose()
+    // try/finally guarantees pool.length = N even if a dispose() call throws,
+    // preventing pool from holding stale references to disposed records.
+    try {
+      for (let i = N; i < P; i++) {
+        // biome-ignore lint/style/noNonNullAssertion: i < P = pool.length, in-bounds
+        pool[i]!.dispose()
+      }
+    } finally {
+      pool.length = N
     }
-    if (N < P) pool.length = N
   })
   onCleanup(() => {
     for (const rec of pool) rec.dispose()
