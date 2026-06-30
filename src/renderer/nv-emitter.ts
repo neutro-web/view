@@ -29,6 +29,7 @@ import type {
   EventBinding,
   ListBinding,
   PropBinding,
+  RecycledListBinding,
   SlotOutletBinding,
   StyleVarBinding,
   SyncBinding,
@@ -188,6 +189,27 @@ function emitBindingLiteral(
         `${i2}key: ${thunk.keySrc},`,
         `${i2}itemReadsIndex: ${readsIndex},`,
         `${i2}itemTemplate: ${factorySig} => ((slotProps) => (${bodyLiteral}))(${slotPropsBody}) }`,
+      ].join('\n')
+    }
+    case 'recycled-list': {
+      if (thunk.kind !== 'recycled-list')
+        throw new Error('[nv/emitter] RecycledListBinding thunk kind mismatch')
+      const i2 = `${indent}  `
+      // Use bodyIR directly — avoids creating stub ReactiveNodes (signal() leak).
+      // bodyIR is set by pushRecycledListBinding on all parse-path bindings.
+      const rlBinding = binding as RecycledListBinding
+      const bodyIR = rlBinding.bodyIR
+      if (bodyIR === undefined) {
+        throw new Error('[nv/emitter] RecycledListBinding has no bodyIR — use parseNvFileForEmit')
+      }
+      const bodyLiteral = emitIrLiteral(bodyIR, thunk.bodyThunks, i2)
+      const [itemName = 'item', indexName = 'i'] = thunk.letNames
+      // indexSig ALWAYS allocated for recycled — no elision, no conditional.
+      const slotPropsBody = `{ ${itemName}: () => valueSig(), ${indexName}: () => indexSig() }`
+      return [
+        `{ kind: 'recycled-list', ${pathEntry},`,
+        `${i2}items: () => (${thunk.itemsSrc}),`,
+        `${i2}itemTemplate: (valueSig, indexSig) => ((slotProps) => (${bodyLiteral}))(${slotPropsBody}) }`,
       ].join('\n')
     }
     case 'classlist': {

@@ -192,6 +192,33 @@ export type ListBinding = BaseBinding & {
   itemReadsIndex?: boolean
 }
 
+/**
+ * Non-keyed, recycled list. Row identity follows slot POSITION, not data key.
+ * Rows are pooled (N = list length) and re-bound via valueSig.set / indexSig.set
+ * (Op-3 path) — no dispose, no create per scroll step.
+ *
+ * CONTRACT: a recycled row's local DOM state (focus, uncontrolled input, in-flight
+ * transition) follows its slot position, not its data. Use only for rows whose
+ * entire visible state derives from item(). Authors declare this contract by
+ * choosing <recycle> instead of <each>.
+ *
+ * indexSig is ALWAYS allocated (non-optional) — position IS the identity and is
+ * always read. Index-elision does NOT apply to RecycledListBinding.
+ */
+export type RecycledListBinding = BaseBinding & {
+  kind: 'recycled-list'
+  items: ReactiveExpr<readonly unknown[]>
+  // NO key — position is identity. <recycle key=> is a parse error.
+  itemTemplate: (valueSig: WritableSignal<unknown>, indexSig: WritableSignal<number>) => TemplateIR
+  // indexSig is non-optional here (contrast ListBinding where indexSig? is optional for elision).
+  /**
+   * The captured body TemplateIR — present on parse-path bindings (parseNvFile /
+   * parseNvFileForEmit) as a structural shortcut so callers do NOT need to call
+   * itemTemplate with stub signals. Absent on runtime-authored bindings.
+   */
+  bodyIR?: TemplateIR
+}
+
 // SyncBinding is an external-source sync (§8.5); contributes no §8.5.2 write-graph edge.
 export type SyncBinding = BaseBinding & {
   kind: 'sync'
@@ -286,6 +313,7 @@ export type Binding =
   | ChildBinding
   | ConditionalBinding
   | ListBinding
+  | RecycledListBinding
   | SyncBinding
   | ComponentBinding
   | SlotOutletBinding

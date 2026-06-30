@@ -64,6 +64,7 @@ import type {
   NodePath,
   PropBinding,
   ReactiveExpr,
+  RecycledListBinding,
   SlotContent,
   SlotOutletBinding,
   StyleVarBinding,
@@ -167,6 +168,10 @@ function wireBinding(
     }
     case 'sync': {
       wireSync(binding as SyncBinding, targetNode)
+      break
+    }
+    case 'recycled-list': {
+      wireRecycledList(binding, targetNode, doc)
       break
     }
     default: {
@@ -427,6 +432,13 @@ function wireChild(binding: ChildBinding, anchorNode: Node, doc: Document): void
 
 // ── ListBinding ───────────────────────────────────────────────────────────────
 
+type RecycledRecord = {
+  valueSig: WritableSignal<unknown>
+  indexSig: WritableSignal<number>
+  rootEl: Node
+  dispose: () => void
+}
+
 type ItemRecord = {
   valueSig: WritableSignal<unknown>
   indexSig?: WritableSignal<number> // absent when elided (itemReadsIndex === false)
@@ -517,6 +529,10 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
       nextEnd--
     }
 
+    // Capture the active element before any DOM mutations (Op 2 removes nodes, blurring focus).
+    // If the focused element is inside a row being deleted, we restore focus to a sibling row.
+    const activeBefore = doc.activeElement as HTMLElement | null
+
     // Op 2: remove stale records — only band rows can be absent from next.
     // Prefix/suffix keys are present in next by construction (they matched key+ref above).
     for (let bi = start; bi <= prevEnd; bi++) {
@@ -526,6 +542,25 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
         // biome-ignore lint/style/noNonNullAssertion: key was in records from prior reconcile
         records.get(k)!.dispose()
         records.delete(k)
+      }
+    }
+
+    // Focus fallback: if the focused element was inside a disposed row, restore focus.
+    // The disposed element is no longer connected; find the nearest surviving row in DOM order.
+    if (activeBefore !== null && !activeBefore.isConnected) {
+      // Sort surviving connected rows by DOM position (document order) and pick the first.
+      const survivors = [...records.values()].filter((r) => r.rootEl.isConnected)
+      survivors.sort((a, b) =>
+        a.rootEl.compareDocumentPosition(b.rootEl) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1,
+      )
+      const target = survivors[0]
+      if (target !== undefined && typeof (target.rootEl as HTMLElement).focus === 'function') {
+        ;(target.rootEl as HTMLElement).focus()
+      } else if (typeof (parent as HTMLElement).focus === 'function') {
+        // Fall back to the list container (parent), then document.body.
+        ;(parent as HTMLElement).focus()
+      } else {
+        doc.body?.focus()
       }
     }
 
@@ -688,15 +723,29 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
         ? // biome-ignore lint/style/noNonNullAssertion: suffix key was present in prev and unchanged
           records.get(suffixStartKey)!.rootEl
         : anchorNode
+
+    // activeBefore was captured before Op-2 (above). Re-use it here for the DOM-move
+    // focus-restore path (insertBefore blurs the element being relocated).
+    let focusHostMoved: HTMLElement | null = null
+
     for (let i = nextEnd; i >= start; i--) {
       // biome-ignore lint/style/noNonNullAssertion: nextKeys[i] set in the first pass above
       const k = nextKeys[i]!
       // biome-ignore lint/style/noNonNullAssertion: key was just set above (op1) or existed
       const rec = records.get(k)!
       if (!lisSet.has(i) && rec.rootEl.nextSibling !== ref) {
+        // Track whether the focused element is inside this node being moved.
+        if (activeBefore !== null && focusHostMoved === null && rec.rootEl.contains(activeBefore)) {
+          focusHostMoved = activeBefore
+        }
         parent.insertBefore(rec.rootEl, ref)
       }
       ref = rec.rootEl
+    }
+
+    // Restore focus on the element that traveled with its keyed data node.
+    if (focusHostMoved !== null && doc.activeElement !== focusHostMoved) {
+      focusHostMoved.focus()
     }
 
     // Record the new DOM sequence and item array for the next reconcile.
@@ -717,6 +766,80 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
   onCleanup(() => {
     for (const rec of records.values()) rec.dispose()
     records.clear()
+  })
+}
+
+function wireRecycledList(binding: RecycledListBinding, anchorNode: Node, doc: Document): void {
+  const parent = anchorNode.parentNode
+  if (parent === null) {
+    throw new Error('[nv/interpreter] RecycledListBinding: anchor has no parent')
+  }
+
+  const pool: RecycledRecord[] = []
+  const listOwner = getOwner()
+
+  effect(() => {
+    const next = binding.items()
+    const N = next.length
+    const P = pool.length
+
+    // Re-bind existing slots [0, min(N,P)) — pure Op-3. No dispose, no create.
+    const rebindCount = Math.min(N, P)
+    for (let i = 0; i < rebindCount; i++) {
+      // biome-ignore lint/style/noNonNullAssertion: i < P = pool.length, in-bounds
+      const rec = pool[i]!
+      rec.valueSig.set(next[i])
+      rec.indexSig.set(i)
+    }
+
+    // Grow [P, N) — create only the delta.
+    // IMPORTANT: mirrors wireList Op-1 exactly (L543–578). indexSig always allocated (no elision).
+    for (let i = P; i < N; i++) {
+      const valueSig = signal<unknown>(next[i])
+      const indexSig = signal<number>(i)
+      let mountedRoot!: Node
+
+      // biome-ignore lint/style/noNonNullAssertion: runWithOwner returns non-null when owner is non-null
+      const dispose = runWithOwner(listOwner, () =>
+        createRoot((d) => {
+          const itemIR = binding.itemTemplate(valueSig, indexSig)
+          const { roots } = mountFragment(itemIR, parent, doc, anchorNode)
+          const contentRoots = roots.filter(
+            (n) => n.nodeType !== 3 /* TEXT_NODE */ || (n.textContent?.trim() ?? '') !== '',
+          )
+          const [root] = contentRoots
+          if (root === undefined || contentRoots.length !== 1) {
+            throw new Error(
+              '[nv] Multi-root list items are not supported in v1. Wrap the item template in a single root element.',
+            )
+          }
+          mountedRoot = root
+          onCleanup(() => {
+            if (mountedRoot.parentNode !== null) mountedRoot.parentNode.removeChild(mountedRoot)
+          })
+          return d
+        }),
+      )!
+
+      pool.push({ valueSig, indexSig, rootEl: mountedRoot, dispose })
+    }
+
+    // Shrink [N, P) — dispose only the delta.
+    // Per-entry try/catch ensures all entries [N, P) are attempted for disposal even if
+    // one throws; pool.length = N runs unconditionally after all entries are attempted.
+    for (let i = N; i < P; i++) {
+      try {
+        // biome-ignore lint/style/noNonNullAssertion: i < P = pool.length, in-bounds
+        pool[i]!.dispose()
+      } catch {
+        // swallow per-entry errors; all entries must be attempted
+      }
+    }
+    pool.length = N
+  })
+  onCleanup(() => {
+    for (const rec of pool) rec.dispose()
+    pool.length = 0
   })
 }
 

@@ -17,6 +17,7 @@ import type {
   EventBinding,
   ListBinding,
   PropBinding,
+  RecycledListBinding,
   SlotOutletBinding,
   StyleVarBinding,
   TemplateIR,
@@ -153,6 +154,17 @@ function bindingEqual(
       const bBody = bReadsIndex ? bl.itemTemplate(stubVs, stubIs) : bl.itemTemplate(stubVs)
       const bodyRes = irStructurallyEqual(undefined, aBody, bBody)
       if (!bodyRes.equal) return { equal: false, reason: `${p}.itemBody → ${bodyRes.reason}` }
+      break
+    }
+    case 'recycled-list': {
+      if (b.kind !== 'recycled-list')
+        return { equal: false, reason: `${p}.kind: ${a.kind} vs ${b.kind}` }
+      const aRL = a as RecycledListBinding
+      const bRL = b as RecycledListBinding
+      if (aRL.bodyIR === undefined || bRL.bodyIR === undefined)
+        return { equal: false, reason: 'recycled-list body IR missing' }
+      const bodyDiff = irStructurallyEqual(slotDoc, aRL.bodyIR, bRL.bodyIR)
+      if (!bodyDiff.equal) return { equal: false, reason: `${p}.bodyIR: ${bodyDiff.reason}` }
       break
     }
     case 'component': {

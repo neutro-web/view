@@ -729,6 +729,12 @@ function emitSetup(
         break
       }
 
+      case 'recycled-list': {
+        throw new Error(
+          '[nv/emitted-mount] RecycledListBinding not yet implemented in compiler back-end',
+        )
+      }
+
       default: {
         const kind = (binding as Binding).kind
         throw new Error(`[nv/emit] Binding kind '${kind}' is not implemented.`)
