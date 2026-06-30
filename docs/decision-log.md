@@ -5031,3 +5031,11 @@ Run stability (3 runs): Arm 1 variation <5% (highly stable at 0.285ms mean). Arm
 3. **Interaction with keyed reconcile:** Recycled path is simpler (contiguous window, no LIS needed). Likely a separate, simpler path — not a mode of wireList.
 4. **Scope:** does nv ship virtualization itself, or just the recycling primitive? (Primitive is smaller, more composable, leaves virtualization strategy to userland.)
 5. **Closure axiom:** renderer-layer change only (re-bind signals, no new reactive primitive). Additive IR or API extension. No reactive-core touch.
+
+### [2026-06-29] Recycling list mode `<recycle>` LANDED at `1ee6a6b` — non-keyed position-identity list. Cites [recycling design gate], [Probe H correction].
+
+`<recycle>` non-keyed recycled list mode landed (13 commits, 787 green, typecheck clean). Distinct construct per ruling (a): separate `<recycle>` element, `RecycledListBinding` (`kind:'recycled-list'`), standalone `wireRecycledList`, `data-nv-recycle` sentinel. Position-identity: rows pooled, re-bound via `valueSig.set`/`indexSig.set` (Op-3), zero dispose/create per scroll step. Grow path mirrors `wireList` Op-1 verbatim (Bug-1 fix: correct `mountFragment` signature, verified at source). Keyed `<each>` untouched (G0 core-clean + G1 distinct-path verified by diff). `<recycle key=>` throws (3 sentinel forms). indexSig always allocated (no elision on recycled path). Template-IR v0.4.4.
+
+**Verification caveat (architect):** T1-1 identity contract (focus-follows-slot-position) is tested in JSDOM — a structural regression guard, but JSDOM is barred from verdict paths and focus/activeElement is exactly where it diverges from real browsers. Gate criterion 3 overstates as unqualified ✅. **Required before v1 ship:** one Playwright recycling spec proving BOTH node-churn = 0/scroll-step (deferred criterion 7) AND focus-follows-position in a real browser. Until then the identity contract is verified structurally, not in a verdict-valid environment.
+
+Competitive: `<recycle>` closes nv's one create-weak workload (virtual scroll) — recycling converts dispose+create into Op-3 signal propagation. The win rests on node-churn elimination (source-verified zero-alloc steady-state; runtime measurement deferred), not the overstated probe wall-clock.
