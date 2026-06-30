@@ -156,6 +156,18 @@ function bindingEqual(
       if (!bodyRes.equal) return { equal: false, reason: `${p}.itemBody → ${bodyRes.reason}` }
       break
     }
+    case 'recycled-list': {
+      if (b.kind !== 'recycled-list')
+        return { equal: false, reason: `${p}.kind: ${a.kind} vs ${b.kind}` }
+      const stubVs = signal<unknown>(null)
+      const stubIs = signal<number>(0)
+      const aBody = (a as RecycledListBinding).itemTemplate(stubVs, stubIs)
+      const bBody = (b as RecycledListBinding).itemTemplate(stubVs, stubIs)
+      const bodyDiff = irStructurallyEqual(undefined, aBody, bBody) // doc is FIRST arg
+      if (!bodyDiff.equal)
+        return { equal: false, reason: `${p}.itemTemplate body: ${bodyDiff.reason}` }
+      break
+    }
     case 'component': {
       // Slot content was previously UNCOMPARED — a ComponentBinding matched on
       // kind+path alone, so <each>-in-slot and static-class rewrites in slot
@@ -209,16 +221,6 @@ function bindingEqual(
         const aRes = irStructurallyEqual(undefined, a.alternate, bc.alternate)
         if (!aRes.equal) return { equal: false, reason: `${p}.alternate → ${aRes.reason}` }
       }
-      break
-    }
-    case 'recycled-list': {
-      const stubVs = signal<unknown>(null)
-      const stubIs = signal<number>(0)
-      const aBody = (a as RecycledListBinding).itemTemplate(stubVs, stubIs)
-      const bBody = (b as RecycledListBinding).itemTemplate(stubVs, stubIs)
-      const bodyDiff = irStructurallyEqual(undefined, aBody, bBody) // doc is FIRST arg
-      if (!bodyDiff.equal)
-        return { equal: false, reason: `${p}.itemTemplate body: ${bodyDiff.reason}` }
       break
     }
     case 'style-var': {

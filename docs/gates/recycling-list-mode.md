@@ -10,5 +10,5 @@
 4. **No core touch:** `git diff main -- src/core/` shows no changes.
 5. **emitted-mount.ts stub only:** `grep 'RecycledList\|recycled-list' src/compiler/emitted-mount.ts` shows only a `throw new Error(...)` — no full implementation.
 6. **html-tag.ts unmodified:** `git diff main -- src/renderer/html-tag.ts` shows no changes.
-7. **Node-churn = 0:** T2-1 Playwright gate green (recycled arm shows 0 alloc/free per scroll step).
-8. **typecheck + test:** `pnpm typecheck && pnpm test` green on main HEAD at landing SHA.
+7. **Node-churn = 0:** DEFERRED — T2-1 Playwright test (recycled arm alloc/free per scroll step) not yet written. Required before v1 ship.
+8. **typecheck + test:** `pnpm typecheck && pnpm test` green at SHA `3811b0fc99a78840116af042d66df740b5ff704b` — 787 tests, 0 typecheck errors.

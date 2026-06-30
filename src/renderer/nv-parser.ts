@@ -675,6 +675,14 @@ function walkNvNodeList(
             '[nv] <recycle> does not take key= (position is identity; use <each key=> for keyed lists)',
           )
         }
+        // Also catch .key=${expr} (prop sentinel — data-nv-prop-K === 'key')
+        for (let k = 0; k < holeExprs.length; k++) {
+          if (recycleEl.getAttribute(`data-nv-prop-${k}`) === 'key') {
+            throw new Error(
+              '[nv] <recycle> does not take key= (position is identity; use <each key=> for keyed lists)',
+            )
+          }
+        }
 
         // Extract let-bound names — same JSDOM broken-attr reassembly as <each>
         const rawLet = recycleEl.getAttribute('let') ?? ''
@@ -946,11 +954,10 @@ function pushRecycledListBinding(
 ): void {
   const pathIndex = allPaths.length
   allPaths.push(wl.anchorPath)
-  const stubExpr = (() => undefined) as ReactiveExpr<unknown>
   bindings.push({
     kind: 'recycled-list',
     pathIndex,
-    items: stubExpr as ReactiveExpr<readonly unknown[]>,
+    items: (() => [] as readonly unknown[]) as ReactiveExpr<readonly unknown[]>,
     itemTemplate: (valueSig, indexSig) => {
       void valueSig
       void indexSig
@@ -3004,6 +3011,12 @@ function computeBindingThunks(
   })
 
   const recycledListThunks: ThunkSource[] = pendingRecycleItems.map((pe) => {
+    if (pe.letNames.length < 2) {
+      throw new Error(
+        `[nv] <recycle> requires two let-bound names (e.g. let={item, i}); got: ${JSON.stringify(pe.letNames)}`,
+      )
+    }
+
     const itemsExpr = holeExprs[pe.itemsHoleIdx] as ts.Expression
     const itemsSrc = eraseSignalReadsInNode(itemsExpr, symbols.all, propsAccessors)
 
@@ -3027,12 +3040,6 @@ function computeBindingThunks(
         mergedAccessors,
       )
     })
-
-    if (pe.letNames.length < 2) {
-      throw new Error(
-        `[nv] <recycle> requires two let-bound names (e.g. let={item, i}); got: ${JSON.stringify(pe.letNames)}`,
-      )
-    }
     return {
       kind: 'recycled-list' as const,
       itemsSrc,

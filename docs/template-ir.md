@@ -170,12 +170,12 @@ type Binding =
   | ChildBinding       //  │
   | ConditionalBinding // ─┘
   | ListBinding        //  ── designed, now in scope (§3.7)
+  | RecycledListBinding //  ── v0.4.4 (non-keyed recycled list; position-identity)
   | SyncBinding        //  ── designed, deferred (§3.8)
   | ComponentBinding   //  ── v0.3 (component API)
   | SlotOutletBinding  //  ── v0.3.1 (slot consumption); v0.3.3 adds optional `fallback?: TemplateIR`
   | ClassListBinding   //  ── v0.4.1 (class-selection; per-key classList.toggle)
-  | StyleVarBinding    //  ── v0.4.2 ($style factory-form; reactive CSS custom property)
-  | RecycledListBinding; //  ── v0.4.4 (non-keyed recycled list; position-identity)
+  | StyleVarBinding;   //  ── v0.4.2 ($style factory-form; reactive CSS custom property)
  
 type BaseBinding = {
   pathIndex: number;   // index into shape.bindingPaths — which node this targets
