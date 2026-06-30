@@ -1,0 +1,25 @@
+const AppRecycled = $component(() => {
+  $script(() => {
+    const M = 10000
+    const S = 25
+    const allRows = []
+    for (let i = 0; i < M; i++) allRows.push({ id: i, label: 'row-' + i })
+
+    const windowStart = signal(0)
+    const windowN = signal(50)
+
+    function scrollStep() {
+      windowStart.set((windowStart() + S) % (M - 100))
+    }
+  })
+  $render(() => html`
+    <div>
+      <button id="scroll-step" @click="${() => scrollStep()}">Scroll</button>
+      <button id="set-n-50" @click="${() => windowN.set(50)}">N=50</button>
+      <button id="set-n-100" @click="${() => windowN.set(100)}">N=100</button>
+      <recycle .of="${() => allRows.slice(windowStart(), windowStart() + windowN())}" let={item}>
+        <div class="row" data-id="${item.id}">${item.label}</div>
+      </recycle>
+    </div>
+  `)
+})
