@@ -96,7 +96,7 @@ _Last updated: 2026-06-28 (index-elision Commission 1 landed at `a495716`; Templ
   and **P-2b** (fast dispose, ~0.35× addressable vs Svelte, mostly inherent) =
   characterized-not-commissioned. Goal: narrow create gap where provably free; do NOT
   trade mutation speed to chase Solid's create number.
-- **Live frontier (code/ruling):** index-elision **FULLY CLOSED** (Commission 1 LANDED `a495716`; Commission 2 MEASURED 2026-06-29). **Reconcile Lever A+B LANDED `79f3cb8`** (prefix/suffix skip + key-cache). **Lever C probes BOTH CLEAR (2026-06-29)** — C-paint: intrinsic layout (90% paint, staging no effect); C-create: binding-node weight only 0.8% of gap (DOM-stamping dominates). **Probes D/E/F/G exhausted create track (7 probes): parse 3.5ms, scope removal regresses, flush neutral, effect-count 0.4% recovery, lean-mount (D2+D3) zero signal. CREATE TRACK FULLY CLOSED — 1.49× gap is irreducible structural cost of fine-grained reactivity on these mechanics.** PT-1b Suspense+SWR named open. P-2c-B reopenable. PT-1a `resource` + P-2c-A1 LANDED. **Reactive-core contract v0.4.3.** P-1b CLOSED.
+- **Live frontier (code/ruling):** index-elision **FULLY CLOSED** (Commission 1 LANDED `a495716`; Commission 2 MEASURED 2026-06-29). **Reconcile Lever A+B LANDED `79f3cb8`** (prefix/suffix skip + key-cache). **Lever C probes BOTH CLEAR (2026-06-29)** — C-paint: intrinsic layout (90% paint, staging no effect); C-create: binding-node weight only 0.8% of gap (DOM-stamping dominates). **Probes D/E/F/G exhausted create track (7 probes): parse 3.5ms, scope removal regresses, flush neutral, effect-count 0.4% recovery, lean-mount (D2+D3) zero signal. CREATE TRACK FULLY CLOSED — 1.49× gap is irreducible structural cost of fine-grained reactivity on these mechanics.** **Probe H — Node Recycling: BUILD candidate (12× scroll-churn win, mean ratio; keyed 0.285ms/step vs recycled 0.024ms/step at 25-row half-window churn). Recycling converts dispose+create into pure signal propagation — theoretical minimum.** PT-1b Suspense+SWR named open. P-2c-B reopenable. PT-1a `resource` + P-2c-A1 LANDED. **Reactive-core contract v0.4.3.** P-1b CLOSED.
 - **Index-elision perf verdict (Commission 2):** T2-1 null (reorder-heavy path dominated by DOM, not indexSig); T2-3 memory: elided 2.154× vanilla vs non-elided 2.345× vanilla (−0.353 MB / −0.19×). Total memory lift (P-2c-A1 + elision): 4.641 → 4.003 MB. Lever stands on correctness + memory.
 - **Reconcile Lever A+B perf (2026-06-29):** remove-one script −60% (1.5→0.6ms, near vanilla 0.5ms); wall-clock −3% (paint-bound — 90% of 17ms confirmed by Probe 2 DevTools trace); swap no-regress; key-call 4n→n. C-paint CLEAR (staging no effect, layout intrinsic). C-create CLEAR on node-weight hypothesis; redirect to C-create-B (DOM-stamping census).
 - **Standing CP-2d board (current = post-A1 CP-2d-REMEASURE, L4633):** create-1k 1.78×, swap 0.29×, select 0.27×, update-10th 0.18×, remove-one **script-parity with vanilla** (0.6ms vs 0.5ms) / wall-clock 1.23× (paint-bound), memory **2.154×** (post-elision). Note: tight mutation baselines (0.29×/0.27×/0.18×) are JIT-warmed session-specific.
@@ -4960,3 +4960,52 @@ Update-10th and swap: no regression (label remains reactive post-D2; source edge
 **"Create intrinsic" is now EARNED**, not assumed. Prior claim (after 6 probes) was premature; Probe G closes the construction-mechanics axis that six component probes couldn't reach. With D1 inadmissible and D2/D3 null, the 1.49× gap is structural and locked.
 
 **Pivot confirmed: PT-1b / non-perf tracks. P-2c-B reopenable for compile-time binding-count reduction (different axis — reducing IR binding count, not per-binding cost).**
+
+---
+
+### [2026-06-29] Probe H — Node Recycling for Virtualized Lists: **BUILD CANDIDATE (~12× scroll-churn reduction).**
+
+**Probe H is measurement-only. No code landed. Throwaway worktree `probe-h-recycling` deleted. Contract v0.4.3 unchanged.**
+
+**Premise:** The 7 create probes established create cost is intrinsic *as an operation*. Probe H asked: for scroll-churn workloads (virtualized infinite scroll), can create be avoided entirely via recycling? The existing reconciler's Op 3 (`valueSig.set(item)`) IS recycling — the probe just decouples it from key matching.
+
+**Framing:** Recycling = the missing non-keyed list mode (`<Index>` in Solid, absent in nv). It is NOT a change to keyed semantics. Keyed rows maintain identity (focus, local DOM state) with the data. Recycled rows maintain identity with the position. These are two deliberately different modes — Probe H validates the case for adding the second.
+
+**What was measured:**
+
+- **Arm 1 (keyed, as-is):** Used nv's real `mount()` + `ListBinding` IR. Scroll step shifts window by 25 rows → reconciler runs 25 Op 2 (dispose) + 25 Op 1 (create) per step. Full keyed reconciler path, no shortcuts.
+- **Arm 2 (recycled pool):** 50 slot signals created once. Scroll step = `batch(50 × sig.set()) + flushSync()`. Zero ReactiveNode allocations during scroll. Zero dispose() calls.
+
+**M1: scroll-churn timing (window N=50, step=25, 40 measured steps, 5 warmup, Chrome headless, 3 runs)**
+
+| arm | median | mean | p90 | per-step cost |
+|---|---|---|---|---|
+| Arm 1 (keyed: 25 Op2 + 25 Op1) | 0.300ms | 0.285ms | 0.400ms | full reconciler |
+| Arm 2 (recycled: 50 sig.set) | <0.1ms | 0.024ms | 0.100ms | pure propagation |
+| **Ratio (mean)** | | **~12×** | | |
+
+Arm 2 median is below Chrome's ~0.1ms timer resolution (28/40 steps measured as 0ms). Mean (0.024ms/step) and run-to-run stability (within 20%) give the usable signal. Ratio by mean = 0.285 / 0.024 ≈ **12×**.
+
+Run stability (3 runs): Arm 1 variation <5% (highly stable at 0.285ms mean). Arm 2 variation sub-resolution mean, consistent at ~0.024ms.
+
+**Trap guards:** All confirmed:
+- Arm 1 render/update/row-count: PASS
+- Arm 2 render/update/row-count constant (confirmed pool, no growth): PASS
+- Recycling engaged (0 dispose/create during Arm 2 scroll): CONFIRMED
+
+**M3: Reactive node churn:**
+- Arm 1: 40 steps × 25 create+dispose × ~7 ReactiveNodes = ~7,000 nodes allocated and freed during the 40-step measurement window.
+- Arm 2: 0 ReactiveNode allocations during scroll. Pure signal propagation.
+
+**Conclusion:** Recycling converts scroll-churn from reconciler-level cost (create + dispose, nv's worst operation) to pure reactive propagation cost (signal.set + effect re-run, nv's best operation). The 12× mean ratio is a confirmed structural win. For virtualized infinite scroll — the exact workload where nv's create deficit reaches real users — the answer is not "make create faster" (proven intrinsic across 7 probes) but "avoid create via a recycled position-keyed list mode."
+
+**Absolute numbers are modest** (0.285ms vs 0.024ms per 25-row step, both fast in isolation). The win matters at larger windows, longer lists, and combined with browser layout budget — a virtualized scroller recycling 100 rows per step (step=50) in a 60fps budget (16ms/frame) would see 10× more budget headroom on the reconcile side.
+
+**Side note:** `mount` must be imported from `dist/renderer/interpreter.js` directly — the renderer index re-exports `nv-parser.js` which pulls `typescript` (not browser-compatible). Separate cleanup ticket.
+
+**BUILD CANDIDATE. Design gate questions for architect:**
+1. **API surface:** `<each recycle>` variant / non-keyed `<each>` / windowing helper? Solid's `<Index>` is a separate component. nv's closure-axiom and authoring model need a ruling.
+2. **Identity semantics contract:** Recycling = position-identity. Must define when recycling is correct (rows with no key-tied local DOM state) and how the API signals this so users don't recycle rows that need stable identity. Contract-adjacent.
+3. **Interaction with keyed reconcile:** Recycled path is simpler (contiguous window, no LIS needed). Likely a separate, simpler path — not a mode of wireList.
+4. **Scope:** does nv ship virtualization itself, or just the recycling primitive? (Primitive is smaller, more composable, leaves virtualization strategy to userland.)
+5. **Closure axiom:** renderer-layer change only (re-bind signals, no new reactive primitive). Additive IR or API extension. No reactive-core touch.
