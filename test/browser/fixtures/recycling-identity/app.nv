@@ -1,0 +1,41 @@
+const AppRecycle = $component(() => {
+  $script(() => {
+    const items = signal(['A', 'B', 'C', 'D', 'E'])
+
+    function swapData() {
+      const el = document.getElementById('next-data')
+      if (el) items.set(JSON.parse(el.textContent))
+    }
+  })
+  $render(() => html`
+    <div>
+      <button id="swap-data" @click="${() => swapData()}">Swap</button>
+      <ul id="recycle-list">
+        <recycle .of="${items}" let={item, i}>
+          <li data-label="${item}"><input class="row-input" /></li>
+        </recycle>
+      </ul>
+    </div>
+  `)
+})
+
+const AppKeyed = $component(() => {
+  $script(() => {
+    const items = signal(['A', 'B', 'C', 'D', 'E'])
+
+    function swapData() {
+      const el = document.getElementById('next-data')
+      if (el) items.set(JSON.parse(el.textContent))
+    }
+  })
+  $render(() => html`
+    <div>
+      <button id="swap-data" @click="${() => swapData()}">Swap</button>
+      <ul id="keyed-list">
+        <each .of="${items}" key="${(item) => item}" let={item, i}>
+          <li data-label="${item}"><input class="row-input" /></li>
+        </each>
+      </ul>
+    </div>
+  `)
+})

@@ -700,15 +700,31 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
         ? // biome-ignore lint/style/noNonNullAssertion: suffix key was present in prev and unchanged
           records.get(suffixStartKey)!.rootEl
         : anchorNode
+
+    // Save focused element before any DOM moves — insertBefore on an existing node
+    // first removes it from the DOM, which blurs the focused element. We restore
+    // focus after all moves complete so the keyed contract (focus follows data) holds.
+    const activeBefore = doc.activeElement as HTMLElement | null
+    let focusHostMoved: HTMLElement | null = null
+
     for (let i = nextEnd; i >= start; i--) {
       // biome-ignore lint/style/noNonNullAssertion: nextKeys[i] set in the first pass above
       const k = nextKeys[i]!
       // biome-ignore lint/style/noNonNullAssertion: key was just set above (op1) or existed
       const rec = records.get(k)!
       if (!lisSet.has(i) && rec.rootEl.nextSibling !== ref) {
+        // Track whether the focused element is inside this node being moved.
+        if (activeBefore !== null && focusHostMoved === null && rec.rootEl.contains(activeBefore)) {
+          focusHostMoved = activeBefore
+        }
         parent.insertBefore(rec.rootEl, ref)
       }
       ref = rec.rootEl
+    }
+
+    // Restore focus on the element that traveled with its keyed data node.
+    if (focusHostMoved !== null && doc.activeElement !== focusHostMoved) {
+      focusHostMoved.focus()
     }
 
     // Record the new DOM sequence and item array for the next reconcile.
