@@ -13,7 +13,7 @@ import type {
   TextBinding,
   WritableSignal,
 } from '../../src/renderer/ir.js'
-import { parseNvFile } from '../../src/renderer/nv-parser.js'
+import { parseNvFile, parseNvFileForEmit } from '../../src/renderer/nv-parser.js'
 
 const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>')
 const document = dom.window.document
@@ -198,3 +198,30 @@ it('T1-4: pool size tracks list length; grow/shrink are delta-only', () => {
 // T1-5: additive-only proof — keyed <each> suite unchanged. Verified by the full 780-test
 // baseline passing in CI. No additional test needed here: regression would surface as failures
 // in test/renderer/each-authoring.test.ts, test/renderer/interpreter.test.ts, etc.
+
+// ── T1-6: letNames.length < 2 guard (emit path) ──
+// The guard lives in computeBindingThunks (emit path only). parseNvFile (structural path)
+// does NOT enforce the two-name requirement — only the emit path does when building thunks.
+
+it('T1-6: throws when fewer than two let-names are provided (emit path guard)', () => {
+  const src = `
+    const C = $component(() => {
+      $script(() => { const items = signal([]) })
+      $render(() => html\`<recycle .of="\${items}" let={item}><span>\${item}</span></recycle>\`)
+    })
+  `
+  // parseNvFileForEmit triggers computeBindingThunks which enforces the two-name requirement.
+  expect(() => parseNvFileForEmit(src, 'test.nv', document)).toThrow(/requires two let-bound names/)
+})
+
+// ── T1-7: <recycle> with no .of is a parse error ──
+
+it('T1-7: throws when .of is missing', () => {
+  const src = `
+    const C = $component(() => {
+      $script(() => { const items = signal([]) })
+      $render(() => html\`<recycle let={item, i}><span>\${item}</span></recycle>\`)
+    })
+  `
+  expect(() => parseNvFile(src, 'test.nv', document)).toThrow(/requires \.of/)
+})

@@ -1001,6 +1001,7 @@ function buildNvSlotContentIR(
     components,
     consumed,
     lists: slotLists,
+    recycledLists: slotRecycledLists,
   } = walkNvNodeList(
     Array.from(fragWrapper.childNodes),
     holeExprs,
@@ -1044,6 +1045,10 @@ function buildNvSlotContentIR(
   // OP-3: thread diagnostics to the parent's diagnostic channel.
   for (const wl of slotLists) {
     pushListBinding(wl, allPaths, bindings, diagnostics)
+  }
+  // Wire <recycle>-in-slot (Fix: recycledLists was previously dropped — silently ignored).
+  for (const wl of slotRecycledLists) {
+    pushRecycledListBinding(wl, allPaths, bindings)
   }
 
   const holeIndices = [...holeInfos.map((h) => h.origIdx), ...consumed].filter(
