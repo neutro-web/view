@@ -616,6 +616,8 @@ function walkNvNodeList(
           `each:body:${lists.length}`,
           signals,
           letNames,
+          undefined,
+          true, // isEachBody — <recycle> inside <each> body is unsupported
         )
         for (const idx of bodyHoleIndices) consumed.add(idx)
 
@@ -1000,6 +1002,7 @@ function buildNvSlotContentIR(
   signals: ReadonlySet<string>,
   letNames: string[] = [],
   diagnostics: NvDiagnostic[] = [],
+  isEachBody = false,
 ): { ir: TemplateIR; holeIndices: number[]; letNames: string[] } {
   const stubExpr = (() => undefined) as ReactiveExpr<unknown>
   const stubHandler = (() => (_e: Event) => undefined) as HandlerExpr
@@ -1071,10 +1074,16 @@ function buildNvSlotContentIR(
   for (const wl of slotLists) {
     pushListBinding(wl, allPaths, bindings, diagnostics)
   }
-  // <recycle> nested inside an <each> body or component slot is a hard error.
-  // Fail early at parse time (before emit path can propagate the invalid IR).
-  if (slotRecycledLists.length > 0) {
-    throw new Error('[nv] <recycle> cannot be nested inside an <each> body or component slot')
+  // <recycle> nested inside an <each> item body is a hard error —
+  // the emitter cannot handle it. Component slot bodies are supported via pushRecycledListBinding.
+  if (isEachBody && slotRecycledLists.length > 0) {
+    throw new Error('[nv] <recycle> cannot be nested inside an <each> body')
+  }
+  // Wire <recycle>-in-slot for component slot bodies (D-SS-2: same structural path as lists).
+  if (!isEachBody) {
+    for (const wl of slotRecycledLists) {
+      pushRecycledListBinding(wl, allPaths, bindings)
+    }
   }
 
   const holeIndices = [...holeInfos.map((h) => h.origIdx), ...consumed].filter(

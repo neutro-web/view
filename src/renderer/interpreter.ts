@@ -546,25 +546,21 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
     }
 
     // Focus fallback: if the focused element was inside a disposed row, restore focus.
-    // The disposed element is no longer connected; find the nearest remaining row or fall back.
+    // The disposed element is no longer connected; find the nearest surviving row in DOM order.
     if (activeBefore !== null && !activeBefore.isConnected) {
-      // Try to focus any surviving row in insertion order (first record wins).
-      let focused = false
-      for (const rec of records.values()) {
-        const candidate = rec.rootEl as HTMLElement | null
-        if (candidate !== null && typeof (candidate as HTMLElement).focus === 'function') {
-          ;(candidate as HTMLElement).focus()
-          focused = true
-          break
-        }
-      }
-      // Fall back to the list container (parent), then document.body.
-      if (!focused) {
-        if (typeof (parent as HTMLElement).focus === 'function') {
-          ;(parent as HTMLElement).focus()
-        } else {
-          doc.body?.focus()
-        }
+      // Sort surviving connected rows by DOM position (document order) and pick the first.
+      const survivors = [...records.values()].filter((r) => r.rootEl.isConnected)
+      survivors.sort((a, b) =>
+        a.rootEl.compareDocumentPosition(b.rootEl) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1,
+      )
+      const target = survivors[0]
+      if (target !== undefined && typeof (target.rootEl as HTMLElement).focus === 'function') {
+        ;(target.rootEl as HTMLElement).focus()
+      } else if (typeof (parent as HTMLElement).focus === 'function') {
+        // Fall back to the list container (parent), then document.body.
+        ;(parent as HTMLElement).focus()
+      } else {
+        doc.body?.focus()
       }
     }
 
@@ -829,16 +825,17 @@ function wireRecycledList(binding: RecycledListBinding, anchorNode: Node, doc: D
     }
 
     // Shrink [N, P) — dispose only the delta.
-    // try/finally guarantees pool.length = N even if a dispose() call throws,
-    // preventing pool from holding stale references to disposed records.
-    try {
-      for (let i = N; i < P; i++) {
+    // Per-entry try/catch ensures all entries [N, P) are attempted for disposal even if
+    // one throws; pool.length = N runs unconditionally after all entries are attempted.
+    for (let i = N; i < P; i++) {
+      try {
         // biome-ignore lint/style/noNonNullAssertion: i < P = pool.length, in-bounds
         pool[i]!.dispose()
+      } catch {
+        // swallow per-entry errors; all entries must be attempted
       }
-    } finally {
-      pool.length = N
     }
+    pool.length = N
   })
   onCleanup(() => {
     for (const rec of pool) rec.dispose()

@@ -159,13 +159,12 @@ function bindingEqual(
     case 'recycled-list': {
       if (b.kind !== 'recycled-list')
         return { equal: false, reason: `${p}.kind: ${a.kind} vs ${b.kind}` }
-      const stubVs = signal<unknown>(null)
-      const stubIs = signal<number>(0)
-      const aBody = (a as RecycledListBinding).itemTemplate(stubVs, stubIs)
-      const bBody = (b as RecycledListBinding).itemTemplate(stubVs, stubIs)
-      const bodyDiff = irStructurallyEqual(slotDoc, aBody, bBody)
-      if (!bodyDiff.equal)
-        return { equal: false, reason: `${p}.itemTemplate body: ${bodyDiff.reason}` }
+      const aRL = a as RecycledListBinding
+      const bRL = b as RecycledListBinding
+      if (aRL.bodyIR === undefined || bRL.bodyIR === undefined)
+        return { equal: false, reason: 'recycled-list body IR missing' }
+      const bodyDiff = irStructurallyEqual(slotDoc, aRL.bodyIR, bRL.bodyIR)
+      if (!bodyDiff.equal) return { equal: false, reason: `${p}.bodyIR: ${bodyDiff.reason}` }
       break
     }
     case 'component': {
