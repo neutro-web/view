@@ -747,7 +747,8 @@ function wireRecycledList(binding: RecycledListBinding, anchorNode: Node, doc: D
     const P = pool.length
 
     // Re-bind existing slots [0, min(N,P)) — pure Op-3. No dispose, no create.
-    for (let i = 0; i < Math.min(N, P); i++) {
+    const rebindCount = Math.min(N, P)
+    for (let i = 0; i < rebindCount; i++) {
       // biome-ignore lint/style/noNonNullAssertion: i < P = pool.length, in-bounds
       const rec = pool[i]!
       rec.valueSig.set(next[i])

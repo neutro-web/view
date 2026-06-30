@@ -439,6 +439,8 @@ Non-keyed recycled list. Row identity follows slot **position**, not data key. R
 
 **Authoring:** `<recycle .of=${items} let={item, i}>...</recycle>`. `key=` is forbidden (throws at parse time). `indexSig` is always allocated — index-elision does not apply.
 
+**Requires exactly two let-bound names** (value and index): `let={item, i}`. Providing fewer than two names is a parse error on the emit path (`[nv] <recycle> requires two let-bound names`).
+
 **IR kind:** `'recycled-list'`  
 **Interpreter:** `wireRecycledList` (standalone function, not a mode of `wireList`)  
 **Distinct from:** `ListBinding` (keyed, uses key-diff + LIS; `<each key=>` authoring)
