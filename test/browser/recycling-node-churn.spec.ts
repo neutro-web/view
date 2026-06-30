@@ -76,6 +76,7 @@ test.beforeAll(async () => {
 async function mountArm(
   page: import('@playwright/test').Page,
   arm: 'AppRecycled' | 'AppKeyed',
+  n: 50 | 100 = 50,
 ): Promise<void> {
   await page.goto('about:blank')
   await page.addScriptTag({ path: BUNDLE })
@@ -84,6 +85,12 @@ async function mountArm(
     g[armName].mount(document.body, document)
     g.flushSync()
   }, arm)
+  if (n === 100) {
+    await page.locator('#set-n-100').click()
+    await page.evaluate(() => {
+      ;(window as unknown as { __nvChurn: ChurnGlobal }).__nvChurn.flushSync()
+    })
+  }
 }
 
 async function scrollStep(page: import('@playwright/test').Page): Promise<void> {
@@ -163,4 +170,46 @@ test('A2 keyed control: nodeAllocCount > 0 (confirms churn is real in keyed mode
     allocCount,
     'keyed control: non-zero ReactiveNode allocations (proves churn)',
   ).toBeGreaterThan(0)
+})
+
+test('A3 wall-clock: log scroll-step timing both arms, N=50 and N=100 (supplementary — never asserted)', async ({
+  page,
+}) => {
+  async function measureArm(arm: 'AppRecycled' | 'AppKeyed', n: 50 | 100): Promise<number[]> {
+    await mountArm(page, arm, n)
+    // warmup
+    for (let i = 0; i < WARMUP_STEPS; i++) await scrollStep(page)
+    // measured — time each step inside the browser to exclude round-trip overhead
+    const times: number[] = []
+    for (let i = 0; i < MEASURED_STEPS; i++) {
+      const ms = await page.evaluate(() => {
+        const g = (window as unknown as { __nvChurn: ChurnGlobal }).__nvChurn
+        const btn = document.querySelector<HTMLElement>('#scroll-step')!
+        const t0 = performance.now()
+        btn.click()
+        g.flushSync()
+        return performance.now() - t0
+      })
+      times.push(ms)
+    }
+    return times
+  }
+
+  const avg = (arr: number[]) => arr.reduce((a, b) => a + b, 0) / arr.length
+  const max = (arr: number[]) => Math.max(...arr)
+
+  for (const n of [50, 100] as const) {
+    const recycledTimes = await measureArm('AppRecycled', n)
+    const keyedTimes = await measureArm('AppKeyed', n)
+    console.log(`\nA3 wall-clock N=${n}:`)
+    console.log(
+      `  recycled avg=${avg(recycledTimes).toFixed(2)}ms max=${max(recycledTimes).toFixed(2)}ms`,
+    )
+    console.log(
+      `  keyed    avg=${avg(keyedTimes).toFixed(2)}ms max=${max(keyedTimes).toFixed(2)}ms`,
+    )
+  }
+
+  // No timing assertion — supplementary evidence only
+  expect(true).toBe(true)
 })
