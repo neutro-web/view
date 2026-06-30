@@ -163,7 +163,7 @@ function bindingEqual(
       const stubIs = signal<number>(0)
       const aBody = (a as RecycledListBinding).itemTemplate(stubVs, stubIs)
       const bBody = (b as RecycledListBinding).itemTemplate(stubVs, stubIs)
-      const bodyDiff = irStructurallyEqual(undefined, aBody, bBody) // doc is FIRST arg
+      const bodyDiff = irStructurallyEqual(slotDoc, aBody, bBody)
       if (!bodyDiff.equal)
         return { equal: false, reason: `${p}.itemTemplate body: ${bodyDiff.reason}` }
       break
