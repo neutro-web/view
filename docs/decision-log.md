@@ -5037,3 +5037,15 @@ Run stability (3 runs): Arm 1 variation <5% (highly stable at 0.285ms mean). Arm
 (A) Node-churn: recycled steady-state 0 ReactiveNode alloc+free/scroll-step (FIRE), keyed control >0 — runtime-measured via test-only `__test.nodeAllocCount`/`nodeFreeCount` (prod-stripped, mirrors `_recomputeCount`; free-counter after isDisposed guard, no double-count; sole core touch, instrumentation-only, verified by diff). Metric is node-alloc not makeLink-calls (links pool). (B) Identity: real Blink, focus+typed-uncontrolled-state stays with slot (recycle) vs follows data (keyed contrast) — closes T1-1 JSDOM verdict-path gap. Criteria 3+7 verified in verdict-valid env. Wall-clock logged, not asserted.
 
 **FLAG — keyed-path change (finding #7):** writing the B2 keyed-focus-follows-data contrast revealed keyed `wireList` did not preserve focus across Op-2 deletion / Op-1/3/4 insertBefore moves (a real pre-existing bug). CC fixed it in `wireList` (focus-restore to nearest surviving row in DOM order; focus-track across moves). Correct fix, cheaply gated (`doc.activeElement` read per reconcile, expensive paths behind `activeBefore !== null`). **Landed unsanctioned on the benchmarked keyed path** — approved post-hoc because correct + cheap + suite-green, but recorded per the standing rule that keyed-path changes surface to architect before landing. Recommended follow-up: same-session swap/remove-one perf confirmation that the per-reconcile activeElement read is benchmark-neutral. Process note logged for CC: question-before-landing on the benchmarked path, even for correct fixes.
+
+**Branch note:** `8da893a` lives on `worktree-feat+recycling-list-mode`, not merged to `main` as of this entry. The above is a forward-reference pending merge.
+
+**Perf confirmation CLOSED — PASS.** Same-session A/B at `8da893a` (real Chromium, warm-discard 5, N=1000 per op): HEAD (`doc.activeElement` read live) vs BASELINE (L534 stubbed to `null`, disabling the read + all gated focus blocks — true pre-finding-#7 behavior).
+
+| op | HEAD median | BASELINE median | delta |
+|---|---|---|---|
+| swap | 0.2000ms (σ 0.0627) | 0.2000ms (σ 0.0671) | 0.0000ms (0.0%) |
+| remove-one | 0.1000ms (σ 0.0584) | 0.1000ms (σ 0.0598) | 0.0000ms (0.0%) |
+| update-10th (control) | 0.4000ms (σ 0.1818) | 0.5000ms (σ 0.3095) | -0.1000ms (-20.0%, well within 1σ — noise) |
+
+All three within noise of BASELINE — the per-reconcile `doc.activeElement` read is confirmed benchmark-neutral. **Flag from finding #7 closes. `<recycle>` has no keyed-path perf debt; fully v1-ship-ready on this axis pending merge to `main`.** Throwaway A/B branch/worktree only — no code landed from this confirmation.
