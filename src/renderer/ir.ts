@@ -156,6 +156,16 @@ export type ConditionalBinding = BaseBinding & {
   alternate: TemplateIR | null
 }
 
+/**
+ * Structural switch/match form. First-match-wins: branches are evaluated in
+ * array order, and the first branch whose `when` is currently truthy is
+ * mounted — later matching branches are never evaluated for mounting once one
+ * has won.
+ *
+ * `fallback: null` means "render nothing" when no branch matches (no implicit
+ * empty-branch mount). A non-null `fallback` is mounted only when every
+ * branch's `when` is falsy.
+ */
 export type SwitchBinding = BaseBinding & {
   kind: 'switch'
   /** Ordered branches — first truthy `when()` wins. */

@@ -765,6 +765,18 @@ function walkNvNodeList(
           throw new Error('[nv] <switch> requires at least one <match> child')
         }
 
+        // Guard against stray non-<match> children being silently dropped when switchEl
+        // is replaced by its anchor comment below — e.g. a bare <div> sibling of <match>,
+        // or a <div> wrapping a nested <match> (which the matchChildren filter above
+        // would never see, since it only inspects immediate .content.children).
+        for (const child of Array.from(switchEl.content.children)) {
+          const isMatchTemplate =
+            child.tagName.toLowerCase() === 'template' && child.hasAttribute('data-nv-match')
+          if (!isMatchTemplate) {
+            throw new Error('[nv] <switch> children must all be <match> elements')
+          }
+        }
+
         // First pass: extract when= hole index (or -1 for fallback) per match child,
         // consuming the sentinel attribute. Validation is done over the FULL set of
         // fallback candidates before building any body IR, so "at most one fallback"

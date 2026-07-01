@@ -1462,6 +1462,21 @@ describe('<switch>/<match> parse path', () => {
     `
     expect(() => parseNvFile(src, 'switch-bad2.nv', document)).toThrow(/at most one fallback/)
   })
+
+  it('<switch> with a stray non-<match> child throws a parse-time error', () => {
+    const src = `
+      const C = $component(() => {
+        $script(() => { const state = signal(0) })
+        $render(() => html\`<div><switch>
+          <match when="\${state === 0}"><span class="zero">0</span></match>
+          <div>stray</div>
+        </switch></div>\`)
+      })
+    `
+    expect(() => parseNvFile(src, 'switch-stray-child.nv', document)).toThrow(
+      /<switch> children must all be <match> elements/,
+    )
+  })
 })
 
 // ── Task 6: <switch>/<match> emit-path ThunkSource ────────────────────────────
