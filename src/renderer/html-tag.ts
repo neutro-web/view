@@ -44,6 +44,7 @@ import type {
   SlotContent,
   SlotEntry,
   SlotOutletBinding,
+  SwitchBinding,
   SyncBinding,
   TemplateIR,
   TemplateShape,
@@ -301,6 +302,43 @@ export function recycle(
   return { __nvRecycled: true, items, factory }
 }
 
+// ── Switch (match) sentinel ─────────────────────────────────────────────────
+
+/** Opaque sentinel returned by `match(branches, fallback)` — the tagged-template switch form. */
+export interface MatchSentinel {
+  readonly __nvMatch: true
+  readonly branches: readonly { when: () => boolean; body: () => TemplateIR }[]
+  readonly fallback: (() => TemplateIR) | null
+}
+
+function isMatchSentinel(v: unknown): v is MatchSentinel {
+  return (
+    v !== null &&
+    typeof v === 'object' &&
+    (v as Record<string, unknown>).__nvMatch === true &&
+    Array.isArray((v as MatchSentinel).branches) &&
+    (v as MatchSentinel).branches.every(
+      (b) => typeof b.when === 'function' && typeof b.body === 'function',
+    ) &&
+    ((v as MatchSentinel).fallback === null || typeof (v as MatchSentinel).fallback === 'function')
+  )
+}
+
+/**
+ * Create a switch (multi-branch) sentinel for the tagged-template side.
+ * Write `${match([{ when: () => a, body: () => html`<p>A</p>` }, ...], () => html`<p>fb</p>`)}`
+ * for reactive N-branch first-match-wins control flow. Both `when` and `body` MUST be
+ * thunks — a raw value is evaluated before `html()` ever sees it and can't be detected
+ * as reactive, same reason `iff()`'s branches are thunks. Mirrors `.nv`'s `<switch>`/
+ * `<match>` element form; both produce `SwitchBinding`.
+ */
+export function match(
+  branches: readonly { when: () => boolean; body: () => TemplateIR }[],
+  fallback?: (() => TemplateIR) | null,
+): MatchSentinel {
+  return { __nvMatch: true, branches, fallback: fallback ?? null }
+}
+
 // ── Class name builder ────────────────────────────────────────────────────────
 
 /**
@@ -380,6 +418,7 @@ function assertAllBindingKindsHandled(kind: Binding['kind']): void {
     case 'list': // each() sentinel — walkNodeList detection, wired in html()/buildSlotContentIR
     case 'conditional': // iff() sentinel — walkNodeList detection, wired in html()/buildSlotContentIR
     case 'recycled-list': // recycle() sentinel — buildRecycledListBinding, wired in html()/buildSlotContentIR
+    case 'switch': // match() sentinel — walkNodeList detection, wired in html()/buildSlotContentIR
     case 'component': // data-nv-component element — makeUnresolvedComponentBinding
       break
     case 'child':
@@ -426,6 +465,7 @@ type HandledBindingKinds =
   | 'list'
   | 'conditional'
   | 'recycled-list'
+  | 'switch'
   | 'component'
   | 'child'
   | 'style-var'
@@ -635,6 +675,13 @@ interface WalkedRecycled {
   sentinel: RecycledSentinel
 }
 
+/** A switch anchor discovered during the walk — the hole's expr was a MatchSentinel. */
+interface WalkedSwitch {
+  anchorPath: NodePath
+  origIdx: number
+  sentinel: MatchSentinel
+}
+
 /**
  * A component element discovered during the walk, with its anchor path (relative
  * to the walk root) and captured slot content. Recorded by walkNodeList; each
@@ -666,6 +713,7 @@ interface WalkResult {
   lists: WalkedList[]
   conditionals: WalkedConditional[]
   recycledLists: WalkedRecycled[]
+  switches: WalkedSwitch[]
 }
 
 /**
@@ -687,6 +735,7 @@ function walkNodeList(nodes: Node[], exprs: unknown[], root: Node, doc: Document
   const lists: WalkedList[] = []
   const conditionals: WalkedConditional[] = []
   const recycledLists: WalkedRecycled[] = []
+  const switches: WalkedSwitch[] = []
 
   function walk(node: Node): void {
     if (node.nodeType === 8 /* COMMENT_NODE */) {
@@ -716,6 +765,14 @@ function walkNodeList(nodes: Node[], exprs: unknown[], root: Node, doc: Document
             anchorPath: computePath(node, root),
             origIdx: idx,
             sentinel: exprs[idx] as RecycledSentinel,
+          })
+          consumed.add(idx)
+        } else if (isMatchSentinel(exprs[idx])) {
+          // Switch sentinel: the comment IS the switch anchor — record path, skip text-hole.
+          switches.push({
+            anchorPath: computePath(node, root),
+            origIdx: idx,
+            sentinel: exprs[idx] as MatchSentinel,
           })
           consumed.add(idx)
         } else {
@@ -868,7 +925,16 @@ function walkNodeList(nodes: Node[], exprs: unknown[], root: Node, doc: Document
   }
 
   for (const n of nodes) walk(n)
-  return { holeInfos, holePaths, components, consumed, lists, conditionals, recycledLists }
+  return {
+    holeInfos,
+    holePaths,
+    components,
+    consumed,
+    lists,
+    conditionals,
+    recycledLists,
+    switches,
+  }
 }
 
 // ── Slot content IR builder (collapse: uses the shared walkNodeList) ───────────
@@ -902,8 +968,16 @@ function buildSlotContentIR(
     fragWrapper.appendChild(n.cloneNode(true))
   }
 
-  const { holeInfos, holePaths, components, consumed, lists, conditionals, recycledLists } =
-    walkNodeList(Array.from(fragWrapper.childNodes), exprs, fragWrapper, doc)
+  const {
+    holeInfos,
+    holePaths,
+    components,
+    consumed,
+    lists,
+    conditionals,
+    recycledLists,
+    switches,
+  } = walkNodeList(Array.from(fragWrapper.childNodes), exprs, fragWrapper, doc)
 
   // shape.html: serialize post-walk subtree (components now replaced by anchors),
   // strip remaining hole sentinels.
@@ -944,6 +1018,12 @@ function buildSlotContentIR(
     const pathIndex = allPaths.length
     allPaths.push(wr.anchorPath)
     bindings.push(buildRecycledListBinding(pathIndex, wr.sentinel))
+  }
+  // Wire <switch>-in-slot: mirrors the each-in-slot / iff-in-slot / recycle-in-slot wiring above.
+  for (const ws of switches) {
+    const pathIndex = allPaths.length
+    allPaths.push(ws.anchorPath)
+    bindings.push(buildSwitchBinding(pathIndex, ws.sentinel))
   }
 
   const holeIndices = [...holeInfos.map((h) => h.origIdx), ...consumed].filter(
@@ -1028,6 +1108,26 @@ function buildRecycledListBinding(
       () => 0,
     ),
   } satisfies RecycledListBinding
+  assertAllBindingKindsHandled(binding.kind)
+  return binding
+}
+
+/**
+ * Build one SwitchBinding from a walked match() sentinel. Shared by both the
+ * top-level html() dispatch and the slot-content builder (mirrors the
+ * conditional/recycled-list wiring pattern above). Resolves `when`/`body`
+ * thunks HERE, eagerly — same convention buildConditionalBinding uses for
+ * ConditionalBinding.consequent/alternate. SwitchBinding.branches[].body and
+ * .fallback are already-resolved TemplateIR, not thunks.
+ */
+function buildSwitchBinding(pathIndex: number, sentinel: MatchSentinel): SwitchBinding {
+  const { branches, fallback } = sentinel
+  const binding = {
+    kind: 'switch',
+    pathIndex,
+    branches: branches.map((b) => ({ when: b.when, body: b.body() })),
+    fallback: fallback !== null ? fallback() : null,
+  } satisfies SwitchBinding
   assertAllBindingKindsHandled(binding.kind)
   return binding
 }
@@ -1171,6 +1271,7 @@ export function createHtmlTag(document: Document) {
         !isEachSentinel(exprs[i]) &&
         !isConditionalSentinel(exprs[i]) &&
         !isRecycledSentinel(exprs[i]) &&
+        !isMatchSentinel(exprs[i]) &&
         !isClassesSentinel(exprs[i])
       ) {
         throw new TypeError(
@@ -1205,6 +1306,7 @@ export function createHtmlTag(document: Document) {
       lists,
       conditionals,
       recycledLists,
+      switches,
     } = walkNodeList(Array.from(frag.childNodes), exprs, frag, document)
     // Map encounter-order hole paths back to GLOBAL hole indices (top-level convention).
     for (let h = 0; h < holeInfos.length; h++) {
@@ -1260,6 +1362,13 @@ export function createHtmlTag(document: Document) {
       const pathIndex = allPaths.length
       allPaths.push(wr.anchorPath)
       bindings.push(buildRecycledListBinding(pathIndex, wr.sentinel))
+    }
+
+    // Add switch bindings (match() sentinels): anchor paths appended after recycled-lists.
+    for (const ws of switches) {
+      const pathIndex = allPaths.length
+      allPaths.push(ws.anchorPath)
+      bindings.push(buildSwitchBinding(pathIndex, ws.sentinel))
     }
 
     const shape: TemplateShape = {

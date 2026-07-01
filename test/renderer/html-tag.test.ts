@@ -1,7 +1,7 @@
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
 import { flushSync, signal } from '../../src/core/core.js'
-import { createHtmlTag, iff, recycle } from '../../src/renderer/html-tag.js'
+import { createHtmlTag, iff, match, recycle } from '../../src/renderer/html-tag.js'
 import { mount } from '../../src/renderer/interpreter.js'
 import type {
   ConditionalBinding,
@@ -278,5 +278,22 @@ describe('html-tag — recycle() recycled-list sentinel', () => {
     ])
 
     dispose()
+  })
+})
+
+describe('html-tag — match() switch sentinel', () => {
+  it('match(): first-match-wins with fallback produces a SwitchBinding', () => {
+    const { html } = setup()
+    const state = signal(0)
+    const ir = html`<div>${match(
+      [
+        { when: () => state() === 0, body: () => html`<span class="zero">0</span>` },
+        { when: () => state() === 1, body: () => html`<span class="one">1</span>` },
+      ],
+      () => html`<span class="fb">fb</span>`,
+    )}</div>`
+
+    const binding = ir.bindings[0]
+    expect(binding?.kind).toBe('switch')
   })
 })
