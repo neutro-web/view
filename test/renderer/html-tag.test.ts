@@ -1,7 +1,8 @@
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
-import { signal } from '../../src/core/core.js'
+import { flushSync, signal } from '../../src/core/core.js'
 import { createHtmlTag, iff, recycle } from '../../src/renderer/html-tag.js'
+import { mount } from '../../src/renderer/interpreter.js'
 import type {
   ConditionalBinding,
   EventBinding,
@@ -181,6 +182,33 @@ describe('html-tag — iff() conditional sentinel', () => {
     const result = irStructurallyEqual(doc, ttIr, nvIr)
     expect(result.equal, result.reason).toBe(true)
   })
+
+  // Reactive behavior: prove the mounted binding actually toggles branches when the
+  // driving signal changes, not just that it builds the same IR as `.nv` (G1 above).
+  it('iff(): mounted binding toggles rendered branch when signal changes', () => {
+    const { doc, html } = setup()
+    const show = signal(true)
+    const ir = html`<div>${iff(
+      () => show(),
+      () => html`<span>A</span>`,
+      () => html`<span>B</span>`,
+    )}</div>`
+    const parent = doc.createElement('div')
+    doc.body.appendChild(parent)
+    const dispose = mount(ir, parent, doc)
+    flushSync()
+    expect(parent.querySelector('span')?.textContent).toBe('A')
+
+    show.set(false)
+    flushSync()
+    expect(parent.querySelector('span')?.textContent).toBe('B')
+
+    show.set(true)
+    flushSync()
+    expect(parent.querySelector('span')?.textContent).toBe('A')
+
+    dispose()
+  })
 })
 
 describe('html-tag — recycle() recycled-list sentinel', () => {
@@ -221,5 +249,34 @@ describe('html-tag — recycle() recycled-list sentinel', () => {
 
     const result = irStructurallyEqual(doc, ttIr, nvIr)
     expect(result.equal, result.reason).toBe(true)
+  })
+
+  // Reactive behavior: prove the mounted binding actually re-renders the list when the
+  // driving items signal changes, not just that it builds the same IR as `.nv` (G1 above).
+  it('recycle(): mounted binding updates rendered list when items signal changes', () => {
+    const { doc, html } = setup()
+    const items = signal(['a', 'b'])
+    const ir = html`<ul>${recycle(
+      () => items(),
+      (item) => html`<li>${() => item()}</li>`,
+    )}</ul>`
+    const parent = doc.createElement('div')
+    doc.body.appendChild(parent)
+    const dispose = mount(ir, parent, doc)
+    flushSync()
+    expect(Array.from(parent.querySelectorAll('li')).map((li) => li.textContent)).toEqual([
+      'a',
+      'b',
+    ])
+
+    items.set(['x', 'y', 'z'])
+    flushSync()
+    expect(Array.from(parent.querySelectorAll('li')).map((li) => li.textContent)).toEqual([
+      'x',
+      'y',
+      'z',
+    ])
+
+    dispose()
   })
 })

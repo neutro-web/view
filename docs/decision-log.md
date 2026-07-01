@@ -5055,3 +5055,9 @@ Competitive: `<recycle>` closes nv's one create-weak workload (virtual scroll) �
 | update-10th (control) | 0.4000ms (σ 0.1818) | 0.5000ms (σ 0.3095) | -0.1000ms (-20.0%, well within 1σ — noise) |
 
 All three within noise of BASELINE — the per-reconcile `doc.activeElement` read is confirmed benchmark-neutral. **Flag from finding #7 closes. `<recycle>` has no keyed-path perf debt; fully v1-ship-ready on this axis.**
+
+### [2026-06-30] Tagged-FE parity restored — `iff()`/`recycle()` builders land at IR parity with `.nv`. Closes T-8. Cites [parity audit].
+
+Tagged-FE parity restored — `iff()` (conditional) + `recycle()` builders added to `html-tag.ts`, same IR as `.nv`; exhaustiveness forcing-function added (new IR kind fails typecheck without a tagged builder/deferral); `child` confirmed symmetric-deferral (not a gap); style-var per §4 ruling. Closes T-8. Cites the parity audit.
+
+**Current State:** tagged front-end at IR parity with `.nv` for control flow; forcing-function prevents silent regression; `<switch>`/`<match>` next, into the gated world.
