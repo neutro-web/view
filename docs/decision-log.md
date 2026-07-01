@@ -29,14 +29,14 @@
 
 ## Current State
 
-_Last updated: 2026-06-30 (index-elision Commission 1 landed at `a495716`; Template-IR **v0.4.3**, reactive-core contract **v0.4.3**). Tagged-FE parity restored — `iff()`/`recycle()` builders land at IR parity with `.nv`; exhaustiveness forcing-function in place; closes T-8. Design docs in-repo under `docs/design/`._
+_Last updated: 2026-06-30. Template-IR **v0.4.4**, reactive-core contract **v0.4.3**._
+_Active frontier: v0.5.0 API-parity + control-flow completion. Performance arc CLOSED (create intrinsic, mutation won, recycling ships). Next: `<switch>`/`<match>` into the parity-gated world._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
-> `decision-log-archive.md` (moved 2026-06-21). This snapshot is the resolved
-> picture; the Log below holds the active arc (Component API → slot consumption).
+> `decision-log-archive.md` (moved 2026-06-21).
 
 ### Status at a glance
-- **Reactive core:** Contract **v0.4.2**, 40/40 conformance. DOM-free. Field order
+- **Reactive core:** Contract **v0.4.3**, conformance green. DOM-free. Field order
   locked (cache-load-bearing). `getOwner`/`runWithOwner` in §6.1/§11/§12.24.
 - **Compiler specialization (steps 1–4):** all wired + gated + measured. Step 3
   (`_compilerEquals`) kept for correctness; step 4 (`_compilerSources`) SHELVED
@@ -48,15 +48,17 @@ _Last updated: 2026-06-30 (index-elision Commission 1 landed at `a495716`; Templ
     [2026-06-24]: wire when a production flow constructs a `ts.Program` over user source
     (gated on the Mode-A consumer pipeline). Not a debt. SyncBindings are external-source
     syncs and correctly contribute no edge (Part 3 CLOSED [2026-06-24]).
-- **Renderer:** interpreter + compiler back-ends at parity for all binding kinds.
-  Both front-ends (tagged-template + `.nv`) produce one IR, FE-equivalence-gated.
-  Template-IR doc reconciled to v0.4.2 (2026-06-23) — now matches `ir.ts`
-  (12-member union incl. `ClassListBinding`, `StyleVarBinding`; `ListBinding`
-  factory `itemTemplate`; root `styleArtifact`/`classRewrites`).
-  Equivalence oracle extended (2026-06-23, Action 2): `bindingEqual` now recurses
-  component slots (forwarding doc → slot shape.html compared); `styleArtifactEqual`
-  compares root `styleArtifact`/`classRewrites`. Slot content + style outputs are
-  no longer FE/back-end-equivalence blind spots.
+- **Renderer:** interpreter + compiler back-ends at parity for all **15** binding kinds
+  (`text attr prop event sync classlist toggle static list component slot-outlet
+  conditional recycled-list style-var child`). Both front-ends (tagged-template + `.nv`)
+  produce one IR, FE-equivalence-gated. **Tagged-FE parity CLOSED 2026-06-30** — `iff()`
+  (conditional) + `recycle()` builders added; `child`/`style-var` are typechecked
+  documented deferrals; a `Binding['kind']` exhaustiveness forcing-function (`never`-default
+  + type-level `Equals`) now fails tsc if a new IR kind lacks a tagged builder or logged
+  deferral. Template-IR doc at **v0.4.4**.
+- **Control-flow constructs:** `<each>` (keyed list), `<recycle>` (non-keyed positional
+  list — **LANDED `3b00064`**), conditional (`.nv` ternary / tagged `iff()`). **Gap:
+  `<switch>`/`<match>`** (multi-branch) — next task, lands into the parity-gated world.
 - **Build pipeline `.nv → .js`:** Mode A, landed. Executable-module gate closed.
   **[2026-06-25] `.nv` author path proven E2E in real browsers** (probe `8146d82`): `.nv` → plugin →
   esbuild → browser, click updates DOM, chromium+webkit. Authoring is assignment-form
@@ -98,6 +100,29 @@ _Last updated: 2026-06-30 (index-elision Commission 1 landed at `a495716`; Templ
   trade mutation speed to chase Solid's create number.
 - **Live frontier (code/ruling):** index-elision **FULLY CLOSED** (Commission 1 LANDED `a495716`; Commission 2 MEASURED 2026-06-29). **Reconcile Lever A+B LANDED `79f3cb8`** (prefix/suffix skip + key-cache). **Lever C probes BOTH CLEAR (2026-06-29)** — C-paint: intrinsic layout (90% paint, staging no effect); C-create: binding-node weight only 0.8% of gap (DOM-stamping dominates). **Probes D/E/F/G exhausted create track (7 probes): parse 3.5ms, scope removal regresses, flush neutral, effect-count 0.4% recovery, lean-mount (D2+D3) zero signal. CREATE TRACK FULLY CLOSED — 1.49× gap is irreducible structural cost of fine-grained reactivity on these mechanics.** **Probe H — Node Recycling: BUILD candidate, DESIGN GATE OPEN [corrected 2026-06-29]. Hard win = scroll node-churn eliminated (~7000→0 ReactiveNode alloc/free); wall-clock win real but modest at jfb-row complexity (~3–6× realistic; the "12×" was a floor-comparison ceiling with a sub-resolution denominator — see correction entry). Recycling = the missing non-keyed (`<Index>`) list mode; rests on capability + node-churn, not the wall-clock headline. Identity-semantics contract is the gate's load-bearing question.** PT-1b Suspense+SWR named open. P-2c-B reopenable. PT-1a `resource` + P-2c-A1 LANDED. **Reactive-core contract v0.4.3.** P-1b CLOSED.
 - **Index-elision perf verdict (Commission 2):** T2-1 null (reorder-heavy path dominated by DOM, not indexSig); T2-3 memory: elided 2.154× vanilla vs non-elided 2.345× vanilla (−0.353 MB / −0.19×). Total memory lift (P-2c-A1 + elision): 4.641 → 4.003 MB. Lever stands on correctness + memory.
+- **Performance arc CLOSED 2026-06-29.** Create proven intrinsic to nv's construction
+  across 8 probes (allocation, parse, node-weight, scope, flush-timing, effect-count,
+  lean-mount D2+D3) — the per-row reactive scaffolding that costs create is the same
+  infrastructure delivering the mutation wins. Not reopenable without new information.
+  Mutation won: swap 0.29×, select 0.27×, update-10th 0.18× vs vanilla (also beats Solid).
+  Create 1.5–1.78× vs vanilla = structural cost, avoided (not reduced) on the one weak
+  workload via recycling.
+- **`<recycle>` (node recycling) LANDED `3b00064`, verdict-gate `8da893a`.** Non-keyed
+  positional list mode = the missing `<Index>`-class construct. Re-binds pooled rows
+  (Op-3) instead of dispose+create; node-churn 0/scroll-step (real-browser measured),
+  focus-follows-slot-position (real-browser verified). Closes nv's virtual-scroll weakness.
+  Finding-#7 (keyed `activeElement` read added during the arc) confirmed benchmark-neutral
+  and flag-closed; process note: keyed/benchmarked-path changes surface to architect
+  before landing, even when correct.
+- **Rulings this arc:** (a) recycling construct named `<recycle>` (distinct construct, not
+  `<each recycle>` attr, not inferred — position-identity is an explicit author choice).
+  (b) tagged conditional builder named `iff()` (not `if`/`when`/`show` — `if` is a reserved
+  word forcing import-aliasing; `when`/`show` are incumbent-vocabulary). (c) `$style`/
+  style-var is **`.nv`-only** — a compile-time file feature (SFC-`<style scoped>` analog),
+  not an IR-parity obligation.
+- **Roadmap:** `<Index>` gap closed by `<recycle>`. Retention/keep-alive named as a
+  **v1.0.0 probe-first candidate** (second member of the avoid-create family; distinct
+  from recycling; unbounded-memory footgun requires cap; measure before building).
 - **Reconcile Lever A+B perf (2026-06-29):** remove-one script −60% (1.5→0.6ms, near vanilla 0.5ms); wall-clock −3% (paint-bound — 90% of 17ms confirmed by Probe 2 DevTools trace); swap no-regress; key-call 4n→n. C-paint CLEAR (staging no effect, layout intrinsic). C-create CLEAR on node-weight hypothesis; redirect to C-create-B (DOM-stamping census).
 - **Standing CP-2d board (current = post-A1 CP-2d-REMEASURE, L4633):** create-1k 1.78×, swap 0.29×, select 0.27×, update-10th 0.18×, remove-one **script-parity with vanilla** (0.6ms vs 0.5ms) / wall-clock 1.23× (paint-bound), memory **2.154×** (post-elision). Note: tight mutation baselines (0.29×/0.27×/0.18×) are JIT-warmed session-specific.
 - **v0.1.0 — TAG-READY.** CP-4 docs placed. Swap deficit is v0.5.0; no blocking items remain.
@@ -5061,3 +5086,13 @@ All three within noise of BASELINE — the per-reconcile `doc.activeElement` rea
 Tagged-FE parity restored — `iff()` (conditional) + `recycle()` builders added to `html-tag.ts`, same IR as `.nv`; exhaustiveness forcing-function added (new IR kind fails typecheck without a tagged builder/deferral); `child` confirmed symmetric-deferral (not a gap); style-var per §4 ruling. Closes T-8. Cites the parity audit.
 
 **Current State:** tagged front-end at IR parity with `.nv` for control flow; forcing-function prevents silent regression; `<switch>`/`<match>` next, into the gated world.
+
+### [2026-06-30] Tagged-FE parity restored + performance/recycling arc consolidated. Contract unchanged (v0.4.3); Template-IR → v0.4.4.
+
+**Tagged-FE parity (`80945fe`, merge `3b26233`).** Three IR kinds were `.nv`-authorable but not buildable from the `html\`\`` tagged runtime FE. Resolved 2 builds + 1 ruling + 1 non-issue: `iff()` conditional builder + `recycle()` list builder added to `html-tag.ts` (sentinel pattern mirroring `each()`); both produce IR `irStructurallyEqual` to the real `.nv` parse path (proven, not stubbed) + mounted-reactivity tested. `style-var` ruled `.nv`-only (`$style` is a compile-time file feature; §4 ruling). `child` confirmed symmetric designed-deferral (both FEs defer identically; not a gap). **Durable fix:** `assertAllBindingKindsHandled` — a `never`-default switch + independent type-level `Equals<Binding['kind'], HandledBindingKinds>` guard; a new IR kind now fails tsc in the tagged path without a builder or a commented deferral. G0 held (zero `nv-parser.ts`/`ir.ts`/`src/core/*` change — verified by diff). Closes T-8. Verified at `80945fe`: 794/794 green, tsc clean, G0/G1/G3 confirmed by source-read. Two nits: orphaned `docs/guide/` (singular) tree deleted; stale `guide/**` exclude line in vitepress config (harmless, remove next docs pass).
+
+**Consolidates the performance/recycling arc** (entries [2026-06-28..29] above): create proven intrinsic across 8 probes; Reconcile Lever A+B landed (remove-one script-parity); `<recycle>` landed (`3b00064`) + verdict-gate (`8da893a`); finding-#7 flag closed (keyed `activeElement` read benchmark-neutral, real-browser measured). Rulings: `<recycle>` naming (distinct construct), `iff()` naming, `$style` `.nv`-only.
+
+**Naming/asymmetry note (documented, not a gap):** conditional is authored as a native ternary in `.nv` (compiler analyzes via TS AST) and via `iff()` in tagged (runtime sees evaluated values, can't detect a ternary) — same `ConditionalBinding` out, different surface by design. No `<iff>` element in `.nv` (ternary is the native form). Principle: use the language's native form where it exists (ternary → conditional); use an nv construct where it doesn't (element/builder → lists). Hence `recycle` is symmetric (element + builder), conditional is asymmetric (ternary + builder).
+
+**Next:** `<switch>`/`<match>` (multi-branch control flow) — the last control-flow gap — lands into the parity-gated world (must satisfy the exhaustiveness guard with both a `.nv` form and a tagged builder).
