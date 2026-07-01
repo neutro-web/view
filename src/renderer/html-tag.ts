@@ -351,6 +351,52 @@ export function cx(...args: CxArg[]): string {
   return tokens.join(' ')
 }
 
+// ── Binding-kind exhaustiveness guard ─────────────────────────────────────────
+
+/**
+ * Compile-time (and light runtime) forcing function: every `Binding['kind']`
+ * must be represented here. If ir.ts's `Binding` union gains a new kind, the
+ * `default` branch below narrows to `never` and `tsc` fails at THIS site —
+ * mirroring emitted-mount.ts's switch + default-never-guard idiom (see
+ * emitSetup's `switch (binding.kind)` there).
+ *
+ * The tagged-template front-end (html-tag.ts) can't funnel all binding
+ * construction through one switch — kinds are resolved incrementally across
+ * several independent detection paths (classifyHole/buildHtmlHoleBinding for
+ * text/attr/prop/event/sync/classlist/slot-outlet; walkNodeList's sentinel
+ * detection for list/conditional/recycled-list/component). This function is
+ * the single point where every resolved kind is funneled through the
+ * completeness check, called from each construction site below.
+ */
+function assertAllBindingKindsHandled(kind: Binding['kind']): void {
+  switch (kind) {
+    case 'text': // buildHtmlHoleBinding: classifyHole 'text' branch (incl. isSlotSentinel handled below)
+    case 'attr': // buildHtmlHoleBinding: 'attr' branch (class + classes() routes to 'classlist' instead)
+    case 'prop': // buildHtmlHoleBinding: 'prop' branch (.propName= hole)
+    case 'event': // buildHtmlHoleBinding: fallthrough default branch (@eventName= hole)
+    case 'sync': // buildHtmlHoleBinding: 'sync' branch (:propName= hole)
+    case 'classlist': // buildHtmlHoleBinding: attr branch + isClassesSentinel(origExpr)
+    case 'slot-outlet': // buildHtmlHoleBinding: text branch + isSlotSentinel(origExpr), via slots()
+    case 'list': // each() sentinel — walkNodeList detection, wired in html()/buildSlotContentIR
+    case 'conditional': // iff() sentinel — walkNodeList detection, wired in html()/buildSlotContentIR
+    case 'recycled-list': // recycle() sentinel — buildRecycledListBinding, wired in html()/buildSlotContentIR
+    case 'component': // data-nv-component element — makeUnresolvedComponentBinding
+      break
+    case 'child':
+      // Deferred — manual IR only (v0 primitive-only), both front-ends symmetric.
+      // See ir.ts ChildBinding doc comment.
+      break
+    case 'style-var':
+      // .nv-only by design — $style compile-time feature, no tagged-template form.
+      // See docs/design/ir-frontend-parity-audit.md.
+      break
+    default: {
+      const exhaustive: never = kind
+      throw new Error(`[nv/html] Unhandled Binding kind: ${exhaustive as string}`)
+    }
+  }
+}
+
 function isSlotSentinel(v: unknown): v is SlotSentinel {
   return (
     typeof v === 'object' &&
@@ -431,6 +477,16 @@ function defaultHtmlEventForProp(prop: string): string {
  * and the slot content builder so the two cannot produce divergent kinds.
  */
 function buildHtmlHoleBinding(holeKind: HoleKind, pathIndex: number, origExpr: unknown): Binding {
+  const b = buildHtmlHoleBindingImpl(holeKind, pathIndex, origExpr)
+  assertAllBindingKindsHandled(b.kind)
+  return b
+}
+
+function buildHtmlHoleBindingImpl(
+  holeKind: HoleKind,
+  pathIndex: number,
+  origExpr: unknown,
+): Binding {
   type PrimitiveExpr = ReactiveExpr<string | number | boolean | null | undefined>
   const expr = origExpr as PrimitiveExpr
   if (holeKind.kind === 'text') {
@@ -838,6 +894,7 @@ function buildSlotContentIR(
     const pathIndex = allPaths.length
     allPaths.push(wl.anchorPath)
     const { items, key, factory } = wl.sentinel
+    assertAllBindingKindsHandled('list')
     bindings.push({
       kind: 'list',
       pathIndex,
@@ -853,6 +910,7 @@ function buildSlotContentIR(
     const pathIndex = allPaths.length
     allPaths.push(wc.anchorPath)
     const { condition, consequent, alternate } = wc.sentinel
+    assertAllBindingKindsHandled('conditional')
     bindings.push({
       kind: 'conditional',
       pathIndex,
@@ -891,6 +949,7 @@ function buildRecycledListBinding(
   pathIndex: number,
   sentinel: RecycledSentinel,
 ): RecycledListBinding {
+  assertAllBindingKindsHandled('recycled-list')
   const { items, factory } = sentinel
   const itemTemplate = (valueSig: WritableSignal<unknown>, indexSig: WritableSignal<number>) =>
     factory(
@@ -911,6 +970,7 @@ function buildRecycledListBinding(
 
 /** Build a ComponentBinding whose factory throws if invoked (tagged-template can't resolve imports). */
 function makeUnresolvedComponentBinding(pathIndex: number, c: WalkedComponent): ComponentBinding {
+  assertAllBindingKindsHandled('component')
   return {
     kind: 'component',
     pathIndex,
