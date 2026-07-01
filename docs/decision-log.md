@@ -29,8 +29,8 @@
 
 ## Current State
 
-_Last updated: 2026-06-30. Template-IR **v0.4.4**, reactive-core contract **v0.4.3**._
-_Active frontier: v0.5.0 API-parity + control-flow completion. Performance arc CLOSED (create intrinsic, mutation won, recycling ships). Next: `<switch>`/`<match>` into the parity-gated world._
+_Last updated: 2026-07-01. Template-IR **v0.4.4**, reactive-core contract **v0.4.3**._
+_Active frontier: v0.5.0 API-parity + control-flow completion. Performance arc CLOSED (create intrinsic, mutation won, recycling ships). Next: `<switch>`/`<match>` — shape ruled 2026-07-01 (new IR kind), commission not yet written._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
 > `decision-log-archive.md` (moved 2026-06-21).
@@ -57,8 +57,13 @@ _Active frontier: v0.5.0 API-parity + control-flow completion. Performance arc C
   + type-level `Equals`) now fails tsc if a new IR kind lacks a tagged builder or logged
   deferral. Template-IR doc at **v0.4.4**.
 - **Control-flow constructs:** `<each>` (keyed list), `<recycle>` (non-keyed positional
-  list — **LANDED `3b00064`**), conditional (`.nv` ternary / tagged `iff()`). **Gap:
-  `<switch>`/`<match>`** (multi-branch) — next task, lands into the parity-gated world.
+  list — **LANDED `3b00064`**), conditional (`.nv` ternary / tagged `iff()`).
+  **`<switch>`/`<match>` (multi-branch) — shape ruled 2026-07-01: new IR kind
+  `SwitchBinding`, not desugared conditionals** (nested-ternary `.nv` path is unsound today —
+  silently misparses to `text`; new kind reuses `wireConditional`'s disposal pattern
+  generalized to N ordered branches). Dedicated `.nv` `<switch>`/`<match>` element + tagged
+  `match()` sentinel, both required by the tagged-FE exhaustiveness gate. **Commission not
+  yet written** — next task.
 - **Build pipeline `.nv → .js`:** Mode A, landed. Executable-module gate closed.
   **[2026-06-25] `.nv` author path proven E2E in real browsers** (probe `8146d82`): `.nv` → plugin →
   esbuild → browser, click updates DOM, chromium+webkit. Authoring is assignment-form
@@ -5096,3 +5101,63 @@ Tagged-FE parity restored — `iff()` (conditional) + `recycle()` builders added
 **Naming/asymmetry note (documented, not a gap):** conditional is authored as a native ternary in `.nv` (compiler analyzes via TS AST) and via `iff()` in tagged (runtime sees evaluated values, can't detect a ternary) — same `ConditionalBinding` out, different surface by design. No `<iff>` element in `.nv` (ternary is the native form). Principle: use the language's native form where it exists (ternary → conditional); use an nv construct where it doesn't (element/builder → lists). Hence `recycle` is symmetric (element + builder), conditional is asymmetric (ternary + builder).
 
 **Next:** `<switch>`/`<match>` (multi-branch control flow) — the last control-flow gap — lands into the parity-gated world (must satisfy the exhaustiveness guard with both a `.nv` form and a tagged builder).
+
+### [2026-07-01] `<switch>`/`<match>` shape ruling: Option A (new IR kind), not desugared conditionals
+
+**Context:** Handoff commissioned a shape ruling before commissioning `<switch>`/`<match>`
+implementation — Option A (new `SwitchBinding` IR kind) vs Option B (desugar to nested
+`ConditionalBinding`). Read at main `1d36e39`.
+
+**Seams read:**
+- `wireConditional` (interpreter.ts:848–888): single effect + one `branchDisposer` variable,
+  swaps only the active branch on condition change. Generalizes mechanically to N ordered
+  branches — loop `when` list, first truthy wins, same disposer-swap pattern, no new
+  disposal mechanism needed.
+- `.nv` ternary detection (nv-parser.ts:367, :2748 — both call sites): flat two-branch check,
+  `isHtmlTTE(whenTrue) && (isHtmlTTE(whenFalse) || isNullish(whenFalse))`. A nested ternary in
+  `whenFalse` fails both checks and **silently falls through to `kind:'text'`** — not a
+  supported-but-untested path, an active misparse. Option B requires parser recursion into
+  ternary chains at both sites to fix this, plus accepting an authoring form
+  (`c1 ? html\`\` : c2 ? html\`\` : html\`\``) with no dedicated element, no explicit fallback
+  syntax, ordering implicit in nesting depth.
+- Tagged sentinel pattern (`iff()`/`recycle()`, html-tag.ts:232–302): mirrors cleanly for a
+  new `match()` builder under either option — not a discriminator.
+
+**Ruling: Option A.** New IR kind `SwitchBinding`:
+```ts
+type SwitchBinding = BaseBinding & {
+  kind: 'switch'
+  branches: { when: ReactiveExpr<boolean>; body: TemplateIR }[]  // ordered
+  fallback: TemplateIR | null
+}
+```
+Distinct `wireSwitch`, generalizing `wireConditional`'s single-effect/single-disposer pattern
+(loop ordered `when`s, first-match-wins, one `branchDisposer`, same bridge-onCleanup for
+parent-teardown). `.nv` gets a dedicated `<switch>`/`<match>` element (parser recognizes a new
+node shape, same tier of work as recognizing `<recycle>` or `<each>` — not ternary recursion).
+Tagged FE gets a `match()` sentinel (`{ branches, fallback }`), required by the existing
+exhaustiveness gate (`assertAllBindingKindsHandled`, html-tag.ts:371) the moment `'switch'` is
+added to `Binding['kind']`.
+
+**Why not B:** the discriminator isn't "less surface wins" — it's that B's surface is parser
+recursion into an authoring form that's already broken for nesting today, versus A's surface
+being one new recognizable shape reusing a disposal pattern already proven correct. Same
+reasoning as `<recycle>` vs `<each recycle>`: distinct construct because the semantics
+(ordered branches, explicit fallback) genuinely differ from a boolean ternary.
+
+**Semantics pinned:**
+- First-match-wins, array order.
+- Single effect reads all `when()` per run — not one effect per branch (matches conditional's
+  cost profile; effect-count was already shown non-bottleneck in the closed create arc).
+- Disposal swaps only the active branch — direct generalization of `wireConditional`, no new
+  disposal pattern.
+
+**Closure-axiom check:** clean. Composition over `effect`/`createRoot`/`onCleanup`, no new
+graph primitive — same category as `<recycle>` and conditional.
+
+**Contract impact:** none (renderer-layer construct, not reactive-core semantics). No contract
+version bump.
+
+**Next:** write the commission — mirror `<recycle>`/tagged-parity commission structure (G0/G1
+gates, distinct-path discipline, tagged `match()` builder + exhaustiveness-gate wiring as
+explicit tasks, Tier-1 correctness gates, decision-log delta on landing).
