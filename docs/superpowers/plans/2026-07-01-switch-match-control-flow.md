@@ -864,7 +864,34 @@ Add directly after the `<recycle>` detection block (nv-parser.ts:655–733 per r
         switches.push({ anchorPath, branches, hasFallback })
         return // don't recurse into <switch> body (already processed via .content)
       }
+
+      // Footgun guard: a stray <match> NOT consumed as a direct child of a <switch>
+      // (e.g. <match> used bare, or nested more than one level inside <switch>) reaches
+      // this point because <switch>'s own handling above only inspects its immediate
+      // .content.children and returns without recursing further. Without this guard, an
+      // unconsumed <template data-nv-match> would silently walk as an ordinary (empty,
+      // invisible) <template> element — same class of silent-footgun the <recycle key=>
+      // guard prevents elsewhere in this file. Fail loudly instead.
+      if (el.tagName.toLowerCase() === 'template' && el.hasAttribute('data-nv-match')) {
+        throw new Error('[nv] <match> is only valid as a direct child of <switch>')
+      }
 ```
+
+- [ ] **Step 4b: Write and pass the stray-`<match>` footgun test**
+
+```typescript
+it('bare <match> outside <switch> throws a parse-time error', () => {
+  const doc = /* same harness as other nv-parser tests in this task */
+  const source =
+    'const C = $component(() => {\n' +
+    '  $script(() => {})\n' +
+    '  $render(() => html`<div><match><span>orphan</span></match></div>`)\n' +
+    '})\n'
+  expect(() => parseNvFile(source, 'match-bare.nv', doc)).toThrow(/only valid as a direct child of <switch>/)
+})
+```
+
+Run and confirm PASS. This closes the gap flagged during Gate-P review: `<match>` must be rejected outside `<switch>`, not silently rendered as empty content.
 
 - [ ] **Step 5: Add `pushSwitchBinding` helper**
 
