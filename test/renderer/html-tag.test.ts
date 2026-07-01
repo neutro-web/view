@@ -1,11 +1,12 @@
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
 import { signal } from '../../src/core/core.js'
-import { createHtmlTag, iff } from '../../src/renderer/html-tag.js'
+import { createHtmlTag, iff, recycle } from '../../src/renderer/html-tag.js'
 import type {
   ConditionalBinding,
   EventBinding,
   PropBinding,
+  RecycledListBinding,
   SyncBinding,
 } from '../../src/renderer/ir.js'
 import { parseNvFile } from '../../src/renderer/nv-parser.js'
@@ -175,6 +176,47 @@ describe('html-tag — iff() conditional sentinel', () => {
       '  $render(() => html`<div>${show ? html`<span>A</span>` : html`<span>B</span>`}</div>`)\n' +
       '})\n'
     const results = parseNvFile(source, 'cond.nv', doc)
+    const nvIr = results[0]!.ir
+
+    const result = irStructurallyEqual(doc, ttIr, nvIr)
+    expect(result.equal, result.reason).toBe(true)
+  })
+})
+
+describe('html-tag — recycle() recycled-list sentinel', () => {
+  it('recycle() produces a RecycledListBinding (kind check, no key field)', () => {
+    const { html } = setup()
+    const items = signal(['a', 'b'])
+    const ir = html`<ul>${recycle(
+      () => items(),
+      (item) => html`<li>${() => item()}</li>`,
+    )}</ul>`
+    expect(ir.bindings.length).toBe(1)
+    expect(ir.bindings[0]!.kind).toBe('recycled-list')
+    const b = ir.bindings[0] as RecycledListBinding
+    expect(b.bodyIR?.shape.html).toBe('<li><!--nv-0--></li>')
+    expect('key' in b).toBe(false)
+  })
+
+  // G1 gate: recycle() and the equivalent .nv <recycle> must produce
+  // irStructurallyEqual RecycledListBindings (via the shared oracle).
+  it('G1  FE-equivalence: recycle() and .nv <recycle> produce irStructurallyEqual RecycledListBinding', () => {
+    const { doc, html } = setup()
+
+    // Tagged-template version
+    const items = signal(['a', 'b'])
+    const ttIr = html`<ul>${recycle(
+      () => items(),
+      (item, index) => html`<li>${() => item()}-${() => index()}</li>`,
+    )}</ul>`
+
+    // .nv version (parse path)
+    const source =
+      'const C = $component(() => {\n' +
+      "  $script(() => { const items = signal(['a', 'b']) })\n" +
+      '  $render(() => html`<ul><recycle .of="${items}" let={item, i}><li>${item}-${i}</li></recycle></ul>`)\n' +
+      '})\n'
+    const results = parseNvFile(source, 'recycle.nv', doc)
     const nvIr = results[0]!.ir
 
     const result = irStructurallyEqual(doc, ttIr, nvIr)

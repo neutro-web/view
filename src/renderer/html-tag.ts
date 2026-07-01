@@ -40,6 +40,7 @@ import type {
   PropBinding,
   PropEntry,
   ReactiveExpr,
+  RecycledListBinding,
   SlotContent,
   SlotEntry,
   SlotOutletBinding,
@@ -261,6 +262,43 @@ export function iff(
   alternate?: (() => TemplateIR) | null,
 ): ConditionalSentinel {
   return { __nvConditional: true, condition, consequent, alternate: alternate ?? null }
+}
+
+// ── Recycled-list sentinel ─────────────────────────────────────────────────────
+
+/**
+ * Opaque sentinel returned by `recycle(items, factory)` — the tagged-template
+ * recycled-list form (position identity, NOT keyed identity — no `key`, unlike
+ * `each()`). Mirrors `.nv`'s `<recycle>`; both produce `RecycledListBinding`.
+ */
+export interface RecycledSentinel {
+  readonly __nvRecycled: true
+  readonly items: () => readonly unknown[]
+  readonly factory: (item: () => unknown, index: () => number) => TemplateIR
+}
+
+function isRecycledSentinel(v: unknown): v is RecycledSentinel {
+  return (
+    v !== null &&
+    typeof v === 'object' &&
+    (v as Record<string, unknown>).__nvRecycled === true &&
+    typeof (v as RecycledSentinel).items === 'function' &&
+    typeof (v as RecycledSentinel).factory === 'function'
+  )
+}
+
+/**
+ * Create a recycled-list sentinel for the tagged-template side.
+ * Write `${recycle(() => items(), (item, index) => html`...`)}` for a
+ * position-identity list — rows are reused by slot position, not by data
+ * identity. No `key` parameter (contrast `each()`, which is keyed). Use only
+ * for rows whose entire visible state derives from `item()`.
+ */
+export function recycle(
+  items: () => readonly unknown[],
+  factory: (item: () => unknown, index: () => number) => TemplateIR,
+): RecycledSentinel {
+  return { __nvRecycled: true, items, factory }
 }
 
 // ── Class name builder ────────────────────────────────────────────────────────
@@ -496,6 +534,13 @@ interface WalkedConditional {
   sentinel: ConditionalSentinel
 }
 
+/** A recycled-list anchor discovered during the walk — the hole's expr was a RecycledSentinel. */
+interface WalkedRecycled {
+  anchorPath: NodePath
+  origIdx: number
+  sentinel: RecycledSentinel
+}
+
 /**
  * A component element discovered during the walk, with its anchor path (relative
  * to the walk root) and captured slot content. Recorded by walkNodeList; each
@@ -526,6 +571,7 @@ interface WalkResult {
   consumed: Set<number>
   lists: WalkedList[]
   conditionals: WalkedConditional[]
+  recycledLists: WalkedRecycled[]
 }
 
 /**
@@ -546,6 +592,7 @@ function walkNodeList(nodes: Node[], exprs: unknown[], root: Node, doc: Document
   const consumed = new Set<number>()
   const lists: WalkedList[] = []
   const conditionals: WalkedConditional[] = []
+  const recycledLists: WalkedRecycled[] = []
 
   function walk(node: Node): void {
     if (node.nodeType === 8 /* COMMENT_NODE */) {
@@ -567,6 +614,14 @@ function walkNodeList(nodes: Node[], exprs: unknown[], root: Node, doc: Document
             anchorPath: computePath(node, root),
             origIdx: idx,
             sentinel: exprs[idx] as ConditionalSentinel,
+          })
+          consumed.add(idx)
+        } else if (isRecycledSentinel(exprs[idx])) {
+          // Recycled-list sentinel: the comment IS the recycled-list anchor — record path, skip text-hole.
+          recycledLists.push({
+            anchorPath: computePath(node, root),
+            origIdx: idx,
+            sentinel: exprs[idx] as RecycledSentinel,
           })
           consumed.add(idx)
         } else {
@@ -719,7 +774,7 @@ function walkNodeList(nodes: Node[], exprs: unknown[], root: Node, doc: Document
   }
 
   for (const n of nodes) walk(n)
-  return { holeInfos, holePaths, components, consumed, lists, conditionals }
+  return { holeInfos, holePaths, components, consumed, lists, conditionals, recycledLists }
 }
 
 // ── Slot content IR builder (collapse: uses the shared walkNodeList) ───────────
@@ -753,12 +808,8 @@ function buildSlotContentIR(
     fragWrapper.appendChild(n.cloneNode(true))
   }
 
-  const { holeInfos, holePaths, components, consumed, lists, conditionals } = walkNodeList(
-    Array.from(fragWrapper.childNodes),
-    exprs,
-    fragWrapper,
-    doc,
-  )
+  const { holeInfos, holePaths, components, consumed, lists, conditionals, recycledLists } =
+    walkNodeList(Array.from(fragWrapper.childNodes), exprs, fragWrapper, doc)
 
   // shape.html: serialize post-walk subtree (components now replaced by anchors),
   // strip remaining hole sentinels.
@@ -810,6 +861,12 @@ function buildSlotContentIR(
       alternate: alternate !== null ? alternate() : null,
     } satisfies ConditionalBinding)
   }
+  // Wire <recycle>-in-slot: mirrors the each-in-slot / iff-in-slot wiring above.
+  for (const wr of recycledLists) {
+    const pathIndex = allPaths.length
+    allPaths.push(wr.anchorPath)
+    bindings.push(buildRecycledListBinding(pathIndex, wr.sentinel))
+  }
 
   const holeIndices = [...holeInfos.map((h) => h.origIdx), ...consumed].filter(
     (v, i, a) => a.indexOf(v) === i,
@@ -819,6 +876,37 @@ function buildSlotContentIR(
     ir: { id: slotId, shape: { html: rawHtml, bindingPaths: allPaths }, bindings },
     holeIndices,
   }
+}
+
+/**
+ * Build one RecycledListBinding from a walked recycle() sentinel. Shared by both
+ * the top-level html() dispatch and the slot-content builder (mirrors the
+ * each()/iff() wiring pattern above). indexSig is ALWAYS allocated (non-optional
+ * per RecycledListBinding — position IS the identity and is always read; contrast
+ * `list`, which can elide it). bodyIR is populated eagerly (stub thunks) so the
+ * structural shortcut consumers (bindingEqual, emit) have a body to recurse into,
+ * mirroring how `.nv`'s <recycle> always captures bodyIR at parse time.
+ */
+function buildRecycledListBinding(
+  pathIndex: number,
+  sentinel: RecycledSentinel,
+): RecycledListBinding {
+  const { items, factory } = sentinel
+  const itemTemplate = (valueSig: WritableSignal<unknown>, indexSig: WritableSignal<number>) =>
+    factory(
+      () => valueSig(),
+      () => indexSig(),
+    )
+  return {
+    kind: 'recycled-list',
+    pathIndex,
+    items,
+    itemTemplate,
+    bodyIR: factory(
+      () => undefined,
+      () => 0,
+    ),
+  } satisfies RecycledListBinding
 }
 
 /** Build a ComponentBinding whose factory throws if invoked (tagged-template can't resolve imports). */
@@ -957,6 +1045,7 @@ export function createHtmlTag(document: Document) {
         !isSlotFillSentinel(exprs[i]) &&
         !isEachSentinel(exprs[i]) &&
         !isConditionalSentinel(exprs[i]) &&
+        !isRecycledSentinel(exprs[i]) &&
         !isClassesSentinel(exprs[i])
       ) {
         throw new TypeError(
@@ -990,6 +1079,7 @@ export function createHtmlTag(document: Document) {
       consumed: consumedByComponent,
       lists,
       conditionals,
+      recycledLists,
     } = walkNodeList(Array.from(frag.childNodes), exprs, frag, document)
     // Map encounter-order hole paths back to GLOBAL hole indices (top-level convention).
     for (let h = 0; h < holeInfos.length; h++) {
@@ -1054,6 +1144,13 @@ export function createHtmlTag(document: Document) {
         consequent: consequent(),
         alternate: alternate !== null ? alternate() : null,
       } satisfies ConditionalBinding)
+    }
+
+    // Add recycled-list bindings (recycle() sentinels): anchor paths appended after conditionals.
+    for (const wr of recycledLists) {
+      const pathIndex = allPaths.length
+      allPaths.push(wr.anchorPath)
+      bindings.push(buildRecycledListBinding(pathIndex, wr.sentinel))
     }
 
     const shape: TemplateShape = {
