@@ -68,6 +68,7 @@ import type {
   SlotContent,
   SlotOutletBinding,
   StyleVarBinding,
+  SwitchBinding,
   SyncBinding,
   TemplateIR,
   TextBinding,
@@ -141,6 +142,10 @@ function wireBinding(
     }
     case 'conditional': {
       wireConditional(binding, targetNode, doc)
+      break
+    }
+    case 'switch': {
+      wireSwitch(binding, targetNode, doc)
       break
     }
     case 'list': {
@@ -878,6 +883,55 @@ function wireConditional(binding: ConditionalBinding, anchorNode: Node, doc: Doc
     })
 
     // Bridge: if THIS effect is disposed (parent region teardown), clean up branch.
+    onCleanup(() => {
+      if (branchDisposer !== null) {
+        branchDisposer()
+        branchDisposer = null
+      }
+    })
+  })
+}
+
+// ── SwitchBinding ─────────────────────────────────────────────────────────────
+
+function wireSwitch(binding: SwitchBinding, anchorNode: Node, doc: Document): void {
+  // Anchor is a Comment node; branches mount before it. Direct generalization of
+  // wireConditional: same single-effect/single-disposer pattern, N ordered branches
+  // instead of 2, first-match-wins instead of boolean toggle.
+  const parent = anchorNode.parentNode
+  if (parent === null) {
+    throw new Error('[nv/interpreter] SwitchBinding: anchor has no parent')
+  }
+
+  let branchDisposer: (() => void) | null = null
+
+  effect(() => {
+    if (branchDisposer !== null) {
+      branchDisposer()
+      branchDisposer = null
+    }
+
+    let template: TemplateIR | null = null
+    for (const branch of binding.branches) {
+      if (branch.when()) {
+        template = branch.body
+        break
+      }
+    }
+    if (template === null) template = binding.fallback
+
+    if (template === null) return
+
+    branchDisposer = createRoot((dispose) => {
+      const { roots } = mountFragment(template as TemplateIR, parent, doc, anchorNode)
+      onCleanup(() => {
+        for (const n of roots) {
+          if (n.parentNode !== null) n.parentNode.removeChild(n)
+        }
+      })
+      return dispose
+    })
+
     onCleanup(() => {
       if (branchDisposer !== null) {
         branchDisposer()

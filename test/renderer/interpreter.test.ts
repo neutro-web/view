@@ -42,6 +42,7 @@ import type {
   EventBinding,
   ListBinding,
   PropBinding,
+  SwitchBinding,
   SyncBinding,
   TemplateIR,
   TextBinding,
@@ -873,6 +874,33 @@ function reactiveTextBranch(expr: () => string | null | undefined): TemplateIR {
   }
 }
 
+/**
+ * Reactive branch that captures its own branch-root owner (the createRoot scope
+ * the branch is mounted under, e.g. by wireConditional/wireSwitch) into `capture`
+ * on each run, via the same getOwner().owner technique used by TC-A1-DIFF-CONF
+ * for itemRootOwner. Lets tests assert owner-tree shape, not just DOM shape.
+ */
+function reactiveBranchCapturingOwner(
+  label: string,
+  expr: () => string,
+  capture: { owner: ReturnType<typeof getOwner> },
+): TemplateIR {
+  return {
+    id: `reactive-owner-branch-${label}`,
+    shape: { html: `<span class="${label}"><!--nv-0--></span>`, bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'text',
+        pathIndex: 0,
+        expr: () => {
+          capture.owner = (getOwner() as unknown as { owner: ReturnType<typeof getOwner> }).owner
+          return expr()
+        },
+      } satisfies TextBinding,
+    ],
+  }
+}
+
 test('TC-06a  condition=true: consequent mounted, alternate absent', () => {
   const show = signal(true)
   const ir = makeConditionalIR(
@@ -957,10 +985,11 @@ test('TC-06d  flip once: old DOM gone, new DOM present', () => {
 
 test('TC-06e  flip N=20 times: no accumulated DOM, content matches final state', () => {
   const show = signal(true)
+  const capture: { owner: ReturnType<typeof getOwner> } = { owner: null }
   const ir = makeConditionalIR(
     () => show(),
-    staticBranch('<span class="A">A</span>'),
-    staticBranch('<span class="B">B</span>'),
+    reactiveBranchCapturingOwner('A', () => 'A', capture),
+    reactiveBranchCapturingOwner('B', () => 'B', capture),
   )
   const parent = mkParent()
   const dispose = mount(ir, parent, document)
@@ -977,6 +1006,13 @@ test('TC-06e  flip N=20 times: no accumulated DOM, content matches final state',
       div.childNodes.length,
       `flip ${i}: expected 2 childNodes, got ${div.childNodes.length}`,
     ).toBe(2)
+    // Owner-tree assertion, not just DOM count — a leaked effect/signal from a
+    // disposed branch can have zero DOM footprint. Each fresh branch root
+    // should own exactly its one text effect.
+    expect(
+      __test.childCount(capture.owner),
+      `flip ${i}: branch root owns exactly 1 effect (no accumulation)`,
+    ).toBe(1)
   }
 
   // After N=20 flips (i=0..19; last flip i=19 is odd → show.set(true) → A mounted)
@@ -1076,6 +1112,155 @@ test('TC-06h  parent region dispose while branch mounted: full cleanup', () => {
 
   // DOM removed
   expect(parent.children.length, 'outer div removed').toBe(0)
+  rmParent(parent)
+})
+
+// ── TC-SW: SwitchBinding ────────────────────────────────────────────────────────
+//
+// Direct generalization of TC-06 (ConditionalBinding): N ordered branches,
+// first-match-wins, optional fallback. Mirrors TC-06's disposal rigor.
+
+function makeSwitchIR(
+  branches: Array<{ when: () => boolean; body: TemplateIR }>,
+  fallback: TemplateIR | null,
+): TemplateIR {
+  return {
+    id: 'test-switch',
+    shape: { html: '<div><!--anchor--></div>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'switch',
+        pathIndex: 0,
+        branches,
+        fallback,
+      } as SwitchBinding,
+    ],
+  }
+}
+
+function staticBranchIR(html: string): TemplateIR {
+  return { id: `test-branch-${html}`, shape: { html, bindingPaths: [] }, bindings: [] }
+}
+
+test('TC-SW01  first-match-wins: branch 1 and branch 2 both true, only branch 1 renders', () => {
+  const ir = makeSwitchIR(
+    [
+      { when: () => true, body: staticBranchIR('<span class="one">1</span>') },
+      { when: () => true, body: staticBranchIR('<span class="two">2</span>') },
+    ],
+    null,
+  )
+  const parent = mkParent()
+  const dispose = mount(ir, parent, document)
+  flushSync()
+
+  const div = parent.querySelector('div') as Element
+  expect(div.querySelector('.one') !== null, 'branch 1 rendered').toBe(true)
+  expect(div.querySelector('.two') === null, 'branch 2 did not render').toBe(true)
+
+  dispose()
+  rmParent(parent)
+})
+
+test('TC-SW02  fallback renders when no branch matches; null-safe when fallback absent', () => {
+  const irWithFallback = makeSwitchIR(
+    [{ when: () => false, body: staticBranchIR('<span class="a">a</span>') }],
+    staticBranchIR('<span class="fb">fb</span>'),
+  )
+  const parent1 = mkParent()
+  const dispose1 = mount(irWithFallback, parent1, document)
+  flushSync()
+  expect(parent1.querySelector('.fb') !== null, 'fallback rendered').toBe(true)
+  dispose1()
+  rmParent(parent1)
+
+  const irNoFallback = makeSwitchIR(
+    [{ when: () => false, body: staticBranchIR('<span class="a">a</span>') }],
+    null,
+  )
+  const parent2 = mkParent()
+  const dispose2 = mount(irNoFallback, parent2, document)
+  flushSync()
+  const div2 = parent2.querySelector('div') as Element
+  // Only the anchor comment remains — no branch content, no error.
+  expect(div2.childNodes.length, 'no accumulated DOM with absent fallback').toBe(1)
+  dispose2()
+  rmParent(parent2)
+})
+
+test('TC-SW03  swap across all branches + fallback repeatedly: no accumulated DOM', () => {
+  const active = signal(0) // 0, 1, 2 → branches; 3 → no match (fallback)
+  const capture: { owner: ReturnType<typeof getOwner> } = { owner: null }
+  const ir = makeSwitchIR(
+    [
+      { when: () => active() === 0, body: reactiveBranchCapturingOwner('b0', () => '0', capture) },
+      { when: () => active() === 1, body: reactiveBranchCapturingOwner('b1', () => '1', capture) },
+      { when: () => active() === 2, body: reactiveBranchCapturingOwner('b2', () => '2', capture) },
+    ],
+    reactiveBranchCapturingOwner('fb', () => 'fb', capture),
+  )
+  const parent = mkParent()
+  const dispose = mount(ir, parent, document)
+  flushSync()
+
+  const div = parent.querySelector('div') as Element
+  const N = 20
+  for (let i = 0; i < N; i++) {
+    active.set(i % 4)
+    flushSync()
+    expect(
+      div.childNodes.length,
+      `swap ${i}: expected 2 childNodes (branch + anchor), got ${div.childNodes.length}`,
+    ).toBe(2)
+    // Owner-tree assertion, not just DOM count — the G1 gate explicitly requires
+    // this because a leaked effect/signal from a disposed branch can have zero
+    // DOM footprint. Each fresh branch root should own exactly its one text
+    // effect — never more, which would indicate an accumulated/leaked child
+    // from a prior branch's root.
+    expect(
+      __test.childCount(capture.owner),
+      `swap ${i}: branch root owns exactly 1 effect (no accumulation)`,
+    ).toBe(1)
+  }
+
+  dispose()
+  rmParent(parent)
+})
+
+test('TC-SW04  parent region dispose while a branch is mounted: full cleanup', () => {
+  const active = signal(0)
+  const switchIR = makeSwitchIR(
+    [{ when: () => active() === 0, body: staticBranchIR('<span class="b0">0</span>') }],
+    null,
+  )
+  // Mount switchIR nested inside a ConditionalBinding's consequent so disposing the
+  // OUTER conditional tears down the inner switch's active branch via the onCleanup bridge.
+  const outerCond = signal(true)
+  const wrapperIR: TemplateIR = {
+    id: 'wrapper',
+    shape: { html: '<div><!--outer--></div>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'conditional',
+        pathIndex: 0,
+        condition: () => outerCond(),
+        consequent: switchIR,
+        alternate: null,
+      } as ConditionalBinding,
+    ],
+  }
+  const parent = mkParent()
+  const dispose = mount(wrapperIR, parent, document)
+  flushSync()
+  expect(parent.querySelector('.b0') !== null, 'inner switch branch mounted').toBe(true)
+
+  outerCond.set(false)
+  flushSync()
+  expect(parent.querySelector('.b0') === null, 'inner switch branch torn down with parent').toBe(
+    true,
+  )
+
+  dispose()
   rmParent(parent)
 })
 
