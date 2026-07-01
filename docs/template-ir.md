@@ -1,9 +1,10 @@
-# nv Template IR — Design v0.4.4
+# nv Template IR — Design v0.4.5
  
 **Stream:** (3) Renderer/templating  
 **Contract reference:** nv Reactive Core Runtime Contract v0.4.3  
-**Status:** Approved — v0.4.4 (2026-06-29). RecycledListBinding (kind: 'recycled-list') added.  
+**Status:** Approved — v0.4.5 (2026-07-01). SwitchBinding (kind: 'switch') added.  
 **Changelog:**  
+- v0.4.5 (2026-07-01): Added `SwitchBinding` (kind: `'switch'`): multi-branch control flow. `branches: readonly { when: ReactiveExpr<boolean>; body: TemplateIR }[]` (ordered, first-truthy-`when()`-wins) + `fallback: TemplateIR | null`. Dedicated `.nv` `<switch>`/`<match>` element (element-recognition tier, NOT ternary sugar — the nested-ternary `.nv` path is independently unsound, see [2026-07-01] shape ruling) + tagged `match(branches, fallback?)` sentinel (`__nvMatch`, thunked branches). Wired in all three back-ends (interpreter `wireSwitch`, `emitted-mount.ts` compiler, Mode-A emitter). `wireSwitch` is a structural generalization of `wireConditional` (§3.6) — single effect, single `branchDisposer`, createRoot-per-branch, onCleanup teardown bridge; N ordered branches via for/break instead of a boolean ternary. reactive-core contract unchanged (remains v0.4.3). Landed `61d5987`.
 - v0.4.4 (2026-06-29): Added `RecycledListBinding` (kind: `'recycled-list'`): non-keyed recycled list with position-identity semantics. `itemTemplate` takes `(valueSig: WritableSignal<unknown>, indexSig: WritableSignal<number>)` — `indexSig` non-optional. No `key` field. Forbids `key=` at parse time (throws). See `<recycle>` authoring element.
 - v0.4.3 (2026-06-28): ListBinding.itemReadsIndex? (additive, absent⇒allocate) — index-elision, compiled-.nv path only. reactive-core contract unchanged (remains v0.4.3, set by P-2c-A1).
 - v0.2 (2026-06-17): initial approved IR spec — six binding kinds (PoC scope) + two designed-deferred (List, Sync).  
@@ -160,7 +161,7 @@ anchor `Comment` node; the back-end inserts/removes content before this anchor.
  
 ## 3. Binding Kinds
  
-Thirteen kinds total: six in PoC scope, two designed-and-deferred, one added in v0.3, one in v0.3.1, one in v0.4.1, one in v0.4.2, one in v0.4.4.
+Fourteen kinds total: six in PoC scope, two designed-and-deferred, one added in v0.3, one in v0.3.1, one in v0.4.1, one in v0.4.2, one in v0.4.4, one in v0.4.5.
  
 ```typescript
 type Binding =
@@ -172,6 +173,7 @@ type Binding =
   | ConditionalBinding // ─┘
   | ListBinding        //  ── designed, now in scope (§3.7)
   | RecycledListBinding //  ── v0.4.4 (non-keyed recycled list; position-identity)
+  | SwitchBinding      //  ── v0.4.5 (multi-branch; ordered first-match-wins + fallback)
   | SyncBinding        //  ── designed, deferred (§3.8)
   | ComponentBinding   //  ── v0.3 (component API)
   | SlotOutletBinding  //  ── v0.3.1 (slot consumption); v0.3.3 adds optional `fallback?: TemplateIR`
@@ -388,6 +390,52 @@ lifetime boundary. The parent effect's `onCleanup` bridges the two lifetimes
 **Escalation check (§6 contract).** The `condition` expression is read inside an
 `effect`, not a `derived`. The branches are instantiated inside a new `createRoot`
 scope. No `derived` writes, no `sync` target violations. ✓
+ 
+### 3.6.1 SwitchBinding (v0.4.5)
+ 
+```typescript
+type SwitchBinding = BaseBinding & {
+  kind: 'switch'
+  branches: readonly { when: ReactiveExpr<boolean>; body: TemplateIR }[]  // ordered
+  fallback: TemplateIR | null
+}
+```
+ 
+**IR kind:** `'switch'`
+ 
+Multi-branch structural control flow. Branches are evaluated in array order; the
+first branch whose `when()` returns truthy has its `body` mounted. If no branch
+matches and `fallback` is non-null, `fallback` mounts; if `fallback` is null and no
+branch matches, nothing mounts (symmetric with `ConditionalBinding.alternate === null`,
+§3.6).
+ 
+**Relationship to ConditionalBinding.** `SwitchBinding` generalizes the 2-branch
+`ConditionalBinding`: an N-branch ordered selection with explicit fallback rather than
+a boolean consequent/alternate. It is a distinct IR kind (not desugared nested
+conditionals) because the `.nv` nested-ternary path is independently unsound —
+nv-parser's ternary detection is a flat two-branch check and a nested ternary in the
+`whenFalse` position silently falls through to `kind:'text'`. The dedicated element
+avoids inheriting that bug. See the [2026-07-01] shape ruling in the decision log.
+ 
+**Disposal.** `wireSwitch` uses the §3.6 single-effect / single-`branchDisposer`
+pattern: one effect reads `when()`s in order, disposes the previous branch on re-
+evaluation, mounts the selected branch in its own `createRoot` scope, and bridges
+parent-region teardown via `onCleanup`. Only the active branch is ever mounted;
+branch swap disposes exactly the outgoing branch's DOM + reactive edges.
+ 
+**Front-ends.** `.nv` `<switch>`/`<match>` element (element-recognition tier) and
+tagged `match(branches, fallback?)` sentinel produce the identical `SwitchBinding`
+(FE-equivalence-gated against the shared IR oracle). Branch bodies and `when` in the
+tagged form MUST be thunks (same reason as `iff()`, §3.6): a raw value is evaluated
+before `html()` sees it and cannot be detected as reactive.
+ 
+**Known emit-path limitation (v0.4.5).** Nested *structural* bindings inside a
+`<switch>` branch body (a component, `<each>`, `<recycle>`, or nested `<switch>`) are
+NOT yet supported on the Mode-A module-emit path — they throw loudly at emit time.
+This is pre-existing in `<each>`/`<recycle>` (shared `computeBindingThunks`/`ThunkSource`
+machinery) and inherited by `<switch>`, not a `<switch>`-specific regression. The
+interpreter and `emitted-mount.ts` compiler paths handle nesting correctly. Tracked as
+a standalone follow-up (see decision log [2026-07-01]).
  
 ### 3.7 ListBinding (landed)
  
@@ -1064,6 +1112,12 @@ type RecycledListBinding = BaseBinding & {  // v0.4.4
   itemTemplate: (valueSig: WritableSignal<unknown>, indexSig: WritableSignal<number>) => TemplateIR;
 };
  
+type SwitchBinding = BaseBinding & {  // v0.4.5
+  kind:     'switch';
+  branches: readonly { when: ReactiveExpr<boolean>; body: TemplateIR }[];  // ordered
+  fallback: TemplateIR | null;
+};
+ 
 type SyncBinding = BaseBinding & {  // DESIGNED, DEFERRED
   kind:           'sync';
   propName:       string;
@@ -1119,7 +1173,7 @@ type StyleVarBinding = BaseBinding & {
 
 type Binding =
   | TextBinding | AttrBinding | PropBinding | EventBinding
-  | ChildBinding | ConditionalBinding | ListBinding | RecycledListBinding | SyncBinding
+  | ChildBinding | ConditionalBinding | ListBinding | RecycledListBinding | SwitchBinding | SyncBinding
   | ComponentBinding
   | SlotOutletBinding
   | ClassListBinding

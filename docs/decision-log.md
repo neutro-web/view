@@ -29,8 +29,8 @@
 
 ## Current State
 
-_Last updated: 2026-07-01. Template-IR **v0.4.4**, reactive-core contract **v0.4.3**._
-_Active frontier: v0.5.0 API-parity + control-flow completion. Performance arc CLOSED (create intrinsic, mutation won, recycling ships). Next: `<switch>`/`<match>` — shape ruled 2026-07-01 (new IR kind), commission not yet written._
+_Last updated: 2026-07-01. Template-IR **v0.4.5**, reactive-core contract **v0.4.3**._
+_Active frontier: v0.5.0 API-parity. Control-flow completion (PT-3) DONE. Performance arc CLOSED._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
 > `decision-log-archive.md` (moved 2026-06-21).
@@ -48,22 +48,46 @@ _Active frontier: v0.5.0 API-parity + control-flow completion. Performance arc C
     [2026-06-24]: wire when a production flow constructs a `ts.Program` over user source
     (gated on the Mode-A consumer pipeline). Not a debt. SyncBindings are external-source
     syncs and correctly contribute no edge (Part 3 CLOSED [2026-06-24]).
-- **Renderer:** interpreter + compiler back-ends at parity for all **15** binding kinds
+- **Renderer:** interpreter + compiler back-ends at parity for all **16** binding kinds
   (`text attr prop event sync classlist toggle static list component slot-outlet
-  conditional recycled-list style-var child`). Both front-ends (tagged-template + `.nv`)
+  conditional recycled-list style-var child switch`). Both front-ends (tagged-template + `.nv`)
   produce one IR, FE-equivalence-gated. **Tagged-FE parity CLOSED 2026-06-30** — `iff()`
   (conditional) + `recycle()` builders added; `child`/`style-var` are typechecked
   documented deferrals; a `Binding['kind']` exhaustiveness forcing-function (`never`-default
   + type-level `Equals`) now fails tsc if a new IR kind lacks a tagged builder or logged
-  deferral. Template-IR doc at **v0.4.4**.
-- **Control-flow constructs:** `<each>` (keyed list), `<recycle>` (non-keyed positional
-  list — **LANDED `3b00064`**), conditional (`.nv` ternary / tagged `iff()`).
-  **`<switch>`/`<match>` (multi-branch) — shape ruled 2026-07-01: new IR kind
-  `SwitchBinding`, not desugared conditionals** (nested-ternary `.nv` path is unsound today —
-  silently misparses to `text`; new kind reuses `wireConditional`'s disposal pattern
-  generalized to N ordered branches). Dedicated `.nv` `<switch>`/`<match>` element + tagged
-  `match()` sentinel, both required by the tagged-FE exhaustiveness gate. **Commission not
-  yet written** — next task.
+  deferral. Template-IR doc at **v0.4.5**.
+- **Control-flow constructs — COMPLETE (PT-3 DONE).** `<each>` (keyed list), `<recycle>`
+  (non-keyed positional list — `3b00064`), conditional (`.nv` ternary / tagged `iff()`),
+  **`<switch>`/`<match>` (multi-branch — LANDED `61d5987`, verified at SHA).** New IR kind
+  `SwitchBinding` (`kind:'switch'`), ordered first-match-wins + `fallback`. Dedicated `.nv`
+  `<switch>`/`<match>` element + tagged `match()` sentinel, identical IR (FE-equivalence-
+  gated). `wireSwitch` = structural generalization of `wireConditional` (single-effect,
+  single-disposer, createRoot-per-branch, onCleanup bridge — N branches via for/break).
+  All three back-ends at parity (interpreter, `emitted-mount.ts` compiler, Mode-A emitter —
+  the 3rd was a halt-checkpoint scope addition, approved mid-plan). Two footgun guards
+  added (stray `<match>` outside `<switch>`; non-`<match>` children of `<switch>`). Closure-
+  clean (no `src/core/` diff). Template-IR **v0.4.5**; contract unchanged v0.4.3. The last
+  open control-flow gap is closed.
+- **Tracked-open follow-ups (surfaced by the switch/match audit, neither on the roadmap —
+  general misses, now logged not silent):**
+  - **Follow-up A — nested structural bindings on the Mode-A emit path (PRIORITY of the two).**
+    A component / `<each>` / `<recycle>` / `<switch>` nested inside a `<each>`/`<recycle>`/
+    `<switch>` body throws loudly at emit time (`computeBindingThunks`/`ThunkSource` only
+    threads primitive holes). **Pre-existing in `<each>`/`<recycle>`**, inherited by `<switch>`;
+    interpreter + `emitted-mount.ts` compiler handle nesting correctly — this is a **Mode-A
+    back-end asymmetry** (the drifting-path pattern collapse-don't-patch targets). Not a
+    `<switch>` blocker; `<switch>` is at-parity for what it claims. Real-app-relevant (nested
+    lists / component-in-row are table-stakes for the dashboard/grid workloads nv targets
+    strongest). **Recommend commissioning as a standalone unit** on the shared machinery.
+    See [2026-07-01] log entry.
+  - **Follow-up B — no dedicated perf benchmark for `<conditional>`/`<recycle>`/`<switch>`.**
+    Only `<each>` has the jfb-style row app; the other three structural kinds never got one.
+    Defensible given the performance arc closed on the shared-scaffolding finding (per-construct
+    cost is structural, not per-kind), so marginal info from benchmarking `<switch>` specifically
+    is low. **The real value is regression-guarding `<recycle>`**, whose entire justification is a
+    perf claim (node-churn→0) currently resting on a one-shot verdict probe (`8da893a`), not a
+    standing benchmark. Scope as one combined harness (all three), **below Follow-up A**. See
+    [2026-07-01] log entry.
 - **Build pipeline `.nv → .js`:** Mode A, landed. Executable-module gate closed.
   **[2026-06-25] `.nv` author path proven E2E in real browsers** (probe `8146d82`): `.nv` → plugin →
   esbuild → browser, click updates DOM, chromium+webkit. Authoring is assignment-form
@@ -5207,3 +5231,44 @@ existing `app.nv` row-benchmark fixture (e.g. a toggle/filter view using `<condi
 `<switch>` per row) or build a separate harness, and should cover `<conditional>`, `<recycle>`,
 and `<switch>` together rather than singling one out, since all three are in the same
 unbenchmarked state today.
+
+### [2026-07-01] `<switch>`/`<match>` LANDED `61d5987` — PT-3 control-flow complete
+
+**Commission:** SwitchBinding (Option A, per [2026-07-01] shape ruling), symmetric across
+`.nv` `<switch>`/`<match>` + tagged `match()`, interpreted + compiled at parity.
+
+**Landed (`61d5987`, verified at SHA — placed source read, not report-trusted):** IR kind
+`SwitchBinding` (ir.ts:169) added to the `Binding` union; `wireSwitch` (interpreter.ts:897)
+single-effect/single-`branchDisposer`/for-break-first-match/createRoot-per-branch/onCleanup-
+bridge — structural generalization of `wireConditional`, audited as genuinely identical
+observable behavior, not a drifting copy; compiler case in `emitted-mount.ts`; **third
+back-end** (Mode-A emitter, `86ed084`/`6d6e622`) added as a halt-checkpoint scope expansion
+(real end-user surface, approved mid-plan). Tagged `match()` sentinel (`__nvMatch`,
+html-tag.ts:308) + exhaustiveness-gate case + independent `HandledBindingKinds` union entry.
+`.nv` on the dedicated element-recognition tier; ternary-detection path confirmed untouched.
+FE-equivalence gated against the shared IR oracle. **No `src/core/` diff** (closure-clean, no
+new primitive). tsc-strict clean; 813/813 tests reported (not re-run in verification sandbox).
+
+**Deviations from commission text, all flagged/approved:** (1) 3rd back-end (above). (2) two
+footgun guards beyond spec — stray `<match>` outside `<switch>` renders nothing (caught
+pre-execution); non-`<match>` children of `<switch>` silently dropped (caught in deep audit);
+both fixed. (3) compiler shares one read-only empty `ReadonlyMap` across branches vs the plan's
+one-per-branch — audited safe (read-only), plan text corrected to match reality.
+
+**Verification:** implementer→independent-review→independent-test-rerun per task (7); whole-branch
+Opus review vs literal G0/G1 text; then 3 parallel Opus audits (coherence/axioms; fault-tolerance
+adversarial; efficiency/docs/gate-re-derivation), each re-running tsc/tests independently. Zero
+Critical, zero Important; six Minor, all fixed + re-verified.
+
+**Two pre-existing gaps surfaced by the audit, logged as separate [2026-07-01] follow-up entries
+(neither on the roadmap — general misses, not tracked debt):** (A) nested structural bindings
+unsupported on Mode-A emit path — pre-existing in `<each>`/`<recycle>`, back-end asymmetry,
+recommended as priority standalone commission; (B) no dedicated perf benchmark for `<conditional>`/
+`<recycle>`/`<switch>` — recommended as one combined harness, value is regression-guarding
+`<recycle>`'s node-churn claim.
+
+**Contract impact:** none (renderer-layer). Template-IR **v0.4.4 → v0.4.5**. reactive-core
+contract unchanged (v0.4.3).
+
+**Result:** PT-3 (control-flow completion) DONE. `<switch>`/`<match>` was the last open
+control-flow construct.
