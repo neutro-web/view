@@ -931,33 +931,13 @@ function buildSlotContentIR(
   for (const wl of lists) {
     const pathIndex = allPaths.length
     allPaths.push(wl.anchorPath)
-    const { items, key, factory } = wl.sentinel
-    const listBinding = {
-      kind: 'list',
-      pathIndex,
-      items,
-      key,
-      itemTemplate: (valueSig, indexSig?) =>
-        // biome-ignore lint/style/noNonNullAssertion: tagged-template path never sets itemReadsIndex: false, so interpreter always allocates indexSig (§6 conservative-allocate default)
-        factory({ item: () => valueSig(), index: () => indexSig!() }),
-    } satisfies ListBinding
-    assertAllBindingKindsHandled(listBinding.kind)
-    bindings.push(listBinding)
+    bindings.push(buildListBinding(pathIndex, wl.sentinel))
   }
   // Wire <iff>-in-slot: mirrors the each-in-slot wiring above.
   for (const wc of conditionals) {
     const pathIndex = allPaths.length
     allPaths.push(wc.anchorPath)
-    const { condition, consequent, alternate } = wc.sentinel
-    const conditionalBinding = {
-      kind: 'conditional',
-      pathIndex,
-      condition,
-      consequent: consequent(),
-      alternate: alternate !== null ? alternate() : null,
-    } satisfies ConditionalBinding
-    assertAllBindingKindsHandled(conditionalBinding.kind)
-    bindings.push(conditionalBinding)
+    bindings.push(buildConditionalBinding(pathIndex, wc.sentinel))
   }
   // Wire <recycle>-in-slot: mirrors the each-in-slot / iff-in-slot wiring above.
   for (const wr of recycledLists) {
@@ -974,6 +954,49 @@ function buildSlotContentIR(
     ir: { id: slotId, shape: { html: rawHtml, bindingPaths: allPaths }, bindings },
     holeIndices,
   }
+}
+
+/**
+ * Build one ListBinding from a walked each() sentinel. Shared by both the
+ * top-level html() dispatch and the slot-content builder (mirrors the
+ * buildRecycledListBinding sharing pattern below). indexSig is optional per
+ * ListBinding, but the tagged-template path never sets `itemReadsIndex: false`,
+ * so the interpreter always allocates it (§6 conservative-allocate default).
+ */
+function buildListBinding(pathIndex: number, sentinel: EachSentinel): ListBinding {
+  const { items, key, factory } = sentinel
+  const binding = {
+    kind: 'list',
+    pathIndex,
+    items,
+    key,
+    itemTemplate: (valueSig, indexSig?) =>
+      // biome-ignore lint/style/noNonNullAssertion: tagged-template path never sets itemReadsIndex: false, so interpreter always allocates indexSig (§6 conservative-allocate default)
+      factory({ item: () => valueSig(), index: () => indexSig!() }),
+  } satisfies ListBinding
+  assertAllBindingKindsHandled(binding.kind)
+  return binding
+}
+
+/**
+ * Build one ConditionalBinding from a walked iff() sentinel. Shared by both the
+ * top-level html() dispatch and the slot-content builder (mirrors the
+ * buildRecycledListBinding sharing pattern below).
+ */
+function buildConditionalBinding(
+  pathIndex: number,
+  sentinel: ConditionalSentinel,
+): ConditionalBinding {
+  const { condition, consequent, alternate } = sentinel
+  const binding = {
+    kind: 'conditional',
+    pathIndex,
+    condition,
+    consequent: consequent(),
+    alternate: alternate !== null ? alternate() : null,
+  } satisfies ConditionalBinding
+  assertAllBindingKindsHandled(binding.kind)
+  return binding
 }
 
 /**
@@ -1222,34 +1245,14 @@ export function createHtmlTag(document: Document) {
     for (const wl of lists) {
       const pathIndex = allPaths.length
       allPaths.push(wl.anchorPath)
-      const { items, key, factory } = wl.sentinel
-      const listBinding = {
-        kind: 'list',
-        pathIndex,
-        items,
-        key,
-        itemTemplate: (valueSig, indexSig?) =>
-          // biome-ignore lint/style/noNonNullAssertion: tagged-template path never sets itemReadsIndex: false, so interpreter always allocates indexSig (§6 conservative-allocate default)
-          factory({ item: () => valueSig(), index: () => indexSig!() }),
-      } satisfies ListBinding
-      assertAllBindingKindsHandled(listBinding.kind)
-      bindings.push(listBinding)
+      bindings.push(buildListBinding(pathIndex, wl.sentinel))
     }
 
     // Add conditional bindings (iff() sentinels): anchor paths appended after lists.
     for (const wc of conditionals) {
       const pathIndex = allPaths.length
       allPaths.push(wc.anchorPath)
-      const { condition, consequent, alternate } = wc.sentinel
-      const conditionalBinding = {
-        kind: 'conditional',
-        pathIndex,
-        condition,
-        consequent: consequent(),
-        alternate: alternate !== null ? alternate() : null,
-      } satisfies ConditionalBinding
-      assertAllBindingKindsHandled(conditionalBinding.kind)
-      bindings.push(conditionalBinding)
+      bindings.push(buildConditionalBinding(pathIndex, wc.sentinel))
     }
 
     // Add recycled-list bindings (recycle() sentinels): anchor paths appended after conditionals.

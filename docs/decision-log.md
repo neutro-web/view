@@ -29,7 +29,7 @@
 
 ## Current State
 
-_Last updated: 2026-06-28 (index-elision Commission 1 landed at `a495716`; Template-IR **v0.4.3**, reactive-core contract **v0.4.3**). Design docs in-repo under `docs/design/`._
+_Last updated: 2026-06-30 (index-elision Commission 1 landed at `a495716`; Template-IR **v0.4.3**, reactive-core contract **v0.4.3**). Tagged-FE parity restored — `iff()`/`recycle()` builders land at IR parity with `.nv`; exhaustiveness forcing-function in place; closes T-8. Design docs in-repo under `docs/design/`._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
 > `decision-log-archive.md` (moved 2026-06-21). This snapshot is the resolved

@@ -5,7 +5,14 @@ export { mount } from './interpreter.js'
 export { resource } from './resource.js'
 export type { Resource } from './resource.js'
 export { createHtmlTag, slots, slot, each, cx, classes, iff, recycle } from './html-tag.js'
-export type { SlotSentinel, SlotFillSentinel, EachSentinel, ClassesSentinel } from './html-tag.js'
+export type {
+  SlotSentinel,
+  SlotFillSentinel,
+  EachSentinel,
+  ClassesSentinel,
+  ConditionalSentinel,
+  RecycledSentinel,
+} from './html-tag.js'
 export { structurallyEqual } from './comparator.js'
 
 export type {
