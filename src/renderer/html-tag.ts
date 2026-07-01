@@ -336,6 +336,11 @@ export function match(
   branches: readonly { when: () => boolean; body: () => TemplateIR }[],
   fallback?: (() => TemplateIR) | null,
 ): MatchSentinel {
+  // `branches: []` is accepted here (degenerate but valid — reduces to always-fallback,
+  // or to always-nothing if fallback is also absent). This is intentionally asymmetric
+  // with .nv's <switch> element, which throws '<switch> requires at least one <match>
+  // child' (src/renderer/nv-parser.ts) — different front-ends, different authoring
+  // affordances; not an oversight.
   return { __nvMatch: true, branches, fallback: fallback ?? null }
 }
 

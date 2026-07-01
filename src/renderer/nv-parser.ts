@@ -762,6 +762,10 @@ function walkNvNodeList(
         ) as HTMLTemplateElement[]
 
         if (matchChildren.length === 0) {
+          // Intentional asymmetry vs. the tagged-template `match([], fallback)` form
+          // (src/renderer/html-tag.ts), which accepts a zero-branch array as a
+          // degenerate-but-valid call — different front-ends, different authoring
+          // affordances. Do not "fix" one to match the other without a decision.
           throw new Error('[nv] <switch> requires at least one <match> child')
         }
 

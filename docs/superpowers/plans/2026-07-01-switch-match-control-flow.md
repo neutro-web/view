@@ -469,22 +469,37 @@ Expected: FAIL — `emitSetup`'s `default` case throws `Binding kind 'switch' is
 
 Add directly after the existing `case 'conditional':` block (lines 328–400 per research) in `src/compiler/emitted-mount.ts`:
 
+**Reconciliation (post-implementation, 2026-07-01):** the code sample below originally
+described an "independent empty verdicts map per branch." What actually shipped in
+`src/compiler/emitted-mount.ts` uses a **single shared empty verdicts map** across all
+branches and the fallback, not one map per branch — confirmed correct by two prior audits.
+This is safe because `emitSetup` only ever `.get()`s from the verdicts map (never mutates
+it); the map is a `ReadonlyMap` read for erasure decisions keyed by `pathIndex`, and since
+it is empty for every branch/fallback call, every `.get()` returns `undefined` (the
+"no verdict, treat conservatively" case) regardless of which branch is asking — there is no
+cross-branch data to leak or collide, because there is no per-branch data in the map at all.
+A single shared empty-map instance is therefore behaviorally identical to N independently
+allocated empty maps, with one fewer allocation per switch binding. The code sample is kept
+below as an illustration of the emit-time recursion pattern; treat the shared-map detail as
+superseded by this note, not by the sample's literal allocation pattern.
+
 ```typescript
       case 'switch': {
         // Recursively emit each branch's setup at emit time, same pattern as 'conditional'.
-        // Independent empty verdicts map per branch — branch bindings have their own
-        // pathIndices and would receive wrong verdicts if the outer map were passed through.
+        // Shared empty verdicts map across all branches + fallback — safe because emitSetup
+        // only ever reads (.get()) from this ReadonlyMap and never mutates it; since the map
+        // is empty for every branch, every lookup returns undefined regardless of which
+        // branch is asking, so there is nothing to leak or collide across branches.
         const branchSetups: Array<{ when: ReactiveExpr<boolean>; setup: ReturnType<typeof emitSetup>['setup'] }> = []
+        const emptyVerdicts = new Map<number, BindingErasureVerdict>()
         for (const branch of binding.branches) {
-          const emptyVerdicts = new Map<number, BindingErasureVerdict>()
           const { setup, diagnostics: bDiags } = emitSetup(branch.body, emptyVerdicts)
           for (const d of bDiags) diagnostics.push(d)
           branchSetups.push({ when: branch.when, setup })
         }
 
-        const emptyFallbackVerdicts = new Map<number, BindingErasureVerdict>()
         const { setup: fallbackSetup, diagnostics: fDiags } = binding.fallback
-          ? emitSetup(binding.fallback, emptyFallbackVerdicts)
+          ? emitSetup(binding.fallback, emptyVerdicts)
           : { setup: null, diagnostics: [] as string[] }
         for (const d of fDiags) diagnostics.push(d)
 

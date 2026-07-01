@@ -39,6 +39,7 @@ import type {
   ComponentRef,
   ConditionalBinding,
   ReactiveExpr,
+  SwitchBinding,
   TemplateIR,
 } from '../../src/renderer/ir.js'
 import { emitModule } from '../../src/renderer/nv-emitter.js'
@@ -131,6 +132,24 @@ function buildLiveIr(result: NvComponentResult, scope: Record<string, unknown>):
             alternate:
               cb.alternate !== null && ct.alternate !== null
                 ? buildLiveSubIr(cb.alternate, ct.alternate)
+                : null,
+          }
+        }
+        case 'switch': {
+          const st = thunk as Extract<ThunkSource, { kind: 'switch' }>
+          const sb = b as SwitchBinding
+          return {
+            ...b,
+            branches: sb.branches.map((branch, bi) => {
+              const bt = st.branches[bi]!
+              return {
+                when: evalThunkSrc(`() => (${bt.whenSrc})`, scope) as () => boolean,
+                body: buildLiveSubIr(branch.body, bt.bodyThunks),
+              }
+            }),
+            fallback:
+              sb.fallback !== null && st.fallbackThunks !== null
+                ? buildLiveSubIr(sb.fallback, st.fallbackThunks)
                 : null,
           }
         }
@@ -744,6 +763,57 @@ describe('emitModule — <switch>/<match> SwitchBinding literal', () => {
     expect(js).toContain('branches:')
     expect(js).toContain('fallback:')
     expect(js).not.toContain('fallback: null')
+  })
+
+  // EM-12b follows this file's established eval+mount round-trip convention
+  // (see buildLiveIr/evalScriptBody, used by EM-01..EM-05 and the EM-12
+  // differential test below): evaluate the erased thunk sources with real
+  // signals, mount the resulting live IR, and assert both the initial branch
+  // and a reactive branch swap render correctly in the DOM.
+  test('EM-12b  eval+mount: <switch>/<match> live IR renders correct branch and swaps on signal write', () => {
+    const source =
+      'const C = $component(() => {\n' +
+      '  $script(() => { const state = signal(0) })\n' +
+      '  $render(() => html`<div><switch>' +
+      '<match when="${state === 0}"><span class="zero">zero</span></match>' +
+      '<match when="${state === 1}"><span class="one">one</span></match>' +
+      '<match><span class="fb">fb</span></match>' +
+      '</switch></div>`)\n' +
+      '})\n'
+
+    const results = parseNvFileForEmit(source, 'switch-emit.nv', document)
+    const scope = evalScriptBody(results[0]!.emit!.scriptBody)
+    const liveIr = buildLiveIr(results[0]!, scope)
+
+    const doc = makeDoc()
+    const parent = makeParent(doc)
+    const dispose = createRoot((d) => {
+      mount(liveIr, parent, doc)
+      return d
+    })
+    flushSync()
+
+    // Initial: state === 0 → first match branch wins
+    expect(parent.querySelector('.zero')).not.toBeNull()
+    expect(parent.querySelector('.one')).toBeNull()
+    expect(parent.querySelector('.fb')).toBeNull()
+
+    // Swap to state === 1 → second match branch wins
+    const stateSig = scope.state as ReturnType<typeof signal<number>>
+    stateSig.set(1)
+    flushSync()
+    expect(parent.querySelector('.zero')).toBeNull()
+    expect(parent.querySelector('.one')).not.toBeNull()
+    expect(parent.querySelector('.fb')).toBeNull()
+
+    // Swap to state === 2 (no branch matches) → fallback wins
+    stateSig.set(2)
+    flushSync()
+    expect(parent.querySelector('.zero')).toBeNull()
+    expect(parent.querySelector('.one')).toBeNull()
+    expect(parent.querySelector('.fb')).not.toBeNull()
+
+    dispose()
   })
 })
 

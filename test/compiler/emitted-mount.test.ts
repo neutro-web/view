@@ -29,7 +29,7 @@ import {
   emitEqualityHooks,
 } from '../../src/compiler/equality-hook-emitter.js'
 import type { BindingErasureVerdict } from '../../src/compiler/types.js'
-import { __test, derived, flushSync, signal, sync } from '../../src/core/core.js'
+import { __test, derived, flushSync, getOwner, signal, sync } from '../../src/core/core.js'
 import { structurallyEqual } from '../../src/renderer/comparator.js'
 import { createHtmlTag } from '../../src/renderer/html-tag.js'
 import { mount } from '../../src/renderer/interpreter.js'
@@ -724,6 +724,56 @@ function makeSwitchIR(
   }
 }
 
+/**
+ * Reactive branch body that captures its own branch-root owner (the createRoot
+ * scope the branch is mounted under, e.g. by the compiler's `case 'switch'` wiring)
+ * into `capture` on each run. Mirrors interpreter.test.ts's
+ * reactiveBranchCapturingOwner (TC-SW03) so the two back-ends can be held to the
+ * same owner-tree rigor, not just DOM-shape rigor.
+ */
+function reactiveBranchCapturingOwner(
+  label: string,
+  expr: () => string,
+  capture: { owner: ReturnType<typeof getOwner> },
+): TemplateIR {
+  return {
+    id: `test:switch-owner-branch-${label}`,
+    shape: { html: `<span class="${label}"><!--nv-0--></span>`, bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'text',
+        pathIndex: 0,
+        expr: () => {
+          // Same getOwner().owner technique as interpreter.test.ts's
+          // reactiveBranchCapturingOwner (TC-SW03) — captures the branch-root
+          // owner one level up from the text-binding's own tracking scope.
+          capture.owner = (getOwner() as unknown as { owner: ReturnType<typeof getOwner> }).owner
+          return expr()
+        },
+      } as TextBinding,
+    ],
+  }
+}
+
+/** Like makeSwitchIR, but takes fully-formed branch/fallback bodies (not raw HTML). */
+function makeSwitchIRFromBodies(
+  branchDefs: ReadonlyArray<{ when: () => boolean; body: TemplateIR }>,
+  fallback: TemplateIR | null,
+): TemplateIR {
+  return {
+    id: 'test:switch-owner',
+    shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'switch',
+        pathIndex: 0,
+        branches: branchDefs,
+        fallback,
+      } as SwitchBinding,
+    ],
+  }
+}
+
 // ── SwitchBinding gate tests (Task 3) ─────────────────────────────────────────
 
 test('SWITCH GATE 1: first-match-wins on initial mount across 2 branches + fallback', () => {
@@ -808,6 +858,64 @@ test('SWITCH GATE 3: fallback renders when toggled to no-match state', () => {
   assertEqual(containerI, containerE, 'post-no-match: fallback rendered')
   expect(containerE.querySelector('em')!.textContent).toBe('none')
   expect(containerE.querySelector('span')).toBeNull()
+
+  disposeI()
+  disposeE()
+})
+
+test('SWITCH GATE 4: cycle through all branches + fallback ~20 times — DOM baseline AND owner-tree parity (mirrors interpreter TC-SW03 rigor)', () => {
+  const { document } = makeDom()
+  const active = signal(0) // 0,1,2 → branches; 3 → no match (fallback)
+  const captureI: { owner: ReturnType<typeof getOwner> } = { owner: null }
+  const captureE: { owner: ReturnType<typeof getOwner> } = { owner: null }
+
+  const irI = makeSwitchIRFromBodies(
+    [
+      { when: () => active() === 0, body: reactiveBranchCapturingOwner('b0', () => '0', captureI) },
+      { when: () => active() === 1, body: reactiveBranchCapturingOwner('b1', () => '1', captureI) },
+      { when: () => active() === 2, body: reactiveBranchCapturingOwner('b2', () => '2', captureI) },
+    ],
+    reactiveBranchCapturingOwner('fb', () => 'fb', captureI),
+  )
+  const irE = makeSwitchIRFromBodies(
+    [
+      { when: () => active() === 0, body: reactiveBranchCapturingOwner('b0', () => '0', captureE) },
+      { when: () => active() === 1, body: reactiveBranchCapturingOwner('b1', () => '1', captureE) },
+      { when: () => active() === 2, body: reactiveBranchCapturingOwner('b2', () => '2', captureE) },
+    ],
+    reactiveBranchCapturingOwner('fb', () => 'fb', captureE),
+  )
+
+  const { containerI, containerE } = makeContainers(document)
+  const disposeI = mount(irI, containerI, document)
+  const { mountFn } = emitMount(irE)
+  const disposeE = mountFn(containerE, document)
+  flushSync()
+
+  const divI = containerI.querySelector('div') as Element
+  const divE = containerE.querySelector('div') as Element
+
+  const N = 20
+  for (let i = 0; i < N; i++) {
+    active.set(i % 4)
+    flushSync()
+    expect(
+      divI.childNodes.length,
+      `interpreter swap ${i}: expected 2 childNodes (branch + anchor)`,
+    ).toBe(2)
+    expect(
+      divE.childNodes.length,
+      `emitted swap ${i}: expected 2 childNodes (branch + anchor)`,
+    ).toBe(2)
+    expect(
+      __test.childCount(captureI.owner),
+      `interpreter swap ${i}: branch root owns exactly 1 effect (no accumulation)`,
+    ).toBe(1)
+    expect(
+      __test.childCount(captureE.owner),
+      `emitted swap ${i}: branch root owns exactly 1 effect (no accumulation)`,
+    ).toBe(1)
+  }
 
   disposeI()
   disposeE()
