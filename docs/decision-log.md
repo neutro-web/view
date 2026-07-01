@@ -5161,3 +5161,27 @@ version bump.
 **Next:** write the commission — mirror `<recycle>`/tagged-parity commission structure (G0/G1
 gates, distinct-path discipline, tagged `match()` builder + exhaustiveness-gate wiring as
 explicit tasks, Tier-1 correctness gates, decision-log delta on landing).
+
+### [2026-07-01] Follow-up note: nested structural bindings inside `<each>`/`<recycle>`/`<switch>` body-thunks unsupported at emit time
+
+**Found during:** pre-merge deep audit of the `<switch>`/`<match>` implementation (fault-tolerance
+pass, hunted mode #7 region). Not caused by, or in scope for, that commission — flagging as a
+pre-existing gap discovered along the way, per this repo's "under-escalating is the costlier
+error" convention.
+
+**The gap:** `computeBindingThunks`'s emit-path thunk construction for `<each>`/`<recycle>`/
+`<switch>` bodies (`nv-parser.ts`, `listThunks`/`recycledListThunks`/`switchThunks`) builds
+`bodyThunks` from `bodyHoleIndices` only — plain text/attr/prop/event holes. A body containing a
+nested structural binding (a component, another `<each>`, or now a `<switch>`) has no thunk
+representation threaded through, so `emitIrLiteral` either runs out of thunks or hits a
+"thunk kind mismatch" throw at emit time. This is a **loud** failure (not silent data corruption),
+but it means `<switch>` cannot yet be nested inside a component/list/switch body when going
+through `parseNvFileForEmit`/`emitModule` (Mode A) — only the interpreter and `emitted-mount.ts`
+compiler paths handle nested structural bindings correctly today, since they build `TemplateIR`
+directly rather than going through erased-source `ThunkSource` reconstruction.
+
+**Status:** not tracked before this note; no fix planned or commissioned. Logged here so it's
+discoverable rather than silently rediscovered later. Whoever picks this up should scope it as
+its own commission (touches the shared `computeBindingThunks`/`ThunkSource` machinery used by
+all three structural-binding emit paths, not `<switch>`-specific) rather than folding it into
+an unrelated change.
