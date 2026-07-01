@@ -141,17 +141,49 @@ const MyComponent = $component(() => {
 
 The condition is re-evaluated reactively — wrap derived conditions in `derived` if they depend on multiple signals.
 
-### Tagged-template: conditional thunk
+There is no `<iff>`/`<if>`/`<show>` element in `.nv` — the ternary above IS the conditional
+syntax, and this is deliberate: an element would be redundant sugar competing with a form
+JavaScript already provides natively. `.nv`'s compiler recognizes the ternary via static
+analysis and lowers it to the same `ConditionalBinding` IR node used by the tagged-template
+path below.
+
+### Tagged-template: `iff()` function
+
+A bare ternary does not work in the tagged template — JavaScript evaluates `cond ? a : b`
+to a single value *before* `html()` ever receives it, so by the time the runtime sees the
+hole, the "conditional-ness" is already gone (only one branch's result remains, and it will
+never react to further changes). Use the `iff()` builder instead, which takes the condition
+and both branches as thunks so the runtime can re-evaluate them reactively:
 
 ```ts
-// .nv (condition is auto-erased, branches are html`...`):
-${isLoggedIn ? html`<span>Welcome</span>` : html`<a>Sign in</a>`}
+import { createHtmlTag, iff } from '@neutro/view/renderer'
 
-// Tagged template (whole conditional wrapped in a thunk):
-${() => isLoggedIn() ? html`<span>Welcome</span>` : html`<a>Sign in</a>`}
+const html = createHtmlTag(document)
+
+html`
+  <div>
+    ${iff(
+      () => isLoggedIn(),
+      () => html`<span>Welcome</span>`,
+      () => html`<a href="/login">Sign in</a>`
+    )}
+  </div>
+`
 ```
 
-The difference: in the tagged template the entire ternary must be wrapped in a thunk because there is no erasure. The branches are the same `html` tagged template literals.
+The third argument (`alternate`) is optional — omit it (or pass `null`) for an `{#if}` with
+no `{:else}`. `iff()` mirrors `each()`: both are sentinel builders that `html()` detects by
+shape, letting the tagged path express structural bindings a raw JS expression cannot.
+
+```
+.nv:              ${isLoggedIn ? html`<span>Welcome</span>` : html`<a>Sign in</a>`}
+Tagged template:  ${iff(() => isLoggedIn(), () => html`<span>Welcome</span>`, () => html`<a>Sign in</a>`)}
+```
+
+Both forms produce the identical `ConditionalBinding` in the IR — the surface syntax differs
+(native ternary vs. explicit builder), the underlying behavior does not. This is the mirror
+image of `<recycle>`/`recycle()`, which *are* syntactically symmetric across both front-ends
+(element + builder) because neither front-end has a native loop-expression to lean on instead.
 
 ---
 
@@ -312,7 +344,20 @@ $style(() => ({
 
 Styles defined in `$style` are injected into a `<style>` element at mount time and removed when the component unmounts.
 
-The tagged template has no `$style` equivalent. The `injectComponentStyle(doc, hash, cssText)` function exists internally (`src/renderer/style-inject.ts`) but is not on the public package API — there is no exported scoping helper for the tagged-template path. Use an external CSS pipeline or standard `<style>` injection instead.
+The tagged template has no `$style` equivalent, and this is by design rather than a gap to
+be closed: `$style` is a compile-time `.nv`-file feature, comparable to an SFC `<style
+scoped>` block — it relies on the compiler statically analyzing the `$style` factory object
+literal (key-form vs. selector-form, hash generation, class rewriting) at build time, which
+has no runtime counterpart to reconstruct from a tagged `html\`\`` call. Unlike `conditional`
+and `recycled-list` (which were genuine IR-authorability gaps closed by adding `iff()` and
+`recycle()`), `style-var` was ruled a legitimate front-end-shape difference, not a parity
+break — there is no tagged builder for it, and none is planned.
+
+The `injectComponentStyle(doc, hash, cssText)` function exists internally
+(`src/renderer/style-inject.ts`) but is not on the public package API. Tagged-template
+authors needing dynamic per-element styling should use inline `style="${...}"` bindings or
+userland CSS-in-JS; for static component-scoped CSS, use an external CSS pipeline or standard
+`<style>` injection.
 
 ---
 

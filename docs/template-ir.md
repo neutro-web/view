@@ -15,6 +15,7 @@
 - v0.4 (2026-06-22): `SlotEntry.content` → factory `(props: SlotProps) => TemplateIR` (hard-cut, no union). `SlotOutletBinding.props?: readonly PropEntry[]` — child-exposed accessor thunks. `SlotFns` updated accordingly. `let={...}` authoring on both front-ends. D-slot-1 retained. reactive-core v0.4.2 unchanged.
 - v0.4.1 (2026-06-22): add `ClassListBinding` (kind `'classlist'`) — per-key `classList.toggle` lowering for object/array `class` expressions. Additive union member; `AttrBinding` byte-unchanged; reactive-core contract unchanged.
 - v0.4.2 (2026-06-23): add `StyleVarBinding` (kind `'style-var'`) — reactive CSS custom property writes for `$style` factory-form lowering. Add optional `styleArtifact` and `classRewrites` fields on `TemplateIR` root (`$style` scoping outputs; renderer-layer, `.nv`-FE-only). `ListBinding.itemTemplate` documented as the factory form `(valueSig, indexSig) => TemplateIR` (was mis-documented as a bare `TemplateIR` value; code has always used the factory). Additive; `AttrBinding`/`ClassListBinding` byte-unchanged; reactive-core contract unchanged.
+- v0.4.4 doc note (2026-06-30): documented two front-end-parity rulings (no IR shape change). §3.6 `ConditionalBinding` now states the ternary/`iff()` authoring asymmetry is deliberate (no `<iff>` element in `.nv` by design). §3.7.3 `StyleVarBinding` now states `$style` is ruled `.nv`-only (compile-time SFC-`<style scoped>`-like feature), not a tagged-template parity gap. See `docs/design/ir-frontend-parity-audit.md`.
  
 ---
  
@@ -339,6 +340,20 @@ type ConditionalBinding = BaseBinding & {
   alternate:  TemplateIR | null; // "else" branch; null = nothing
 };
 ```
+
+**Authoring (asymmetric by design).** `.nv` has NO `<iff>`/`<if>`/`<show>` element —
+a conditional is authored only as a plain ternary (`${cond ? html\`a\` : html\`b\`}`),
+which the compiler recognizes via TS-AST analysis (`ts.isConditionalExpression`) and
+lowers to `ConditionalBinding`. An `<iff>` element would be redundant sugar competing
+with the language-native ternary, so one was deliberately not added. The tagged-template
+front-end cannot use a bare ternary — JS evaluates it before `html()` ever sees the
+result — so it authors the same binding via the `iff(condition, consequent, alternate?)`
+sentinel builder (`src/renderer/html-tag.ts`): `${iff(() => cond(), () => html\`a\`, () =>
+html\`b\`)}`. Both forms produce the identical `ConditionalBinding`; the surface syntax
+differs, the IR does not. Contrast with `list`/`recycled-list`, which are symmetric
+across front-ends (`<each>`/`each()`, `<recycle>`/`recycle()`) because neither front-end
+has a native loop-expression to piggyback on. See `docs/design/ir-frontend-parity-audit.md`
+for the full ruling.
  
 Back-end mapping:
  
@@ -491,6 +506,17 @@ Back-end: one `effect(() => { const v = expr(); v == null ? el.style.removePrope
 : el.style.setProperty(varName, String(v)); })`. Wired in the interpreter (`wireStyleVar`)
 and the compiler back-end (`emitted-mount.ts`). `.nv`-FE-only (the tagged-template FE has no
 `$style`); the cross-back-end differential is interpreter-vs-emitted, not FE-vs-FE.
+
+**Ruled `.nv`-only (not a parity gap).** `$style`/`StyleVarBinding` is a compile-time
+`.nv`-file feature, analogous to an SFC `<style scoped>` block — it depends on the
+compiler's static analysis of the `$style` factory object literal (key-form vs
+selector-form, hash generation, `classRewrites`) at build time. There is no runtime
+equivalent to reconstruct from a tagged `html\`\`` call, and none is planned: this is a
+front-end-shape difference, not an IR-authorability obligation like `conditional` or
+`recycled-list` were. Tagged-template authors needing dynamic per-element styling use
+inline `style="${...}"` bindings (`AttrBinding`/`PropBinding`) or userland CSS-in-JS.
+See `docs/design/ir-frontend-parity-audit.md` (Task 3 ruling) and
+`docs/guides/rendering.md` for the authoring-facing statement of this boundary.
 
 **Scope discipline.** `$style` scoping, the `styleArtifact`/`classRewrites` IR-root fields,
 and `StyleVarBinding` are all renderer-layer outputs. They are NOT a reactive-core contract

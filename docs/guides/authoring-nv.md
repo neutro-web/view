@@ -194,7 +194,7 @@ The handler arrow function is passed directly to the runtime as-is. Any reads in
 
 ### Conditional Rendering
 
-Use a ternary expression with `html` branches for conditional rendering. Both branches must be `html` tagged template literals.
+Use a ternary expression with `html` branches for conditional rendering. Both branches must be `html` tagged template literals. There is no `<iff>`/`<if>`/`<show>` element — this is deliberate, not a missing feature: the ternary already is the native conditional form, and an element would be redundant sugar competing with it. (The tagged-template runtime front-end, which cannot use a bare ternary, has an `iff()` builder for the same purpose — see [Rendering](/guides/rendering#tagged-template-iff-function).)
 
 ```js
 $render(() => html`
@@ -318,7 +318,7 @@ The following limitations apply to the current release. They are tracked for res
 | Shorthand property names `{ count }` not erased | Use `{ count: count() }` |
 | Compound assignments beyond `op=` forms not detected | Use explicit `.set()` for complex mutations |
 | `for...of` loop variables not tracked for shadowing | Avoid naming loop variables after signals |
-| No `<when>` directive for conditional blocks | Use ternary with `html` branches |
+| No `<when>`/`<if>`/`<show>` directive for conditional blocks | Not a limitation — by design. Use ternary with `html` branches |
 | No async primitive | Wrap async work in effects manually |
 | No cross-component store | Pass signals as props or use module-level signals |
 | `// @ts-nocheck` required in `.ts` importers | Planned for v0.5.0 |
