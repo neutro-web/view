@@ -69,6 +69,7 @@ import type {
   SlotEntry,
   SlotOutletBinding,
   StyleVarBinding,
+  SwitchBinding,
   SyncBinding,
   TemplateIR,
   TemplateShape,
@@ -522,6 +523,20 @@ interface NvWalkedRecycle {
   bodyHoleIndices: number[]
 }
 
+interface NvWalkedMatchBranch {
+  /** Hole index for the `when=` attribute, or -1 for the fallback (no `when=`). */
+  whenHoleIdx: number
+  bodyIR: TemplateIR
+  bodyHoleIndices: number[]
+}
+
+interface NvWalkedSwitch {
+  anchorPath: NodePath
+  branches: NvWalkedMatchBranch[]
+  /** True if the last branch has no `when=` (is the fallback). */
+  hasFallback: boolean
+}
+
 interface NvWalkResult {
   holeInfos: NvSlotHoleInfo[]
   holePaths: NodePath[]
@@ -529,6 +544,7 @@ interface NvWalkResult {
   consumed: Set<number>
   lists: NvWalkedEach[]
   recycledLists: NvWalkedRecycle[]
+  switches: NvWalkedSwitch[]
 }
 
 /**
@@ -552,6 +568,7 @@ function walkNvNodeList(
   const consumed = new Set<number>()
   const lists: NvWalkedEach[] = []
   const recycledLists: NvWalkedRecycle[] = []
+  const switches: NvWalkedSwitch[] = []
 
   function walk(node: Node): void {
     if (node.nodeType === 8) {
@@ -732,6 +749,85 @@ function walkNvNodeList(
         return
       }
 
+      // <switch> element detection — after <recycle> block, before component detection.
+      if (el.tagName.toLowerCase() === 'template' && el.hasAttribute('data-nv-switch')) {
+        const switchEl = el as HTMLTemplateElement
+        const matchChildren = Array.from(switchEl.content.children).filter(
+          (c) => c.tagName.toLowerCase() === 'template' && c.hasAttribute('data-nv-match'),
+        ) as HTMLTemplateElement[]
+
+        if (matchChildren.length === 0) {
+          throw new Error('[nv] <switch> requires at least one <match> child')
+        }
+
+        // First pass: extract when= hole index (or -1 for fallback) per match child,
+        // consuming the sentinel attribute. Validation is done over the FULL set of
+        // fallback candidates before building any body IR, so "at most one fallback"
+        // is checked independently of (and prior to) "fallback must be last" — a
+        // <switch> with two fallback <match>es is always "too many fallbacks" first,
+        // regardless of position.
+        const whenHoleIdxs: number[] = matchChildren.map((matchEl) => {
+          let whenHoleIdx = -1
+          for (let k = 0; k < holeExprs.length; k++) {
+            if (matchEl.getAttribute(`data-nv-attr-${k}`) === 'when') {
+              whenHoleIdx = k
+              matchEl.removeAttribute(`data-nv-attr-${k}`)
+              consumed.add(k)
+            }
+          }
+          return whenHoleIdx
+        })
+
+        const fallbackIndices = whenHoleIdxs
+          .map((idx, i) => (idx === -1 ? i : -1))
+          .filter((i) => i !== -1)
+
+        if (fallbackIndices.length > 1) {
+          throw new Error('[nv] <switch> may have at most one fallback <match> (no when=)')
+        }
+        const hasFallback = fallbackIndices.length === 1
+        if (hasFallback && (fallbackIndices[0] as number) !== matchChildren.length - 1) {
+          throw new Error('[nv] <switch> fallback <match> (no when=) must be the last child')
+        }
+
+        const branches: NvWalkedMatchBranch[] = matchChildren.map((matchEl, branchIdx) => {
+          const whenHoleIdx = whenHoleIdxs[branchIdx] as number
+          const bodyNodes = Array.from(matchEl.content.childNodes)
+          const { ir: bodyIR, holeIndices: bodyHoleIndices } = buildNvSlotContentIR(
+            bodyNodes,
+            holeExprs,
+            doc,
+            `switch:branch:${switches.length}:${branchIdx}`,
+            signals,
+          )
+          for (const idx of bodyHoleIndices) consumed.add(idx)
+
+          return { whenHoleIdx, bodyIR, bodyHoleIndices }
+        })
+
+        const switchIndex = switches.length
+        const anchor = doc.createComment(`nv-switch-${switchIndex}`)
+        if (switchEl.parentNode === null) {
+          throw new Error('[nv] <switch> element has no parent — cannot compute binding path')
+        }
+        switchEl.parentNode.replaceChild(anchor, switchEl)
+        const anchorPath = computePath(anchor, root)
+
+        switches.push({ anchorPath, branches, hasFallback })
+        return // don't recurse into <switch> body (already processed via .content)
+      }
+
+      // Footgun guard: a stray <match> NOT consumed as a direct child of a <switch>
+      // (e.g. <match> used bare, or nested more than one level inside <switch>) reaches
+      // this point because <switch>'s own handling above only inspects its immediate
+      // .content.children and returns without recursing further. Without this guard, an
+      // unconsumed <template data-nv-match> would silently walk as an ordinary (empty,
+      // invisible) <template> element — same class of silent-footgun the <recycle key=>
+      // guard prevents elsewhere in this file. Fail loudly instead.
+      if (el.tagName.toLowerCase() === 'template' && el.hasAttribute('data-nv-match')) {
+        throw new Error('[nv] <match> is only valid as a direct child of <switch>')
+      }
+
       // Component element detection via data-nv-component sentinel.
       const compName = el.getAttribute('data-nv-component')
       if (compName !== null) {
@@ -889,7 +985,7 @@ function walkNvNodeList(
   }
 
   for (const n of nodes) walk(n)
-  return { holeInfos, holePaths, components, consumed, lists, recycledLists }
+  return { holeInfos, holePaths, components, consumed, lists, recycledLists, switches }
 }
 
 // ── Slot content IR builder (collapse: uses walkNvNodeList) ────────────────────
@@ -987,6 +1083,27 @@ function pushRecycledListBinding(
 }
 
 /**
+ * Push one <switch> binding into allPaths + bindings.
+ *
+ * PARSE-PATH ONLY: `when` thunks are stubbed as `(() => false)` — structural IR shape
+ * for FE-equivalence checking. Real reactive `when` thunks come from parseNvFileForEmit.
+ */
+function pushSwitchBinding(ws: NvWalkedSwitch, allPaths: NodePath[], bindings: Binding[]): void {
+  const pathIndex = allPaths.length
+  allPaths.push(ws.anchorPath)
+  const stubExpr = (() => false) as ReactiveExpr<boolean>
+  const branchCount = ws.hasFallback ? ws.branches.length - 1 : ws.branches.length
+  bindings.push({
+    kind: 'switch',
+    pathIndex,
+    branches: ws.branches.slice(0, branchCount).map((b) => ({ when: stubExpr, body: b.bodyIR })),
+    fallback: ws.hasFallback
+      ? (ws.branches[ws.branches.length - 1] as NvWalkedMatchBranch).bodyIR
+      : null,
+  } satisfies SwitchBinding)
+}
+
+/**
  * Build a TemplateIR from sentinel-DOM nodes (slot content), via the SAME
  * walkNvNodeList used for the top-level template. Component elements in slot
  * content produce ComponentBindings (component-as-slot-child).
@@ -1030,6 +1147,7 @@ function buildNvSlotContentIR(
     consumed,
     lists: slotLists,
     recycledLists: slotRecycledLists,
+    switches: slotSwitches,
   } = walkNvNodeList(
     Array.from(fragWrapper.childNodes),
     holeExprs,
@@ -1084,6 +1202,10 @@ function buildNvSlotContentIR(
     for (const wl of slotRecycledLists) {
       pushRecycledListBinding(wl, allPaths, bindings)
     }
+  }
+  // Wire <switch>-in-slot for component slot bodies (D-SS-2: same structural path as lists).
+  for (const ws of slotSwitches) {
+    pushSwitchBinding(ws, allPaths, bindings)
   }
 
   const holeIndices = [...holeInfos.map((h) => h.origIdx), ...consumed].filter(
@@ -1286,6 +1408,10 @@ function processHtmlTemplate(
     .replace(/<\/each>/g, '</template>')
     .replace(/<recycle(\s[^>]*)?>/g, (_, attrs) => `<template data-nv-recycle${attrs ?? ''}>`)
     .replace(/<\/recycle>/g, '</template>')
+    .replace(/<switch(\s[^>]*)?>/g, (_, attrs) => `<template data-nv-switch${attrs ?? ''}>`)
+    .replace(/<\/switch>/g, '</template>')
+    .replace(/<match(\s[^>]*)?>/g, (_, attrs) => `<template data-nv-match${attrs ?? ''}>`)
+    .replace(/<\/match>/g, '</template>')
 
   const tmpl = doc.createElement('template')
   tmpl.innerHTML = sentinelHtml
@@ -1305,6 +1431,7 @@ function processHtmlTemplate(
     consumed: consumedByComponent,
     lists: pendingLists,
     recycledLists: pendingRecycleLists,
+    switches: pendingSwitches,
   } = walkNvNodeList(Array.from(frag.childNodes), holeExprs, doc, frag, signals, processdiagnostics)
   // Map encounter-order hole paths back to GLOBAL hole indices (top-level convention).
   for (let h = 0; h < holeInfos.length; h++) {
@@ -1362,6 +1489,11 @@ function processHtmlTemplate(
   // Add recycled list bindings from <recycle> elements.
   for (const wl of pendingRecycleLists) {
     pushRecycledListBinding(wl, allPaths, bindings)
+  }
+
+  // Add switch bindings from <switch> elements.
+  for (const ws of pendingSwitches) {
+    pushSwitchBinding(ws, allPaths, bindings)
   }
 
   for (let i = 0; i < holeExprs.length; i++) {

@@ -43,6 +43,7 @@ import type {
   EventBinding,
   ListBinding,
   PropBinding,
+  SwitchBinding,
   TemplateIR,
   TextBinding,
 } from '../../src/renderer/ir.js'
@@ -1398,5 +1399,67 @@ describe('G3: scopeHash uses shapeHtml not ir.id', () => {
     expect(rwHash).not.toBe(simpleHash(parent.ir.id))
     // It should equal simpleHash of the pre-walk shape — verified by checking styleArtifact
     expect(parent.ir.styleArtifact?.scopeHash).toBe(rwHash)
+  })
+})
+
+// ── Task 5: <switch>/<match> parse-path recognition ────────────────────────────
+
+describe('<switch>/<match> parse path', () => {
+  it('parses <switch>/<match> into a SwitchBinding with 2 branches + fallback', () => {
+    const src = `
+      const C = $component(() => {
+        $script(() => { const state = signal(0) })
+        $render(() => html\`<div><switch>
+          <match when="\${state === 0}"><span class="zero">0</span></match>
+          <match when="\${state === 1}"><span class="one">1</span></match>
+          <match><span class="fb">fb</span></match>
+        </switch></div>\`)
+      })
+    `
+    const results = parseNvFile(src, 'switch.nv', document)
+    const ir = results[0]!.ir
+    const binding = ir.bindings[0]
+    expect(binding?.kind).toBe('switch')
+    const sb = binding as SwitchBinding
+    expect(sb.branches.length).toBe(2)
+    expect(sb.fallback).not.toBeNull()
+  })
+
+  it('bare <match> outside <switch> throws a parse-time error', () => {
+    const src = `
+      const C = $component(() => {
+        $script(() => { const state = signal(0) })
+        $render(() => html\`<div>\${state}<match><span>orphan</span></match></div>\`)
+      })
+    `
+    expect(() => parseNvFile(src, 'match-bare.nv', document)).toThrow(
+      /only valid as a direct child of <switch>/,
+    )
+  })
+
+  it('<switch> with fallback not last throws a parse-time error', () => {
+    const src = `
+      const C = $component(() => {
+        $script(() => { const state = signal(0) })
+        $render(() => html\`<div><switch>
+          <match><span class="fb">fb</span></match>
+          <match when="\${state === 0}"><span class="zero">0</span></match>
+        </switch></div>\`)
+      })
+    `
+    expect(() => parseNvFile(src, 'switch-bad.nv', document)).toThrow(/fallback.*last/)
+  })
+
+  it('<switch> with two fallback <match> (no when=) throws a parse-time error', () => {
+    const src = `
+      const C = $component(() => {
+        $script(() => { const state = signal(0) })
+        $render(() => html\`<div>\${state}<switch>
+          <match><span class="a">a</span></match>
+          <match><span class="b">b</span></match>
+        </switch></div>\`)
+      })
+    `
+    expect(() => parseNvFile(src, 'switch-bad2.nv', document)).toThrow(/at most one fallback/)
   })
 })
