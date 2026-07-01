@@ -397,6 +397,44 @@ function assertAllBindingKindsHandled(kind: Binding['kind']): void {
   }
 }
 
+// ── Compile-time regression guard for the switch above ──────────────────────
+//
+// The switch's own `default: never` check only fails to compile when
+// `Binding['kind']` gains a kind that ISN'T a case label above — it does NOT
+// protect against someone weakening the guard itself, e.g. deleting the
+// `const exhaustive: never = kind` line, changing its annotation from `never`
+// to `unknown`/`string`, or folding a `case` into `default` (which would still
+// typecheck as long as `default`'s narrowed type stays assignable to the
+// (now looser) annotation). `HandledBindingKinds` below is authored
+// independently of the switch and re-asserted against `Binding['kind']` via
+// `Equals`, so it fails closed in both directions: a kind added to/removed
+// from ir.ts's `Binding` union, OR a literal silently dropped from this list,
+// breaks `tsc --noEmit`.
+//
+// Validated by temporarily deleting `| 'style-var'` below: tsc reports
+// `Type 'false' is not assignable to type 'true'` on `_assertBindingKindExhaustive`
+// (see .superpowers/sdd/task-4-report.md, Finding 2 fix, for the full transcript).
+// Keep this union in sync with the `case` labels in `assertAllBindingKindsHandled`.
+type HandledBindingKinds =
+  | 'text'
+  | 'attr'
+  | 'prop'
+  | 'event'
+  | 'sync'
+  | 'classlist'
+  | 'slot-outlet'
+  | 'list'
+  | 'conditional'
+  | 'recycled-list'
+  | 'component'
+  | 'child'
+  | 'style-var'
+type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
+  ? true
+  : false
+// biome-ignore lint/correctness/noUnusedVariables: type-level-only regression guard, see comment above
+const _assertBindingKindExhaustive: Equals<Binding['kind'], HandledBindingKinds> = true
+
 function isSlotSentinel(v: unknown): v is SlotSentinel {
   return (
     typeof v === 'object' &&
@@ -894,8 +932,7 @@ function buildSlotContentIR(
     const pathIndex = allPaths.length
     allPaths.push(wl.anchorPath)
     const { items, key, factory } = wl.sentinel
-    assertAllBindingKindsHandled('list')
-    bindings.push({
+    const listBinding = {
       kind: 'list',
       pathIndex,
       items,
@@ -903,21 +940,24 @@ function buildSlotContentIR(
       itemTemplate: (valueSig, indexSig?) =>
         // biome-ignore lint/style/noNonNullAssertion: tagged-template path never sets itemReadsIndex: false, so interpreter always allocates indexSig (§6 conservative-allocate default)
         factory({ item: () => valueSig(), index: () => indexSig!() }),
-    } satisfies ListBinding)
+    } satisfies ListBinding
+    assertAllBindingKindsHandled(listBinding.kind)
+    bindings.push(listBinding)
   }
   // Wire <iff>-in-slot: mirrors the each-in-slot wiring above.
   for (const wc of conditionals) {
     const pathIndex = allPaths.length
     allPaths.push(wc.anchorPath)
     const { condition, consequent, alternate } = wc.sentinel
-    assertAllBindingKindsHandled('conditional')
-    bindings.push({
+    const conditionalBinding = {
       kind: 'conditional',
       pathIndex,
       condition,
       consequent: consequent(),
       alternate: alternate !== null ? alternate() : null,
-    } satisfies ConditionalBinding)
+    } satisfies ConditionalBinding
+    assertAllBindingKindsHandled(conditionalBinding.kind)
+    bindings.push(conditionalBinding)
   }
   // Wire <recycle>-in-slot: mirrors the each-in-slot / iff-in-slot wiring above.
   for (const wr of recycledLists) {
@@ -949,14 +989,13 @@ function buildRecycledListBinding(
   pathIndex: number,
   sentinel: RecycledSentinel,
 ): RecycledListBinding {
-  assertAllBindingKindsHandled('recycled-list')
   const { items, factory } = sentinel
   const itemTemplate = (valueSig: WritableSignal<unknown>, indexSig: WritableSignal<number>) =>
     factory(
       () => valueSig(),
       () => indexSig(),
     )
-  return {
+  const binding = {
     kind: 'recycled-list',
     pathIndex,
     items,
@@ -966,12 +1005,13 @@ function buildRecycledListBinding(
       () => 0,
     ),
   } satisfies RecycledListBinding
+  assertAllBindingKindsHandled(binding.kind)
+  return binding
 }
 
 /** Build a ComponentBinding whose factory throws if invoked (tagged-template can't resolve imports). */
 function makeUnresolvedComponentBinding(pathIndex: number, c: WalkedComponent): ComponentBinding {
-  assertAllBindingKindsHandled('component')
-  return {
+  const binding: ComponentBinding = {
     kind: 'component',
     pathIndex,
     component: (_props, _slots) => {
@@ -983,6 +1023,8 @@ function makeUnresolvedComponentBinding(pathIndex: number, c: WalkedComponent): 
     propNames: c.propNames,
     slots: c.slots,
   }
+  assertAllBindingKindsHandled(binding.kind)
+  return binding
 }
 
 // ── Sentinel HTML builder ─────────────────────────────────────────────────────
@@ -1181,7 +1223,7 @@ export function createHtmlTag(document: Document) {
       const pathIndex = allPaths.length
       allPaths.push(wl.anchorPath)
       const { items, key, factory } = wl.sentinel
-      bindings.push({
+      const listBinding = {
         kind: 'list',
         pathIndex,
         items,
@@ -1189,7 +1231,9 @@ export function createHtmlTag(document: Document) {
         itemTemplate: (valueSig, indexSig?) =>
           // biome-ignore lint/style/noNonNullAssertion: tagged-template path never sets itemReadsIndex: false, so interpreter always allocates indexSig (§6 conservative-allocate default)
           factory({ item: () => valueSig(), index: () => indexSig!() }),
-      } satisfies ListBinding)
+      } satisfies ListBinding
+      assertAllBindingKindsHandled(listBinding.kind)
+      bindings.push(listBinding)
     }
 
     // Add conditional bindings (iff() sentinels): anchor paths appended after lists.
@@ -1197,13 +1241,15 @@ export function createHtmlTag(document: Document) {
       const pathIndex = allPaths.length
       allPaths.push(wc.anchorPath)
       const { condition, consequent, alternate } = wc.sentinel
-      bindings.push({
+      const conditionalBinding = {
         kind: 'conditional',
         pathIndex,
         condition,
         consequent: consequent(),
         alternate: alternate !== null ? alternate() : null,
-      } satisfies ConditionalBinding)
+      } satisfies ConditionalBinding
+      assertAllBindingKindsHandled(conditionalBinding.kind)
+      bindings.push(conditionalBinding)
     }
 
     // Add recycled-list bindings (recycle() sentinels): anchor paths appended after conditionals.
