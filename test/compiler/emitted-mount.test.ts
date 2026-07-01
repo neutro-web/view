@@ -40,6 +40,7 @@ import type {
   EventBinding,
   PropBinding,
   ReactiveExpr,
+  SwitchBinding,
   SyncBinding,
   TemplateIR,
   TextBinding,
@@ -693,6 +694,124 @@ function makeConditionalIR(
     ],
   }
 }
+
+function makeSwitchIR(
+  branchDefs: ReadonlyArray<{ when: () => boolean; html: string }>,
+  fallbackHtml: string | null,
+): TemplateIR {
+  const branches = branchDefs.map((b, i) => ({
+    when: b.when,
+    body: {
+      id: `test:switch-branch-${i}`,
+      shape: { html: b.html, bindingPaths: [] },
+      bindings: [],
+    },
+  }))
+  const fallback: TemplateIR | null = fallbackHtml
+    ? { id: 'test:switch-fallback', shape: { html: fallbackHtml, bindingPaths: [] }, bindings: [] }
+    : null
+  return {
+    id: 'test:switch',
+    shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0, 0]] },
+    bindings: [
+      {
+        kind: 'switch',
+        pathIndex: 0,
+        branches,
+        fallback,
+      } as SwitchBinding,
+    ],
+  }
+}
+
+// ── SwitchBinding gate tests (Task 3) ─────────────────────────────────────────
+
+test('SWITCH GATE 1: first-match-wins on initial mount across 2 branches + fallback', () => {
+  const { document } = makeDom()
+  const a = signal(false)
+  const b = signal(true)
+  const ir = makeSwitchIR(
+    [
+      { when: () => a(), html: '<span>A</span>' },
+      { when: () => b(), html: '<span>B</span>' },
+    ],
+    '<span>fallback</span>',
+  )
+
+  const { containerI, containerE } = makeContainers(document)
+  const disposeI = mount(ir, containerI, document)
+  const { mountFn } = emitMount(ir)
+  const disposeE = mountFn(containerE, document)
+  flushSync()
+
+  assertEqual(containerI, containerE, 'initial')
+  expect(containerI.querySelector('span')!.textContent, 'first true branch wins').toBe('B')
+  expect(containerE.querySelector('span')!.textContent, 'first true branch wins (emitter)').toBe(
+    'B',
+  )
+
+  disposeI()
+  disposeE()
+})
+
+test('SWITCH GATE 2: branch swap disposes outgoing branch DOM (childNodes count returns to baseline)', () => {
+  const { document } = makeDom()
+  const which = signal<'a' | 'b'>('a')
+  const ir = makeSwitchIR(
+    [
+      { when: () => which() === 'a', html: '<span>A</span>' },
+      { when: () => which() === 'b', html: '<span>B</span>' },
+    ],
+    null,
+  )
+
+  const { containerI, containerE } = makeContainers(document)
+  const disposeI = mount(ir, containerI, document)
+  const { mountFn } = emitMount(ir)
+  const disposeE = mountFn(containerE, document)
+  flushSync()
+
+  const divE = containerE.querySelector('div')!
+  const baseline = divE.childNodes.length // text/span + anchor comment
+
+  expect(containerE.querySelector('span')!.textContent).toBe('A')
+
+  which.set('b')
+  flushSync()
+  assertEqual(containerI, containerE, 'post-swap')
+  expect(containerE.querySelector('span')!.textContent).toBe('B')
+  expect(divE.childNodes.length, 'childNodes count returns to baseline after swap').toBe(baseline)
+
+  disposeI()
+  disposeE()
+})
+
+test('SWITCH GATE 3: fallback renders when toggled to no-match state', () => {
+  const { document } = makeDom()
+  const which = signal<'a' | 'none'>('a')
+  const ir = makeSwitchIR(
+    [{ when: () => which() === 'a', html: '<span>A</span>' }],
+    '<em>none</em>',
+  )
+
+  const { containerI, containerE } = makeContainers(document)
+  const disposeI = mount(ir, containerI, document)
+  const { mountFn } = emitMount(ir)
+  const disposeE = mountFn(containerE, document)
+  flushSync()
+
+  assertEqual(containerI, containerE, 'initial')
+  expect(containerE.querySelector('span')!.textContent).toBe('A')
+
+  which.set('none')
+  flushSync()
+  assertEqual(containerI, containerE, 'post-no-match: fallback rendered')
+  expect(containerE.querySelector('em')!.textContent).toBe('none')
+  expect(containerE.querySelector('span')).toBeNull()
+
+  disposeI()
+  disposeE()
+})
 
 // ── GATE 1 (Child): tracked-read parity ───────────────────────────────────────
 

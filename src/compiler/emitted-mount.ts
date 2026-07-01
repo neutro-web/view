@@ -52,6 +52,7 @@ import type {
   SlotContent,
   SlotOutletBinding,
   StyleVarBinding,
+  SwitchBinding,
   SyncBinding,
   TemplateIR,
   WritableSignal,
@@ -387,6 +388,81 @@ function emitSetup(
 
               // Bridge: if THIS condition effect is disposed (parent region teardown),
               // propagate disposal to the current branch.
+              onCleanup(() => {
+                if (branchDisposer !== null) {
+                  branchDisposer()
+                  branchDisposer = null
+                }
+              })
+            })
+          },
+        })
+        break
+      }
+
+      case 'switch': {
+        // Direct generalization of case 'conditional': same single-effect/single-
+        // branchDisposer pattern, N ordered branches instead of 2, first-match-wins
+        // instead of boolean toggle. Mirrors interpreter's wireSwitch exactly.
+        const emptyVerdicts = new Map<number, BindingErasureVerdict>()
+
+        const emittedBranches: Array<{
+          when: ReactiveExpr<boolean>
+          setup: SetupFn
+        }> = binding.branches.map((branch) => {
+          const { setup: branchSetup, diagnostics: bDiags } = emitSetup(branch.body, emptyVerdicts)
+          for (const d of bDiags) diagnostics.push(d)
+          return { when: branch.when, setup: branchSetup }
+        })
+
+        const { setup: fallbackSetup, diagnostics: fDiags } = binding.fallback
+          ? emitSetup(binding.fallback, emptyVerdicts)
+          : { setup: null, diagnostics: [] as string[] }
+        for (const d of fDiags) diagnostics.push(d)
+
+        wireSpecs.push({
+          accessor,
+          wire(anchorNode, doc) {
+            // Interpreter semantics (ground truth, wireSwitch):
+            //   - switch effect: dispose old branch → mount new branch in its OWN createRoot
+            //   - branch root onCleanup: removes branch DOM
+            //   - switch effect onCleanup: disposes branch (bridge for parent teardown)
+            const parent = anchorNode.parentNode
+            if (parent === null) {
+              throw new Error('[nv/emit] SwitchBinding: anchor has no parent')
+            }
+
+            let branchDisposer: (() => void) | null = null
+
+            effect(() => {
+              if (branchDisposer !== null) {
+                branchDisposer()
+                branchDisposer = null
+              }
+
+              let branchSetup: SetupFn | null = null
+              for (const b of emittedBranches) {
+                if (b.when()) {
+                  branchSetup = b.setup
+                  break
+                }
+              }
+              if (branchSetup === null) branchSetup = fallbackSetup
+
+              if (branchSetup === null) return
+
+              // biome-ignore lint/style/noNonNullAssertion: guarded non-null above
+              const setupFn = branchSetup!
+              branchDisposer = createRoot((dispose) => {
+                const { roots } = setupFn(parent, doc, anchorNode)
+                onCleanup(() => {
+                  for (const n of roots) {
+                    if (n.parentNode !== null) n.parentNode.removeChild(n)
+                  }
+                })
+                return dispose
+              })
+
               onCleanup(() => {
                 if (branchDisposer !== null) {
                   branchDisposer()
