@@ -1488,3 +1488,28 @@ describe('<switch>/<match> emit path', () => {
     }
   })
 })
+
+// ── Task 10: <switch> nested inside <each> body — nesting sanity check ───────
+
+describe('<switch> nested inside <each> body', () => {
+  it('<switch> works correctly nested inside an <each> body', () => {
+    const source =
+      'const C = $component(() => {\n' +
+      '  $script(() => { const items = signal([{ id: 1, kind: 0 }]) })\n' +
+      '  $render(() => html`<div><each .of="${items}" key="${(i) => i.id}" let={item}>' +
+      '<switch><match when="${item.kind === 0}"><span>zero</span></match><match><span>fb</span></match></switch>' +
+      '</each></div>`)\n' +
+      '})\n'
+    const results = parseNvFile(source, 'switch-in-each.nv', document)
+    const ir = results[0]!.ir
+    const listBinding = ir.bindings.find((b) => b.kind === 'list') as ListBinding
+    expect(listBinding).toBeDefined()
+    const stubVs = signal<unknown>(null)
+    const stubIs = signal<number>(0)
+    const itemIR = listBinding.itemTemplate(stubVs, stubIs)
+    const switchBinding = itemIR.bindings.find((b) => b.kind === 'switch') as SwitchBinding
+    expect(switchBinding).toBeDefined()
+    expect(switchBinding.branches.length).toBe(1)
+    expect(switchBinding.fallback).not.toBeNull()
+  })
+})
