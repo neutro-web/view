@@ -725,6 +725,28 @@ const Counter = $component(() => {
   })
 })
 
+// ── EM-12: <switch>/<match> emit — SwitchBinding literal ─────────────────────
+
+describe('emitModule — <switch>/<match> SwitchBinding literal', () => {
+  test('EM-12  emitModule: <switch>/<match> emits a SwitchBinding literal with reactive when + fallback', () => {
+    const source =
+      'const C = $component(() => {\n' +
+      '  $script(() => { const state = signal(0) })\n' +
+      '  $render(() => html`<div><switch>' +
+      '<match when="${state === 0}"><span class="zero">0</span></match>' +
+      '<match><span class="fb">fb</span></match>' +
+      '</switch></div>`)\n' +
+      '})\n'
+    const results = parseNvFileForEmit(source, 'switch-emit.nv', document)
+    const js = emitModule(results)
+    expect(js).toContain("kind: 'switch'")
+    expect(js).toContain('state()')
+    expect(js).toContain('branches:')
+    expect(js).toContain('fallback:')
+    expect(js).not.toContain('fallback: null')
+  })
+})
+
 // ── EM-D1a: factory signature — Name(props, slots) ───────────────────────────
 
 describe('factory signature — props + slots params', () => {

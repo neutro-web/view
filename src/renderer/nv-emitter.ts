@@ -32,6 +32,7 @@ import type {
   RecycledListBinding,
   SlotOutletBinding,
   StyleVarBinding,
+  SwitchBinding,
   SyncBinding,
   TemplateIR,
 } from './ir.js'
@@ -210,6 +211,27 @@ function emitBindingLiteral(
         `{ kind: 'recycled-list', ${pathEntry},`,
         `${i2}items: () => (${thunk.itemsSrc}),`,
         `${i2}itemTemplate: (valueSig, indexSig) => ((slotProps) => (${bodyLiteral}))(${slotPropsBody}) }`,
+      ].join('\n')
+    }
+    case 'switch': {
+      if (thunk.kind !== 'switch') throw new Error('[nv/emitter] SwitchBinding thunk kind mismatch')
+      const swb = binding as SwitchBinding
+      const i2 = `${indent}  `
+      const branchLiterals = swb.branches
+        .map((b, idx) => {
+          const branchThunk = thunk.branches[idx]
+          if (!branchThunk)
+            throw new Error(`[nv/emitter] Missing switch branch thunk at index ${idx}`)
+          const bodyLiteral = emitIrLiteral(b.body, branchThunk.bodyThunks, i2)
+          return `{ when: () => (${branchThunk.whenSrc}), body: ${bodyLiteral} }`
+        })
+        .join(`,\n${i2}`)
+      const fallbackLiteral =
+        swb.fallback === null ? 'null' : emitIrLiteral(swb.fallback, thunk.fallbackThunks ?? [], i2)
+      return [
+        `{ kind: 'switch', ${pathEntry},`,
+        `${i2}branches: [${branchLiterals}],`,
+        `${i2}fallback: ${fallbackLiteral} }`,
       ].join('\n')
     }
     case 'classlist': {
