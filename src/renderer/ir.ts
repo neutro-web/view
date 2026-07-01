@@ -156,6 +156,13 @@ export type ConditionalBinding = BaseBinding & {
   alternate: TemplateIR | null
 }
 
+export type SwitchBinding = BaseBinding & {
+  kind: 'switch'
+  /** Ordered branches — first truthy `when()` wins. */
+  branches: readonly { when: ReactiveExpr<boolean>; body: TemplateIR }[]
+  fallback: TemplateIR | null
+}
+
 // ── Designed, now in scope ────────────────────────────────────────────────────
 
 /**
@@ -314,6 +321,7 @@ export type Binding =
   | ConditionalBinding
   | ListBinding
   | RecycledListBinding
+  | SwitchBinding
   | SyncBinding
   | ComponentBinding
   | SlotOutletBinding
