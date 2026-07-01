@@ -32,6 +32,7 @@ import type {
   Binding,
   ClassListBinding,
   ComponentBinding,
+  ConditionalBinding,
   EventBinding,
   HandlerExpr,
   ListBinding,
@@ -223,6 +224,43 @@ export function each(
   factory: SlotContent,
 ): EachSentinel {
   return { __nvEach: true, items, key, factory }
+}
+
+// ── Conditional sentinel ──────────────────────────────────────────────────────
+
+/** Opaque sentinel returned by `iff(condition, consequent, alternate)` — the tagged-template if/else form. */
+export interface ConditionalSentinel {
+  readonly __nvConditional: true
+  readonly condition: () => boolean
+  readonly consequent: () => TemplateIR
+  readonly alternate: (() => TemplateIR) | null
+}
+
+function isConditionalSentinel(v: unknown): v is ConditionalSentinel {
+  return (
+    v !== null &&
+    typeof v === 'object' &&
+    (v as Record<string, unknown>).__nvConditional === true &&
+    typeof (v as ConditionalSentinel).condition === 'function' &&
+    typeof (v as ConditionalSentinel).consequent === 'function' &&
+    ((v as ConditionalSentinel).alternate === null ||
+      typeof (v as ConditionalSentinel).alternate === 'function')
+  )
+}
+
+/**
+ * Create a conditional (if/else) sentinel for the tagged-template side.
+ * Write `${iff(() => cond(), () => html\`<p>yes</p>\`, () => html\`<p>no</p>\`)}` for a reactive
+ * structural if/else. Both branches MUST be thunks — a raw ternary is evaluated before `html()`
+ * ever sees it, so it cannot be detected as conditional; wrapping preserves reactivity.
+ * Mirrors `.nv`'s ternary-with-html-branches form; both produce `ConditionalBinding`.
+ */
+export function iff(
+  condition: () => boolean,
+  consequent: () => TemplateIR,
+  alternate?: (() => TemplateIR) | null,
+): ConditionalSentinel {
+  return { __nvConditional: true, condition, consequent, alternate: alternate ?? null }
 }
 
 // ── Class name builder ────────────────────────────────────────────────────────
@@ -451,6 +489,13 @@ interface WalkedList {
   sentinel: EachSentinel
 }
 
+/** A conditional anchor discovered during the walk — the hole's expr was a ConditionalSentinel. */
+interface WalkedConditional {
+  anchorPath: NodePath
+  origIdx: number
+  sentinel: ConditionalSentinel
+}
+
 /**
  * A component element discovered during the walk, with its anchor path (relative
  * to the walk root) and captured slot content. Recorded by walkNodeList; each
@@ -480,6 +525,7 @@ interface WalkResult {
   components: WalkedComponent[]
   consumed: Set<number>
   lists: WalkedList[]
+  conditionals: WalkedConditional[]
 }
 
 /**
@@ -499,6 +545,7 @@ function walkNodeList(nodes: Node[], exprs: unknown[], root: Node, doc: Document
   const components: WalkedComponent[] = []
   const consumed = new Set<number>()
   const lists: WalkedList[] = []
+  const conditionals: WalkedConditional[] = []
 
   function walk(node: Node): void {
     if (node.nodeType === 8 /* COMMENT_NODE */) {
@@ -512,6 +559,14 @@ function walkNodeList(nodes: Node[], exprs: unknown[], root: Node, doc: Document
             anchorPath: computePath(node, root),
             origIdx: idx,
             sentinel: exprs[idx] as EachSentinel,
+          })
+          consumed.add(idx)
+        } else if (isConditionalSentinel(exprs[idx])) {
+          // Conditional sentinel: the comment IS the conditional anchor — record path, skip text-hole.
+          conditionals.push({
+            anchorPath: computePath(node, root),
+            origIdx: idx,
+            sentinel: exprs[idx] as ConditionalSentinel,
           })
           consumed.add(idx)
         } else {
@@ -664,7 +719,7 @@ function walkNodeList(nodes: Node[], exprs: unknown[], root: Node, doc: Document
   }
 
   for (const n of nodes) walk(n)
-  return { holeInfos, holePaths, components, consumed, lists }
+  return { holeInfos, holePaths, components, consumed, lists, conditionals }
 }
 
 // ── Slot content IR builder (collapse: uses the shared walkNodeList) ───────────
@@ -698,7 +753,7 @@ function buildSlotContentIR(
     fragWrapper.appendChild(n.cloneNode(true))
   }
 
-  const { holeInfos, holePaths, components, consumed, lists } = walkNodeList(
+  const { holeInfos, holePaths, components, consumed, lists, conditionals } = walkNodeList(
     Array.from(fragWrapper.childNodes),
     exprs,
     fragWrapper,
@@ -741,6 +796,19 @@ function buildSlotContentIR(
         // biome-ignore lint/style/noNonNullAssertion: tagged-template path never sets itemReadsIndex: false, so interpreter always allocates indexSig (§6 conservative-allocate default)
         factory({ item: () => valueSig(), index: () => indexSig!() }),
     } satisfies ListBinding)
+  }
+  // Wire <iff>-in-slot: mirrors the each-in-slot wiring above.
+  for (const wc of conditionals) {
+    const pathIndex = allPaths.length
+    allPaths.push(wc.anchorPath)
+    const { condition, consequent, alternate } = wc.sentinel
+    bindings.push({
+      kind: 'conditional',
+      pathIndex,
+      condition,
+      consequent: consequent(),
+      alternate: alternate !== null ? alternate() : null,
+    } satisfies ConditionalBinding)
   }
 
   const holeIndices = [...holeInfos.map((h) => h.origIdx), ...consumed].filter(
@@ -888,6 +956,7 @@ export function createHtmlTag(document: Document) {
         !isSlotSentinel(exprs[i]) &&
         !isSlotFillSentinel(exprs[i]) &&
         !isEachSentinel(exprs[i]) &&
+        !isConditionalSentinel(exprs[i]) &&
         !isClassesSentinel(exprs[i])
       ) {
         throw new TypeError(
@@ -920,6 +989,7 @@ export function createHtmlTag(document: Document) {
       components,
       consumed: consumedByComponent,
       lists,
+      conditionals,
     } = walkNodeList(Array.from(frag.childNodes), exprs, frag, document)
     // Map encounter-order hole paths back to GLOBAL hole indices (top-level convention).
     for (let h = 0; h < holeInfos.length; h++) {
@@ -970,6 +1040,20 @@ export function createHtmlTag(document: Document) {
           // biome-ignore lint/style/noNonNullAssertion: tagged-template path never sets itemReadsIndex: false, so interpreter always allocates indexSig (§6 conservative-allocate default)
           factory({ item: () => valueSig(), index: () => indexSig!() }),
       } satisfies ListBinding)
+    }
+
+    // Add conditional bindings (iff() sentinels): anchor paths appended after lists.
+    for (const wc of conditionals) {
+      const pathIndex = allPaths.length
+      allPaths.push(wc.anchorPath)
+      const { condition, consequent, alternate } = wc.sentinel
+      bindings.push({
+        kind: 'conditional',
+        pathIndex,
+        condition,
+        consequent: consequent(),
+        alternate: alternate !== null ? alternate() : null,
+      } satisfies ConditionalBinding)
     }
 
     const shape: TemplateShape = {
