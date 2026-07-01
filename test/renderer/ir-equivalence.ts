@@ -20,6 +20,7 @@ import type {
   RecycledListBinding,
   SlotOutletBinding,
   StyleVarBinding,
+  SwitchBinding,
   TemplateIR,
 } from '../../src/renderer/ir.js'
 
@@ -219,6 +220,27 @@ function bindingEqual(
       if (a.alternate !== null && bc.alternate !== null) {
         const aRes = irStructurallyEqual(undefined, a.alternate, bc.alternate)
         if (!aRes.equal) return { equal: false, reason: `${p}.alternate → ${aRes.reason}` }
+      }
+      break
+    }
+    case 'switch': {
+      const bs = b as SwitchBinding
+      if (a.branches.length !== bs.branches.length)
+        return { equal: false, reason: `${p}.branches length mismatch` }
+      for (let j = 0; j < a.branches.length; j++) {
+        const bodyRes = irStructurallyEqual(
+          undefined,
+          (a.branches[j] as SwitchBinding['branches'][number]).body,
+          (bs.branches[j] as SwitchBinding['branches'][number]).body,
+        )
+        if (!bodyRes.equal)
+          return { equal: false, reason: `${p}.branches[${j}].body → ${bodyRes.reason}` }
+      }
+      if ((a.fallback === null) !== (bs.fallback === null))
+        return { equal: false, reason: `${p}.fallback nullity mismatch` }
+      if (a.fallback !== null && bs.fallback !== null) {
+        const fbRes = irStructurallyEqual(undefined, a.fallback, bs.fallback)
+        if (!fbRes.equal) return { equal: false, reason: `${p}.fallback → ${fbRes.reason}` }
       }
       break
     }

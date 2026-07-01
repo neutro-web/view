@@ -183,6 +183,36 @@ describe('html-tag — iff() conditional sentinel', () => {
     expect(result.equal, result.reason).toBe(true)
   })
 
+  // G1 gate: match() and the equivalent .nv <switch>/<match> must produce
+  // structurally identical SwitchBindings (via the shared irStructurallyEqual oracle).
+  it('G1  FE-equivalence: match() and .nv <switch>/<match> produce irStructurallyEqual SwitchBinding', () => {
+    const { doc, html } = setup()
+
+    const state = signal(0)
+    const ttIr = html`<div>${match(
+      [
+        { when: () => state() === 0, body: () => html`<span>A</span>` },
+        { when: () => state() === 1, body: () => html`<span>B</span>` },
+      ],
+      () => html`<span>C</span>`,
+    )}</div>`
+
+    const source =
+      'const C = $component(() => {\n' +
+      '  $script(() => { const state = signal(0) })\n' +
+      '  $render(() => html`<div><switch>' +
+      '<match when="${state === 0}"><span>A</span></match>' +
+      '<match when="${state === 1}"><span>B</span></match>' +
+      '<match><span>C</span></match>' +
+      '</switch></div>`)\n' +
+      '})\n'
+    const results = parseNvFile(source, 'switch-equiv.nv', doc)
+    const nvIr = results[0]!.ir
+
+    const result = irStructurallyEqual(doc, ttIr, nvIr)
+    expect(result.equal, result.reason).toBe(true)
+  })
+
   // Reactive behavior: prove the mounted binding actually toggles branches when the
   // driving signal changes, not just that it builds the same IR as `.nv` (G1 above).
   it('iff(): mounted binding toggles rendered branch when signal changes', () => {
