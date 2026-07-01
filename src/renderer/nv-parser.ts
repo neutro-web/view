@@ -143,6 +143,11 @@ export type ThunkSource =
       letNames: [string, string] // [itemName, indexName] — both always present
     }
   | {
+      kind: 'switch'
+      branches: Array<{ whenSrc: string; bodyThunks: ThunkSource[] }>
+      fallbackThunks: ThunkSource[] | null
+    }
+  | {
       kind: 'classlist'
       entries: Array<
         { kind: 'static'; token: string } | { kind: 'toggle'; key: string; boolSrc: string }
@@ -1352,12 +1357,18 @@ interface PendingNvRecycleInfo {
   bodyHoleIndices: number[]
 }
 
+interface PendingNvSwitchInfo {
+  branches: Array<{ whenHoleIdx: number; bodyHoleIndices: number[]; bodyIR: TemplateIR }>
+  hasFallback: boolean
+}
+
 interface ProcessResult {
   ir: TemplateIR
   verdicts: Array<'ACCEPT' | 'PLAIN'>
   pendingComponents: PendingNvComponentInfo[]
   pendingEachItems: PendingNvEachInfo[]
   pendingRecycleItems: PendingNvRecycleInfo[]
+  pendingSwitchItems: PendingNvSwitchInfo[]
   consumedByComponent: ReadonlySet<number>
   diagnostics: NvDiagnostic[]
   shapeHtml: string // pre-walk authored shape; B3 scopeHash seed
@@ -1381,6 +1392,7 @@ function processHtmlTemplate(
       pendingComponents: [],
       pendingEachItems: [],
       pendingRecycleItems: [],
+      pendingSwitchItems: [],
       consumedByComponent: new Set<number>(),
       diagnostics: [],
       shapeHtml: template.text,
@@ -1563,6 +1575,14 @@ function processHtmlTemplate(
       itemsHoleIdx: wl.itemsHoleIdx,
       letNames: wl.letNames,
       bodyHoleIndices: wl.bodyHoleIndices,
+    })),
+    pendingSwitchItems: pendingSwitches.map((ws) => ({
+      branches: ws.branches.map((b) => ({
+        whenHoleIdx: b.whenHoleIdx,
+        bodyHoleIndices: b.bodyHoleIndices,
+        bodyIR: b.bodyIR,
+      })),
+      hasFallback: ws.hasFallback,
     })),
     consumedByComponent,
     diagnostics: processdiagnostics,
@@ -2893,6 +2913,7 @@ function computeThunkSource(
           consequentResult.pendingComponents,
           consequentResult.pendingEachItems,
           consequentResult.pendingRecycleItems,
+          consequentResult.pendingSwitchItems,
           consequentResult.consumedByComponent,
           cHoles.holeExprs,
           cHoles.positions,
@@ -2910,6 +2931,7 @@ function computeThunkSource(
                 altResult.pendingComponents,
                 altResult.pendingEachItems,
                 altResult.pendingRecycleItems,
+                altResult.pendingSwitchItems,
                 altResult.consumedByComponent,
                 aHoles.holeExprs,
                 aHoles.positions,
@@ -3079,6 +3101,7 @@ function computeBindingThunks(
   pendingComponents: PendingNvComponentInfo[],
   pendingEachItems: PendingNvEachInfo[],
   pendingRecycleItems: PendingNvRecycleInfo[],
+  pendingSwitchItems: PendingNvSwitchInfo[],
   consumedByComponent: ReadonlySet<number>,
   holeExprs: ts.Expression[],
   positions: PosKind[],
@@ -3216,6 +3239,51 @@ function computeBindingThunks(
     }
   })
 
+  const switchThunks: ThunkSource[] = pendingSwitchItems.map((ps) => {
+    const branchThunks = ps.branches
+      .filter((b) => b.whenHoleIdx !== -1)
+      .map((b) => {
+        const whenExpr = holeExprs[b.whenHoleIdx] as ts.Expression
+        const whenSrc = eraseSignalReadsInNode(whenExpr, symbols.all, propsAccessors)
+        const bodyThunks: ThunkSource[] = b.bodyHoleIndices.map((holeIdx) => {
+          const holeExpr = holeExprs[holeIdx]
+          if (holeExpr === undefined)
+            throw new Error(`[nv/switch] Body hole index ${holeIdx} out of range`)
+          return computeThunkSource(
+            holeExpr,
+            positions[holeIdx] as PosKind,
+            doc,
+            symbols,
+            diagnostics,
+            propsParamName,
+            propsAccessors,
+          )
+        })
+        return { whenSrc, bodyThunks }
+      })
+
+    const fallbackBranch = ps.hasFallback ? ps.branches[ps.branches.length - 1] : undefined
+    const fallbackThunks: ThunkSource[] | null =
+      fallbackBranch !== undefined
+        ? fallbackBranch.bodyHoleIndices.map((holeIdx) => {
+            const holeExpr = holeExprs[holeIdx]
+            if (holeExpr === undefined)
+              throw new Error(`[nv/switch] Fallback body hole index ${holeIdx} out of range`)
+            return computeThunkSource(
+              holeExpr,
+              positions[holeIdx] as PosKind,
+              doc,
+              symbols,
+              diagnostics,
+              propsParamName,
+              propsAccessors,
+            )
+          })
+        : null
+
+    return { kind: 'switch' as const, branches: branchThunks, fallbackThunks }
+  })
+
   const holeThunks = holeExprs
     .map((expr, i) =>
       consumedByComponent.has(i)
@@ -3232,7 +3300,7 @@ function computeBindingThunks(
     )
     .filter((t): t is ThunkSource => t !== null)
 
-  return [...componentThunks, ...listThunks, ...recycledListThunks, ...holeThunks]
+  return [...componentThunks, ...listThunks, ...recycledListThunks, ...switchThunks, ...holeThunks]
 }
 
 /**
@@ -3454,6 +3522,7 @@ export function parseNvFileForEmit(
             pendingComponents,
             renderResult.pendingEachItems,
             renderResult.pendingRecycleItems,
+            renderResult.pendingSwitchItems,
             consumedByComponent,
             bodyHoleExprs,
             bodyPositions,

@@ -1463,3 +1463,28 @@ describe('<switch>/<match> parse path', () => {
     expect(() => parseNvFile(src, 'switch-bad2.nv', document)).toThrow(/at most one fallback/)
   })
 })
+
+// ── Task 6: <switch>/<match> emit-path ThunkSource ────────────────────────────
+
+describe('<switch>/<match> emit path', () => {
+  it('parseNvFileForEmit produces switch ThunkSource with reactive when expressions', () => {
+    const source =
+      'const C = $component(() => {\n' +
+      '  $script(() => { const state = signal(0) })\n' +
+      '  $render(() => html`<div><switch>' +
+      '<match when="${state === 0}"><span class="zero">0</span></match>' +
+      '<match><span class="fb">fb</span></match>' +
+      '</switch></div>`)\n' +
+      '})\n'
+    const results = parseNvFileForEmit(source, 'switch-emit.nv', document)
+    const emit = results[0]!.emit
+    expect(emit).toBeDefined()
+    const switchThunk = emit!.bindingThunks.find((t) => t.kind === 'switch')
+    expect(switchThunk).toBeDefined()
+    if (switchThunk?.kind === 'switch') {
+      expect(switchThunk.branches.length).toBe(1)
+      expect(switchThunk.branches[0]!.whenSrc).toContain('state()')
+      expect(switchThunk.fallbackThunks).not.toBeNull()
+    }
+  })
+})
