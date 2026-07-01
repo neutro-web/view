@@ -5185,3 +5185,25 @@ discoverable rather than silently rediscovered later. Whoever picks this up shou
 its own commission (touches the shared `computeBindingThunks`/`ThunkSource` machinery used by
 all three structural-binding emit paths, not `<switch>`-specific) rather than folding it into
 an unrelated change.
+
+### [2026-07-01] Follow-up note: `<conditional>`/`<recycle>` never got a dedicated performance benchmark either — `<switch>` inherits the same gap
+
+**Found during:** same pre-merge audit of `<switch>`/`<match>`, in response to a question about
+whether this new construct needed a benchmark before landing.
+
+**The gap:** `bench/row-churn.mjs` measures raw signal/derived/attr/text/event binding costs
+adversarially and does not exercise `<each>`/`<recycle>`/`<conditional>`/`<switch>` at all
+(the word "each" appears only in its prose comments, not as the binding kind). The only
+structural binding kind with a dedicated performance benchmark is `<each>`, via the
+js-framework-benchmark-style row app at `test/browser/fixtures/benchmark/app.nv`
+(create/swap/remove 1,000–10,000 rows, driven by Playwright in
+`test/browser/nv-benchmark-probe.spec.ts`). `<recycle>` and `<conditional>` were never given an
+equivalent benchmark when they landed; `<switch>` is landing with the same absence, not a new
+regression in coverage.
+
+**Status:** not tracked before this note; no fix planned or commissioned. This is scoped
+broader than any single binding kind — whoever picks it up should decide whether to extend the
+existing `app.nv` row-benchmark fixture (e.g. a toggle/filter view using `<conditional>` or
+`<switch>` per row) or build a separate harness, and should cover `<conditional>`, `<recycle>`,
+and `<switch>` together rather than singling one out, since all three are in the same
+unbenchmarked state today.
