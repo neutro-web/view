@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { JSDOM } from 'jsdom'
 import { describe, expect, test } from 'vitest'
+import { emitModule } from '../../src/renderer/nv-emitter.js'
 import { parseNvFileForEmit } from '../../src/renderer/nv-parser.js'
 
 const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>')
@@ -72,5 +73,21 @@ describe('P2C-NEST-04  all nesting-matrix fixtures parse and emit without throwi
   ])('%s', (name) => {
     const source = readFileSync(join(fixturesDir, `${name}.nv`), 'utf8')
     expect(() => parseNvFileForEmit(source, `${name}.nv`, document)).not.toThrow()
+  })
+})
+
+describe('P2C-NEST-05  all nesting-matrix fixtures emit real Mode-A module source (emitModule, not just parse)', () => {
+  const fixturesDir = join(__dirname, '../browser/fixtures/nested-structural')
+  test.each([
+    'component-in-each',
+    'each-in-each',
+    'switch-in-each',
+    'each-in-switch-branch',
+    'component-in-switch-fallback',
+    'switch-in-each-in-switch',
+  ])('%s', (name) => {
+    const source = readFileSync(join(fixturesDir, `${name}.nv`), 'utf8')
+    const results = parseNvFileForEmit(source, `${name}.nv`, document)
+    expect(() => emitModule(results)).not.toThrow()
   })
 })

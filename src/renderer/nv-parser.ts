@@ -544,6 +544,10 @@ interface NvWalkedEach {
   letNames: string[]
   bodyIR: TemplateIR
   bodyHoleIndices: number[]
+  /** Leaf-only subset of bodyHoleIndices — real hole bindings, excluding holes
+   * consumed solely by a nested structural child's prop/.of/key/when. Used to
+   * build bodyThunks (one per real hole binding), not the full consumed union. */
+  bodyLeafHoleIndices: number[]
   itemReadsIndex: boolean
   nested: NestedStructuralPending
 }
@@ -554,6 +558,7 @@ interface NvWalkedRecycle {
   letNames: string[]
   bodyIR: TemplateIR
   bodyHoleIndices: number[]
+  bodyLeafHoleIndices: number[]
   nested: NestedStructuralPending
 }
 
@@ -562,6 +567,7 @@ interface NvWalkedMatchBranch {
   whenHoleIdx: number
   bodyIR: TemplateIR
   bodyHoleIndices: number[]
+  bodyLeafHoleIndices: number[]
   nested: NestedStructuralPending
 }
 
@@ -664,6 +670,7 @@ function walkNvNodeList(
         const {
           ir: bodyIR,
           holeIndices: bodyHoleIndices,
+          leafHoleIndices: bodyLeafHoleIndices,
           nested,
         } = buildNvSlotContentIR(
           bodyNodes,
@@ -703,6 +710,7 @@ function walkNvNodeList(
           letNames,
           bodyIR,
           bodyHoleIndices,
+          bodyLeafHoleIndices,
           itemReadsIndex,
           nested,
         })
@@ -767,6 +775,7 @@ function walkNvNodeList(
         const {
           ir: bodyIR,
           holeIndices: bodyHoleIndices,
+          leafHoleIndices: bodyLeafHoleIndices,
           nested,
         } = buildNvSlotContentIR(
           bodyNodes,
@@ -795,6 +804,7 @@ function walkNvNodeList(
           letNames,
           bodyIR,
           bodyHoleIndices,
+          bodyLeafHoleIndices,
           nested,
         })
         return
@@ -863,6 +873,7 @@ function walkNvNodeList(
           const {
             ir: bodyIR,
             holeIndices: bodyHoleIndices,
+            leafHoleIndices: bodyLeafHoleIndices,
             nested,
           } = buildNvSlotContentIR(
             bodyNodes,
@@ -873,7 +884,7 @@ function walkNvNodeList(
           )
           for (const idx of bodyHoleIndices) consumed.add(idx)
 
-          return { whenHoleIdx, bodyIR, bodyHoleIndices, nested }
+          return { whenHoleIdx, bodyIR, bodyHoleIndices, bodyLeafHoleIndices, nested }
         })
 
         const switchIndex = switches.length
@@ -1194,6 +1205,10 @@ function buildNvSlotContentIR(
 ): {
   ir: TemplateIR
   holeIndices: number[]
+  /** Leaf-only hole indices (real hole bindings) — a subset of holeIndices that
+   * excludes indices consumed solely by a nested structural child's prop/.of/
+   * key/when. Use this (not holeIndices) to build one bodyThunk per real hole. */
+  leafHoleIndices: number[]
   letNames: string[]
   nested: NestedStructuralPending
 } {
@@ -1204,6 +1219,7 @@ function buildNvSlotContentIR(
     return {
       ir: { id: slotId, shape: { html: '', bindingPaths: [] }, bindings: [] },
       holeIndices: [],
+      leafHoleIndices: [],
       letNames,
       nested: { components: [], lists: [], recycles: [], switches: [] },
     }
@@ -1285,9 +1301,8 @@ function buildNvSlotContentIR(
     pushSwitchBinding(ws, allPaths, bindings)
   }
 
-  const holeIndices = [...holeInfos.map((h) => h.origIdx), ...consumed].filter(
-    (v, i, a) => a.indexOf(v) === i,
-  )
+  const leafHoleIndices = holeInfos.map((h) => h.origIdx)
+  const holeIndices = [...leafHoleIndices, ...consumed].filter((v, i, a) => a.indexOf(v) === i)
 
   const nested = toPendingBundle(components, slotLists, slotRecycledLists, slotSwitches)
 
@@ -1299,6 +1314,7 @@ function buildNvSlotContentIR(
       meta: { frontEnd: 'nv-file' },
     },
     holeIndices,
+    leafHoleIndices,
     letNames,
     nested,
   }
@@ -1423,6 +1439,7 @@ interface PendingNvEachInfo {
   keyHoleIdx: number
   letNames: string[]
   bodyHoleIndices: number[]
+  bodyLeafHoleIndices: number[]
   itemReadsIndex: boolean
   nested: NestedStructuralPending
 }
@@ -1431,6 +1448,7 @@ interface PendingNvRecycleInfo {
   itemsHoleIdx: number
   letNames: string[]
   bodyHoleIndices: number[]
+  bodyLeafHoleIndices: number[]
   nested: NestedStructuralPending
 }
 
@@ -1438,6 +1456,7 @@ interface PendingNvSwitchInfo {
   branches: Array<{
     whenHoleIdx: number
     bodyHoleIndices: number[]
+    bodyLeafHoleIndices: number[]
     bodyIR: TemplateIR
     nested: NestedStructuralPending
   }>
@@ -1468,6 +1487,7 @@ function toPendingBundle(
       keyHoleIdx: wl.keyHoleIdx,
       letNames: wl.letNames,
       bodyHoleIndices: wl.bodyHoleIndices,
+      bodyLeafHoleIndices: wl.bodyLeafHoleIndices,
       itemReadsIndex: wl.itemReadsIndex,
       nested: wl.nested,
     })),
@@ -1475,12 +1495,14 @@ function toPendingBundle(
       itemsHoleIdx: wl.itemsHoleIdx,
       letNames: wl.letNames,
       bodyHoleIndices: wl.bodyHoleIndices,
+      bodyLeafHoleIndices: wl.bodyLeafHoleIndices,
       nested: wl.nested,
     })),
     switches: switches.map((ws) => ({
       branches: ws.branches.map((b) => ({
         whenHoleIdx: b.whenHoleIdx,
         bodyHoleIndices: b.bodyHoleIndices,
+        bodyLeafHoleIndices: b.bodyLeafHoleIndices,
         bodyIR: b.bodyIR,
         nested: b.nested,
       })),
@@ -3299,7 +3321,7 @@ function computeListThunks(
       bodySwitchThunks,
     } = computeBodyThunks(
       pe.nested,
-      pe.bodyHoleIndices,
+      pe.bodyLeafHoleIndices,
       holeExprs,
       positions,
       doc,
@@ -3358,7 +3380,7 @@ function computeRecycledListThunks(
       bodySwitchThunks,
     } = computeBodyThunks(
       pe.nested,
-      pe.bodyHoleIndices,
+      pe.bodyLeafHoleIndices,
       holeExprs,
       positions,
       doc,
@@ -3404,7 +3426,7 @@ function computeSwitchThunks(
           bodySwitchThunks,
         } = computeBodyThunks(
           b.nested,
-          b.bodyHoleIndices,
+          b.bodyLeafHoleIndices,
           holeExprs,
           positions,
           doc,
@@ -3432,7 +3454,7 @@ function computeSwitchThunks(
     if (fallbackBranch !== undefined) {
       const computed = computeBodyThunks(
         fallbackBranch.nested,
-        fallbackBranch.bodyHoleIndices,
+        fallbackBranch.bodyLeafHoleIndices,
         holeExprs,
         positions,
         doc,
@@ -3471,7 +3493,7 @@ function computeSwitchThunks(
  */
 function computeBodyThunks(
   pending: NestedStructuralPending,
-  bodyHoleIndices: number[],
+  bodyLeafHoleIndices: number[],
   holeExprs: ts.Expression[],
   positions: PosKind[],
   doc: Document,
@@ -3486,7 +3508,14 @@ function computeBodyThunks(
   bodyRecycledListThunks: ThunkSource[]
   bodySwitchThunks: ThunkSource[]
 } {
-  const bodyThunks = bodyHoleIndices.map((holeIdx) => {
+  // bodyLeafHoleIndices must be LEAF-ONLY hole indices (buildNvSlotContentIR's
+  // leafHoleIndices), not the full bodyHoleIndices/consumed union — the union also
+  // includes holes consumed solely by a nested structural child's prop/.of/key/when,
+  // which already get their own thunk via bodyComponentThunks/bodyListThunks/etc.
+  // Including them here would create a phantom bodyThunks entry that shifts the
+  // positional pairing emitIrLiteral relies on between bodyIR.bindings[i] and the
+  // thunk array, causing "<kind>Binding thunk kind mismatch" errors at emit time.
+  const bodyThunks = bodyLeafHoleIndices.map((holeIdx) => {
     const holeExpr = holeExprs[holeIdx]
     if (holeExpr === undefined)
       throw new Error(`[nv/emitter] Body hole index ${holeIdx} out of range`)
