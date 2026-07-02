@@ -93,11 +93,18 @@ async function flushChurn(page: import('@playwright/test').Page): Promise<void> 
   })
 }
 
-test('ADVISORY wall-clock: recycle mutation matrix (nv-only, logged never asserted)', async ({
-  page,
-}) => {
-  for (const scenario of SCENARIOS) {
-    for (const arm of ['AppRecycled', 'AppKeyed'] as const) {
+// One test per (scenario, arm) pair — NOT a single test iterating the whole
+// matrix. A single-test-body design was tried first and timed out on firefox
+// (default 30s Playwright test timeout; firefox's per-click round-trip in this
+// environment is slow enough that 5 scenarios × 2 arms × 45 clicks each
+// cumulatively exceeds the budget even though nothing in the body is a real
+// assertion). Splitting gives each pair its own 30s budget, matching the
+// per-scenario test pattern already used in the Task 3 churn matrix.
+for (const scenario of SCENARIOS) {
+  for (const arm of ['AppRecycled', 'AppKeyed'] as const) {
+    test(`ADVISORY wall-clock — ${scenario.label} — ${arm} (nv-only, logged never asserted)`, async ({
+      page,
+    }) => {
       await mountArm(page, arm)
       for (let i = 0; i < WARMUP_STEPS; i++) {
         await mutationStep(page, scenario, () => flushChurn(page))
@@ -113,8 +120,8 @@ test('ADVISORY wall-clock: recycle mutation matrix (nv-only, logged never assert
       console.log(
         `\nADVISORY [${scenario.key}] ${arm} — avg=${avg.toFixed(2)}ms max=${max.toFixed(2)}ms (round-trip incl. IPC; not isolated in-page timing)`,
       )
-    }
+      // Advisory only — no timing assertion, matches A3 wall-clock discipline.
+      expect(true).toBe(true)
+    })
   }
-  // Advisory only — no timing assertion, matches A3 wall-clock discipline.
-  expect(true).toBe(true)
-})
+}
