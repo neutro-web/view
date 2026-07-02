@@ -133,6 +133,10 @@ export type ThunkSource =
       itemsSrc: string
       keySrc: string
       bodyThunks: ThunkSource[]
+      bodyComponentThunks: ThunkSource[]
+      bodyListThunks: ThunkSource[]
+      bodyRecycledListThunks: ThunkSource[]
+      bodySwitchThunks: ThunkSource[]
       letNames: string[]
       itemReadsIndex: boolean
     }
@@ -140,12 +144,27 @@ export type ThunkSource =
       kind: 'recycled-list'
       itemsSrc: string // erased source text for the items expression
       bodyThunks: ThunkSource[] // thunks for the item body template holes
+      bodyComponentThunks: ThunkSource[]
+      bodyListThunks: ThunkSource[]
+      bodyRecycledListThunks: ThunkSource[]
+      bodySwitchThunks: ThunkSource[]
       letNames: [string, string] // [itemName, indexName] — both always present
     }
   | {
       kind: 'switch'
-      branches: Array<{ whenSrc: string; bodyThunks: ThunkSource[] }>
+      branches: Array<{
+        whenSrc: string
+        bodyThunks: ThunkSource[]
+        bodyComponentThunks: ThunkSource[]
+        bodyListThunks: ThunkSource[]
+        bodyRecycledListThunks: ThunkSource[]
+        bodySwitchThunks: ThunkSource[]
+      }>
       fallbackThunks: ThunkSource[] | null
+      fallbackComponentThunks: ThunkSource[]
+      fallbackListThunks: ThunkSource[]
+      fallbackRecycledListThunks: ThunkSource[]
+      fallbackSwitchThunks: ThunkSource[]
     }
   | {
       kind: 'classlist'
@@ -3186,12 +3205,8 @@ function extractTemplateHoles(tte: ts.TaggedTemplateExpression): {
  * Used by both the top-level emit path (parseNvFileForEmit) and the conditional
  * branch path (computeThunkSource) — this is the E-2b collapse.
  */
-function computeBindingThunks(
+function computeComponentThunks(
   pendingComponents: PendingNvComponentInfo[],
-  pendingEachItems: PendingNvEachInfo[],
-  pendingRecycleItems: PendingNvRecycleInfo[],
-  pendingSwitchItems: PendingNvSwitchInfo[],
-  consumedByComponent: ReadonlySet<number>,
   holeExprs: ts.Expression[],
   positions: PosKind[],
   doc: Document,
@@ -3200,7 +3215,7 @@ function computeBindingThunks(
   propsParamName?: string,
   propsAccessors?: ReadonlyMap<string, string>,
 ): ThunkSource[] {
-  const componentThunks: ThunkSource[] = pendingComponents.map((pc) => ({
+  return pendingComponents.map((pc) => ({
     kind: 'component' as const,
     componentSrc: pc.tagName,
     propSrcs: pc.reactiveHoles.map((rh) => ({
@@ -3247,8 +3262,19 @@ function computeBindingThunks(
       }
     }),
   }))
+}
 
-  const listThunks: ThunkSource[] = pendingEachItems.map((pe) => {
+function computeListThunks(
+  pendingEachItems: PendingNvEachInfo[],
+  holeExprs: ts.Expression[],
+  symbols: ScriptSymbols,
+  propsAccessors: ReadonlyMap<string, string> | undefined,
+  doc: Document,
+  positions: PosKind[],
+  diagnostics: NvDiagnostic[],
+  propsParamName?: string,
+): ThunkSource[] {
+  return pendingEachItems.map((pe) => {
     const itemsExpr = holeExprs[pe.itemsHoleIdx] as ts.Expression
     const keyExpr = holeExprs[pe.keyHoleIdx] as ts.Expression
 
@@ -3265,32 +3291,50 @@ function computeBindingThunks(
     )
     const mergedAccessors = new Map([...(propsAccessors ?? []), ...slotPropsAccessors])
 
-    const bodyThunks: ThunkSource[] = pe.bodyHoleIndices.map((holeIdx) => {
-      const holeExpr = holeExprs[holeIdx]
-      if (holeExpr === undefined)
-        throw new Error(`[nv/each] Body hole index ${holeIdx} out of range`)
-      return computeThunkSource(
-        holeExpr,
-        positions[holeIdx] as PosKind,
-        doc,
-        symbols,
-        diagnostics,
-        propsParamName,
-        mergedAccessors,
-      )
-    })
+    const {
+      bodyThunks,
+      bodyComponentThunks,
+      bodyListThunks,
+      bodyRecycledListThunks,
+      bodySwitchThunks,
+    } = computeBodyThunks(
+      pe.nested,
+      pe.bodyHoleIndices,
+      holeExprs,
+      positions,
+      doc,
+      symbols,
+      diagnostics,
+      propsParamName,
+      mergedAccessors,
+    )
 
     return {
       kind: 'list' as const,
       itemsSrc,
       keySrc,
       bodyThunks,
+      bodyComponentThunks,
+      bodyListThunks,
+      bodyRecycledListThunks,
+      bodySwitchThunks,
       letNames: pe.letNames,
       itemReadsIndex: pe.itemReadsIndex,
     }
   })
+}
 
-  const recycledListThunks: ThunkSource[] = pendingRecycleItems.map((pe) => {
+function computeRecycledListThunks(
+  pendingRecycleItems: PendingNvRecycleInfo[],
+  holeExprs: ts.Expression[],
+  symbols: ScriptSymbols,
+  propsAccessors: ReadonlyMap<string, string> | undefined,
+  doc: Document,
+  positions: PosKind[],
+  diagnostics: NvDiagnostic[],
+  propsParamName?: string,
+): ThunkSource[] {
+  return pendingRecycleItems.map((pe) => {
     if (pe.letNames.length !== 2) {
       throw new Error(
         `[nv] <recycle> requires exactly two let-bound names (e.g. \`let={item, i}\`); got: ${JSON.stringify(pe.letNames)}`,
@@ -3306,72 +3350,264 @@ function computeBindingThunks(
     )
     const mergedAccessors = new Map([...(propsAccessors ?? []), ...slotPropsAccessors])
 
-    const bodyThunks: ThunkSource[] = pe.bodyHoleIndices.map((holeIdx) => {
-      const holeExpr = holeExprs[holeIdx]
-      if (holeExpr === undefined)
-        throw new Error(`[nv] <recycle> body hole index ${holeIdx} out of range`)
-      return computeThunkSource(
-        holeExpr,
-        positions[holeIdx] as PosKind,
-        doc,
-        symbols,
-        diagnostics,
-        propsParamName,
-        mergedAccessors,
-      )
-    })
+    const {
+      bodyThunks,
+      bodyComponentThunks,
+      bodyListThunks,
+      bodyRecycledListThunks,
+      bodySwitchThunks,
+    } = computeBodyThunks(
+      pe.nested,
+      pe.bodyHoleIndices,
+      holeExprs,
+      positions,
+      doc,
+      symbols,
+      diagnostics,
+      propsParamName,
+      mergedAccessors,
+    )
     return {
       kind: 'recycled-list' as const,
       itemsSrc,
       bodyThunks,
+      bodyComponentThunks,
+      bodyListThunks,
+      bodyRecycledListThunks,
+      bodySwitchThunks,
       letNames: pe.letNames as [string, string],
     }
   })
+}
 
-  const switchThunks: ThunkSource[] = pendingSwitchItems.map((ps) => {
+function computeSwitchThunks(
+  pendingSwitchItems: PendingNvSwitchInfo[],
+  holeExprs: ts.Expression[],
+  symbols: ScriptSymbols,
+  propsAccessors: ReadonlyMap<string, string> | undefined,
+  doc: Document,
+  positions: PosKind[],
+  diagnostics: NvDiagnostic[],
+  propsParamName?: string,
+): ThunkSource[] {
+  return pendingSwitchItems.map((ps) => {
     const branchThunks = ps.branches
       .filter((b) => b.whenHoleIdx !== -1)
       .map((b) => {
         const whenExpr = holeExprs[b.whenHoleIdx] as ts.Expression
         const whenSrc = eraseSignalReadsInNode(whenExpr, symbols.all, propsAccessors)
-        const bodyThunks: ThunkSource[] = b.bodyHoleIndices.map((holeIdx) => {
-          const holeExpr = holeExprs[holeIdx]
-          if (holeExpr === undefined)
-            throw new Error(`[nv/switch] Body hole index ${holeIdx} out of range`)
-          return computeThunkSource(
-            holeExpr,
-            positions[holeIdx] as PosKind,
-            doc,
-            symbols,
-            diagnostics,
-            propsParamName,
-            propsAccessors,
-          )
-        })
-        return { whenSrc, bodyThunks }
+        const {
+          bodyThunks,
+          bodyComponentThunks,
+          bodyListThunks,
+          bodyRecycledListThunks,
+          bodySwitchThunks,
+        } = computeBodyThunks(
+          b.nested,
+          b.bodyHoleIndices,
+          holeExprs,
+          positions,
+          doc,
+          symbols,
+          diagnostics,
+          propsParamName,
+          propsAccessors,
+        )
+        return {
+          whenSrc,
+          bodyThunks,
+          bodyComponentThunks,
+          bodyListThunks,
+          bodyRecycledListThunks,
+          bodySwitchThunks,
+        }
       })
 
     const fallbackBranch = ps.hasFallback ? ps.branches[ps.branches.length - 1] : undefined
-    const fallbackThunks: ThunkSource[] | null =
-      fallbackBranch !== undefined
-        ? fallbackBranch.bodyHoleIndices.map((holeIdx) => {
-            const holeExpr = holeExprs[holeIdx]
-            if (holeExpr === undefined)
-              throw new Error(`[nv/switch] Fallback body hole index ${holeIdx} out of range`)
-            return computeThunkSource(
-              holeExpr,
-              positions[holeIdx] as PosKind,
-              doc,
-              symbols,
-              diagnostics,
-              propsParamName,
-              propsAccessors,
-            )
-          })
-        : null
+    let fallbackThunks: ThunkSource[] | null = null
+    let fallbackComponentThunks: ThunkSource[] = []
+    let fallbackListThunks: ThunkSource[] = []
+    let fallbackRecycledListThunks: ThunkSource[] = []
+    let fallbackSwitchThunks: ThunkSource[] = []
+    if (fallbackBranch !== undefined) {
+      const computed = computeBodyThunks(
+        fallbackBranch.nested,
+        fallbackBranch.bodyHoleIndices,
+        holeExprs,
+        positions,
+        doc,
+        symbols,
+        diagnostics,
+        propsParamName,
+        propsAccessors,
+      )
+      fallbackThunks = computed.bodyThunks
+      fallbackComponentThunks = computed.bodyComponentThunks
+      fallbackListThunks = computed.bodyListThunks
+      fallbackRecycledListThunks = computed.bodyRecycledListThunks
+      fallbackSwitchThunks = computed.bodySwitchThunks
+    }
 
-    return { kind: 'switch' as const, branches: branchThunks, fallbackThunks }
+    return {
+      kind: 'switch' as const,
+      branches: branchThunks,
+      fallbackThunks,
+      fallbackComponentThunks,
+      fallbackListThunks,
+      fallbackRecycledListThunks,
+      fallbackSwitchThunks,
+    }
   })
+}
+
+/**
+ * Recursively assemble the four structural thunk channels plus the hole
+ * (`bodyThunks`) channel for one body/slot level. Shared by every body-producing
+ * site (each/recycle/switch branch/switch fallback) — this is the single recursive
+ * reconstruction that replaces the old flat "map over bodyHoleIndices only" logic.
+ *
+ * Must reproduce buildNvSlotContentIR's bindings order (hole → component → list →
+ * recycledList → switch) — see docs/design/design-nested-structural-emit.md.
+ */
+function computeBodyThunks(
+  pending: NestedStructuralPending,
+  bodyHoleIndices: number[],
+  holeExprs: ts.Expression[],
+  positions: PosKind[],
+  doc: Document,
+  symbols: ScriptSymbols,
+  diagnostics: NvDiagnostic[],
+  propsParamName: string | undefined,
+  propsAccessors: ReadonlyMap<string, string> | undefined,
+): {
+  bodyThunks: ThunkSource[]
+  bodyComponentThunks: ThunkSource[]
+  bodyListThunks: ThunkSource[]
+  bodyRecycledListThunks: ThunkSource[]
+  bodySwitchThunks: ThunkSource[]
+} {
+  const bodyThunks = bodyHoleIndices.map((holeIdx) => {
+    const holeExpr = holeExprs[holeIdx]
+    if (holeExpr === undefined)
+      throw new Error(`[nv/emitter] Body hole index ${holeIdx} out of range`)
+    return computeThunkSource(
+      holeExpr,
+      positions[holeIdx] as PosKind,
+      doc,
+      symbols,
+      diagnostics,
+      propsParamName,
+      propsAccessors,
+    )
+  })
+
+  const bodyComponentThunks = computeComponentThunks(
+    pending.components,
+    holeExprs,
+    positions,
+    doc,
+    symbols,
+    diagnostics,
+    propsParamName,
+    propsAccessors,
+  )
+  const bodyListThunks = computeListThunks(
+    pending.lists,
+    holeExprs,
+    symbols,
+    propsAccessors,
+    doc,
+    positions,
+    diagnostics,
+    propsParamName,
+  )
+  const bodyRecycledListThunks = computeRecycledListThunks(
+    pending.recycles,
+    holeExprs,
+    symbols,
+    propsAccessors,
+    doc,
+    positions,
+    diagnostics,
+    propsParamName,
+  )
+  const bodySwitchThunks = computeSwitchThunks(
+    pending.switches,
+    holeExprs,
+    symbols,
+    propsAccessors,
+    doc,
+    positions,
+    diagnostics,
+    propsParamName,
+  )
+
+  return {
+    bodyThunks,
+    bodyComponentThunks,
+    bodyListThunks,
+    bodyRecycledListThunks,
+    bodySwitchThunks,
+  }
+}
+
+function computeBindingThunks(
+  pendingComponents: PendingNvComponentInfo[],
+  pendingEachItems: PendingNvEachInfo[],
+  pendingRecycleItems: PendingNvRecycleInfo[],
+  pendingSwitchItems: PendingNvSwitchInfo[],
+  consumedByComponent: ReadonlySet<number>,
+  holeExprs: ts.Expression[],
+  positions: PosKind[],
+  doc: Document,
+  symbols: ScriptSymbols,
+  diagnostics: NvDiagnostic[],
+  propsParamName?: string,
+  propsAccessors?: ReadonlyMap<string, string>,
+): ThunkSource[] {
+  const componentThunks: ThunkSource[] = computeComponentThunks(
+    pendingComponents,
+    holeExprs,
+    positions,
+    doc,
+    symbols,
+    diagnostics,
+    propsParamName,
+    propsAccessors,
+  )
+
+  const listThunks: ThunkSource[] = computeListThunks(
+    pendingEachItems,
+    holeExprs,
+    symbols,
+    propsAccessors,
+    doc,
+    positions,
+    diagnostics,
+    propsParamName,
+  )
+
+  const recycledListThunks: ThunkSource[] = computeRecycledListThunks(
+    pendingRecycleItems,
+    holeExprs,
+    symbols,
+    propsAccessors,
+    doc,
+    positions,
+    diagnostics,
+    propsParamName,
+  )
+
+  const switchThunks: ThunkSource[] = computeSwitchThunks(
+    pendingSwitchItems,
+    holeExprs,
+    symbols,
+    propsAccessors,
+    doc,
+    positions,
+    diagnostics,
+    propsParamName,
+  )
 
   const holeThunks = holeExprs
     .map((expr, i) =>

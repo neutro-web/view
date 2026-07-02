@@ -175,7 +175,14 @@ function emitBindingLiteral(
       const stubVs = signal<unknown>(null)
       const stubIs = signal<number>(0)
       const bodyIR = lb.itemTemplate(stubVs, stubIs)
-      const bodyLiteral = emitIrLiteral(bodyIR, thunk.bodyThunks, i2)
+      const bodyThunksOrdered: ThunkSource[] = [
+        ...thunk.bodyThunks,
+        ...thunk.bodyComponentThunks,
+        ...thunk.bodyListThunks,
+        ...thunk.bodyRecycledListThunks,
+        ...thunk.bodySwitchThunks,
+      ]
+      const bodyLiteral = emitIrLiteral(bodyIR, bodyThunksOrdered, i2)
       // letNames default to ['item', 'index'] if empty; first name maps to valueSig, second to indexSig
       const [itemName = 'item', indexName = 'index'] = thunk.letNames
       const readsIndex =
@@ -203,7 +210,14 @@ function emitBindingLiteral(
       if (bodyIR === undefined) {
         throw new Error('[nv/emitter] RecycledListBinding has no bodyIR — use parseNvFileForEmit')
       }
-      const bodyLiteral = emitIrLiteral(bodyIR, thunk.bodyThunks, i2)
+      const bodyThunksOrdered: ThunkSource[] = [
+        ...thunk.bodyThunks,
+        ...thunk.bodyComponentThunks,
+        ...thunk.bodyListThunks,
+        ...thunk.bodyRecycledListThunks,
+        ...thunk.bodySwitchThunks,
+      ]
+      const bodyLiteral = emitIrLiteral(bodyIR, bodyThunksOrdered, i2)
       const [itemName = 'item', indexName = 'i'] = thunk.letNames
       // indexSig ALWAYS allocated for recycled — no elision, no conditional.
       const slotPropsBody = `{ ${itemName}: () => valueSig(), ${indexName}: () => indexSig() }`
@@ -222,12 +236,26 @@ function emitBindingLiteral(
           const branchThunk = thunk.branches[idx]
           if (!branchThunk)
             throw new Error(`[nv/emitter] Missing switch branch thunk at index ${idx}`)
-          const bodyLiteral = emitIrLiteral(b.body, branchThunk.bodyThunks, i2)
+          const branchThunksOrdered: ThunkSource[] = [
+            ...branchThunk.bodyThunks,
+            ...branchThunk.bodyComponentThunks,
+            ...branchThunk.bodyListThunks,
+            ...branchThunk.bodyRecycledListThunks,
+            ...branchThunk.bodySwitchThunks,
+          ]
+          const bodyLiteral = emitIrLiteral(b.body, branchThunksOrdered, i2)
           return `{ when: () => (${branchThunk.whenSrc}), body: ${bodyLiteral} }`
         })
         .join(`,\n${i2}`)
+      const fallbackThunksOrdered: ThunkSource[] = [
+        ...(thunk.fallbackThunks ?? []),
+        ...thunk.fallbackComponentThunks,
+        ...thunk.fallbackListThunks,
+        ...thunk.fallbackRecycledListThunks,
+        ...thunk.fallbackSwitchThunks,
+      ]
       const fallbackLiteral =
-        swb.fallback === null ? 'null' : emitIrLiteral(swb.fallback, thunk.fallbackThunks ?? [], i2)
+        swb.fallback === null ? 'null' : emitIrLiteral(swb.fallback, fallbackThunksOrdered, i2)
       return [
         `{ kind: 'switch', ${pathEntry},`,
         `${i2}branches: [${branchLiterals}],`,
