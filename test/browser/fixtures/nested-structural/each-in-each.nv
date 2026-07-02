@@ -1,0 +1,11 @@
+const Grid = $component(() => {
+  $script(() => {
+    const rows = signal([
+      { id: 1, cells: [{ id: 10, v: 'a' }, { id: 11, v: 'b' }] },
+      { id: 2, cells: [{ id: 20, v: 'c' }] },
+    ])
+  })
+  $render(() => html`<div class="grid"><each .of="${rows}" key="${(r) => r.id}" let={row}>
+    <div class="row"><each .of="${row.cells}" key="${(c) => c.id}" let={cell}><span class="cell">${cell.v}</span></each></div>
+  </each></div>`)
+})

@@ -1,0 +1,17 @@
+const Panel = $component(() => {
+  $script(() => {
+    const mode = signal('list')
+    const rows = signal([{ id: 1, flag: true }, { id: 2, flag: false }])
+  })
+  $render(() => html`<div><switch>
+    <match when="${mode() === 'list'}">
+      <ul><each .of="${rows}" key="${(r) => r.id}" let={row}>
+        <li><switch>
+          <match when="${row.flag}"><span class="flagged">Y</span></match>
+          <match><span class="unflagged">N</span></match>
+        </switch></li>
+      </each></ul>
+    </match>
+    <match><p>no rows</p></match>
+  </switch></div>`)
+})

@@ -1,0 +1,11 @@
+const List = $component(() => {
+  $script(() => {
+    const items = signal([{ id: 1, status: 'ok' }, { id: 2, status: 'error' }])
+  })
+  $render(() => html`<ul><each .of="${items}" key="${(i) => i.id}" let={item}>
+    <li><switch>
+      <match when="${item.status === 'ok'}"><span class="ok">OK</span></match>
+      <match><span class="err">ERR</span></match>
+    </switch></li>
+  </each></ul>`)
+})

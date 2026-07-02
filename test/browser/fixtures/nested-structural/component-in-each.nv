@@ -1,0 +1,9 @@
+const Row = $component((props) => {
+  $render(() => html`<li class="row">${props.label}</li>`)
+})
+const List = $component(() => {
+  $script(() => {
+    const items = signal([{ id: 1, label: 'Alpha' }, { id: 2, label: 'Beta' }])
+  })
+  $render(() => html`<ul><each .of="${items}" key="${(i) => i.id}" let={item}><Row label="${item.label}" /></each></ul>`)
+})

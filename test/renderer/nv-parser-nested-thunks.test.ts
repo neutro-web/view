@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { JSDOM } from 'jsdom'
 import { describe, expect, test } from 'vitest'
 import { parseNvFileForEmit } from '../../src/renderer/nv-parser.js'
@@ -55,5 +57,20 @@ const Grid = $component(() => {
     expect(() => parseNvFileForEmit(source, 'grid.nv', document)).toThrow(
       '[nv] <recycle> cannot be nested inside an <each> body',
     )
+  })
+})
+
+describe('P2C-NEST-04  all nesting-matrix fixtures parse and emit without throwing', () => {
+  const fixturesDir = join(__dirname, '../browser/fixtures/nested-structural')
+  test.each([
+    'component-in-each',
+    'each-in-each',
+    'switch-in-each',
+    'each-in-switch-branch',
+    'component-in-switch-fallback',
+    'switch-in-each-in-switch',
+  ])('%s', (name) => {
+    const source = readFileSync(join(fixturesDir, `${name}.nv`), 'utf8')
+    expect(() => parseNvFileForEmit(source, `${name}.nv`, document)).not.toThrow()
   })
 })

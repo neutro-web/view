@@ -1,0 +1,10 @@
+const Panel = $component(() => {
+  $script(() => {
+    const mode = signal('list')
+    const items = signal([{ id: 1, label: 'A' }, { id: 2, label: 'B' }])
+  })
+  $render(() => html`<div><switch>
+    <match when="${mode() === 'list'}"><ul><each .of="${items}" key="${(i) => i.id}" let={item}><li>${item.label}</li></each></ul></match>
+    <match><p>empty</p></match>
+  </switch></div>`)
+})
