@@ -22,7 +22,10 @@ const AppRecycled = $component(() => {
     function replaceAll() {
       replaceVersion++
       const v = replaceVersion
-      allRows.set(allRows().map((r) => ({ id: r.id, label: 'v' + v + '-' + r.id })))
+      // New ids on every call — a replace that preserves ids is invisible to a
+      // keyed-identity reconciler (it correctly no-ops), which defeats the
+      // keyed-contrast leg of this scenario. New ids force genuine identity churn.
+      allRows.set(allRows().map((r, idx) => ({ id: v * M + idx, label: 'v' + v + '-' + idx })))
     }
     function appendRows() {
       const added = makeRows(K, nextId)
