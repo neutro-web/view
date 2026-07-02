@@ -510,6 +510,14 @@ interface NvWalkedComponent {
   slotLetNames: string[][]
 }
 
+/** Nested structural pendings discovered one level below a body/slot walk. */
+interface NestedStructuralPending {
+  components: PendingNvComponentInfo[]
+  lists: PendingNvEachInfo[]
+  recycles: PendingNvRecycleInfo[]
+  switches: PendingNvSwitchInfo[]
+}
+
 interface NvWalkedEach {
   anchorPath: NodePath
   itemsHoleIdx: number
@@ -518,6 +526,7 @@ interface NvWalkedEach {
   bodyIR: TemplateIR
   bodyHoleIndices: number[]
   itemReadsIndex: boolean
+  nested: NestedStructuralPending
 }
 
 interface NvWalkedRecycle {
@@ -526,6 +535,7 @@ interface NvWalkedRecycle {
   letNames: string[]
   bodyIR: TemplateIR
   bodyHoleIndices: number[]
+  nested: NestedStructuralPending
 }
 
 interface NvWalkedMatchBranch {
@@ -533,6 +543,7 @@ interface NvWalkedMatchBranch {
   whenHoleIdx: number
   bodyIR: TemplateIR
   bodyHoleIndices: number[]
+  nested: NestedStructuralPending
 }
 
 interface NvWalkedSwitch {
@@ -631,7 +642,11 @@ function walkNvNodeList(
 
         // Build body IR from template content (body is in .content, not direct childNodes)
         const bodyNodes = Array.from(eachEl.content.childNodes)
-        const { ir: bodyIR, holeIndices: bodyHoleIndices } = buildNvSlotContentIR(
+        const {
+          ir: bodyIR,
+          holeIndices: bodyHoleIndices,
+          nested,
+        } = buildNvSlotContentIR(
           bodyNodes,
           holeExprs,
           doc,
@@ -670,6 +685,7 @@ function walkNvNodeList(
           bodyIR,
           bodyHoleIndices,
           itemReadsIndex,
+          nested,
         })
         return // don't recurse into <each> body (already processed via .content)
       }
@@ -729,7 +745,11 @@ function walkNvNodeList(
 
         // Build body IR
         const bodyNodes = Array.from(recycleEl.content.childNodes)
-        const { ir: bodyIR, holeIndices: bodyHoleIndices } = buildNvSlotContentIR(
+        const {
+          ir: bodyIR,
+          holeIndices: bodyHoleIndices,
+          nested,
+        } = buildNvSlotContentIR(
           bodyNodes,
           holeExprs,
           doc,
@@ -750,7 +770,14 @@ function walkNvNodeList(
         recycleEl.parentNode.replaceChild(anchor, recycleEl)
         const anchorPath = computePath(anchor, root)
 
-        recycledLists.push({ anchorPath, itemsHoleIdx, letNames, bodyIR, bodyHoleIndices })
+        recycledLists.push({
+          anchorPath,
+          itemsHoleIdx,
+          letNames,
+          bodyIR,
+          bodyHoleIndices,
+          nested,
+        })
         return
       }
 
@@ -814,7 +841,11 @@ function walkNvNodeList(
         const branches: NvWalkedMatchBranch[] = matchChildren.map((matchEl, branchIdx) => {
           const whenHoleIdx = whenHoleIdxs[branchIdx] as number
           const bodyNodes = Array.from(matchEl.content.childNodes)
-          const { ir: bodyIR, holeIndices: bodyHoleIndices } = buildNvSlotContentIR(
+          const {
+            ir: bodyIR,
+            holeIndices: bodyHoleIndices,
+            nested,
+          } = buildNvSlotContentIR(
             bodyNodes,
             holeExprs,
             doc,
@@ -823,7 +854,7 @@ function walkNvNodeList(
           )
           for (const idx of bodyHoleIndices) consumed.add(idx)
 
-          return { whenHoleIdx, bodyIR, bodyHoleIndices }
+          return { whenHoleIdx, bodyIR, bodyHoleIndices, nested }
         })
 
         const switchIndex = switches.length
@@ -1141,7 +1172,12 @@ function buildNvSlotContentIR(
   letNames: string[] = [],
   diagnostics: NvDiagnostic[] = [],
   isEachBody = false,
-): { ir: TemplateIR; holeIndices: number[]; letNames: string[] } {
+): {
+  ir: TemplateIR
+  holeIndices: number[]
+  letNames: string[]
+  nested: NestedStructuralPending
+} {
   const stubExpr = (() => undefined) as ReactiveExpr<unknown>
   const stubHandler = (() => (_e: Event) => undefined) as HandlerExpr
 
@@ -1150,6 +1186,7 @@ function buildNvSlotContentIR(
       ir: { id: slotId, shape: { html: '', bindingPaths: [] }, bindings: [] },
       holeIndices: [],
       letNames,
+      nested: { components: [], lists: [], recycles: [], switches: [] },
     }
   }
 
@@ -1233,6 +1270,8 @@ function buildNvSlotContentIR(
     (v, i, a) => a.indexOf(v) === i,
   )
 
+  const nested = toPendingBundle(components, slotLists, slotRecycledLists, slotSwitches)
+
   return {
     ir: {
       id: slotId,
@@ -1242,6 +1281,7 @@ function buildNvSlotContentIR(
     },
     holeIndices,
     letNames,
+    nested,
   }
 }
 
@@ -1365,17 +1405,69 @@ interface PendingNvEachInfo {
   letNames: string[]
   bodyHoleIndices: number[]
   itemReadsIndex: boolean
+  nested: NestedStructuralPending
 }
 
 interface PendingNvRecycleInfo {
   itemsHoleIdx: number
   letNames: string[]
   bodyHoleIndices: number[]
+  nested: NestedStructuralPending
 }
 
 interface PendingNvSwitchInfo {
-  branches: Array<{ whenHoleIdx: number; bodyHoleIndices: number[]; bodyIR: TemplateIR }>
+  branches: Array<{
+    whenHoleIdx: number
+    bodyHoleIndices: number[]
+    bodyIR: TemplateIR
+    nested: NestedStructuralPending
+  }>
   hasFallback: boolean
+}
+
+/** Convert one level of walk-result structural collections into Pending*Info. Shared
+ * by the top-level ProcessResult return and buildNvSlotContentIR (body/slot walks). */
+function toPendingBundle(
+  components: NvWalkedComponent[],
+  lists: NvWalkedEach[],
+  recycledLists: NvWalkedRecycle[],
+  switches: NvWalkedSwitch[],
+): NestedStructuralPending {
+  return {
+    components: components.map(
+      ({ tagName, propNames, reactiveHoles, slots, slotHoleGroups, slotLetNames }) => ({
+        tagName,
+        propNames,
+        reactiveHoles,
+        slots,
+        slotHoleGroups,
+        slotLetNames,
+      }),
+    ),
+    lists: lists.map((wl) => ({
+      itemsHoleIdx: wl.itemsHoleIdx,
+      keyHoleIdx: wl.keyHoleIdx,
+      letNames: wl.letNames,
+      bodyHoleIndices: wl.bodyHoleIndices,
+      itemReadsIndex: wl.itemReadsIndex,
+      nested: wl.nested,
+    })),
+    recycles: recycledLists.map((wl) => ({
+      itemsHoleIdx: wl.itemsHoleIdx,
+      letNames: wl.letNames,
+      bodyHoleIndices: wl.bodyHoleIndices,
+      nested: wl.nested,
+    })),
+    switches: switches.map((ws) => ({
+      branches: ws.branches.map((b) => ({
+        whenHoleIdx: b.whenHoleIdx,
+        bodyHoleIndices: b.bodyHoleIndices,
+        bodyIR: b.bodyIR,
+        nested: b.nested,
+      })),
+      hasFallback: ws.hasFallback,
+    })),
+  }
 }
 
 interface ProcessResult {
@@ -1562,6 +1654,13 @@ function processHtmlTemplate(
     '',
   ) // strip hole attr sentinels only
 
+  const pendingBundle = toPendingBundle(
+    pendingComponents,
+    pendingLists,
+    pendingRecycleLists,
+    pendingSwitches,
+  )
+
   return {
     ir: {
       id: `nv:${simpleHash(reserializedShape)}`,
@@ -1570,36 +1669,10 @@ function processHtmlTemplate(
       meta: { frontEnd: 'nv-file' },
     },
     verdicts,
-    pendingComponents: pendingComponents.map(
-      ({ tagName, propNames, reactiveHoles, slots, slotHoleGroups, slotLetNames }) => ({
-        tagName,
-        propNames,
-        reactiveHoles,
-        slots,
-        slotHoleGroups,
-        slotLetNames,
-      }),
-    ),
-    pendingEachItems: pendingLists.map((wl) => ({
-      itemsHoleIdx: wl.itemsHoleIdx,
-      keyHoleIdx: wl.keyHoleIdx,
-      letNames: wl.letNames,
-      bodyHoleIndices: wl.bodyHoleIndices,
-      itemReadsIndex: wl.itemReadsIndex,
-    })),
-    pendingRecycleItems: pendingRecycleLists.map((wl) => ({
-      itemsHoleIdx: wl.itemsHoleIdx,
-      letNames: wl.letNames,
-      bodyHoleIndices: wl.bodyHoleIndices,
-    })),
-    pendingSwitchItems: pendingSwitches.map((ws) => ({
-      branches: ws.branches.map((b) => ({
-        whenHoleIdx: b.whenHoleIdx,
-        bodyHoleIndices: b.bodyHoleIndices,
-        bodyIR: b.bodyIR,
-      })),
-      hasFallback: ws.hasFallback,
-    })),
+    pendingComponents: pendingBundle.components,
+    pendingEachItems: pendingBundle.lists,
+    pendingRecycleItems: pendingBundle.recycles,
+    pendingSwitchItems: pendingBundle.switches,
     consumedByComponent,
     diagnostics: processdiagnostics,
     shapeHtml,
