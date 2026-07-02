@@ -29,9 +29,9 @@
 
 ## Current State
 
-_Last updated: 2026-07-01. Template-IR **v0.4.5**, reactive-core contract **v0.4.3**.
-Control-flow completion (PT-3) DONE. Follow-up A LANDED (3/4 nesting directions);
-A′ open (4th direction); B held._
+_Last updated: 2026-07-02. Template-IR **v0.4.5**, reactive-core contract **v0.4.3**.
+Control-flow completion (PT-3) DONE. Mode-A nested structural: all 4 directions closed
+(A `b0409cf`, A′ `3a3cdbe`). Follow-up B next._
 _Active frontier: v0.5.0 API-parity. Control-flow completion (PT-3) DONE. Performance arc CLOSED._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
@@ -80,22 +80,23 @@ _Active frontier: v0.5.0 API-parity. Control-flow completion (PT-3) DONE. Perfor
     hole-thunk `7f00ae4`; bare-anchor multi-root `156a1ef`). Closure-clean (empty
     `src/core/` diff). **One direction deferred → Follow-up A′.** See [2026-07-01]
     log entry.
-  - **Follow-up A′ — `<recycle>`-in-`<each>` emit support — OPEN.** The 4th nesting
-    direction; currently a loud parse-time throw (nv-parser.ts:1329). Confirmed
-    nv-specific emit debt, not intrinsic — Solid (fine-grained foil) and Svelte 5
-    (compile-model foil) both nest control flow in all directions. The throw also
-    props up the fix's positional-pairing invariant (:3597), so closing it must
-    replace invariant-by-guard with invariant-by-construction/type. Commission
-    written; Gate-P-first. **Not blocked** — actionable now. See [2026-07-01] log
-    entry.
-  - **Follow-up B — no dedicated perf benchmark for `<conditional>`/`<recycle>`/`<switch>`.**
-    Only `<each>` has the jfb-style row app; the other three structural kinds never got one.
-    Defensible given the performance arc closed on the shared-scaffolding finding (per-construct
-    cost is structural, not per-kind), so marginal info from benchmarking `<switch>` specifically
-    is low. **The real value is regression-guarding `<recycle>`**, whose entire justification is a
-    perf claim (node-churn→0) currently resting on a one-shot verdict probe (`8da893a`), not a
-    standing benchmark. Scope as one combined harness (all three). **HELD, behind Follow-up A′**
-    (per Kofi). See [2026-07-01] log entry.
+  - **Follow-up A′ — `<recycle>`-in-`<each>` emit support — LANDED `3a3cdbe`.** 4th/4
+    Mode-A nesting direction closed. Two-line collapse (removed parse throw +
+    `!isEachBody` gate; `pushRecycledListBinding` now unconditional). Ruling (a) proven
+    empirically (real-browser parity fixture passed with no other fix). Positional-
+    pairing invariant made structural — the invariant-by-guard hazard flagged at A
+    landing is closed. Two-back-end parity (compiler `recycled-list` is a pre-existing
+    stub, not on v1 path — `<recycle>` parity bounded by its own back-end coverage;
+    three-back-end was a commission overreach, accepted). Closure-clean (empty
+    core/interpreter/emitted-mount diff). See [2026-07-02] log entry.
+  - **Follow-up B — combined perf harness for `<conditional>`/`<recycle>`/`<switch>` —
+    NEXT (was held behind A′; A′ landed `3a3cdbe`).** Only `<each>` has the jfb-style
+    row app; the other three structural kinds never got one. Defensible given the
+    performance arc closed on the shared-scaffolding finding (per-construct cost is
+    structural). **The real value is regression-guarding `<recycle>`**, whose node-churn→0
+    claim rests on a one-shot verdict probe (`8da893a`), not a standing benchmark. Scope
+    as one combined harness (all three). Commission not yet written. See [2026-07-01] +
+    [2026-07-02] log entries.
 - **Build pipeline `.nv → .js`:** Mode A, landed. Executable-module gate closed.
   **[2026-06-25] `.nv` author path proven E2E in real browsers** (probe `8146d82`): `.nv` → plugin →
   esbuild → browser, click updates DOM, chromium+webkit. Authoring is assignment-form
@@ -1033,3 +1034,60 @@ replacing invariant-by-guard with invariant-by-construction or type. Commission:
 implementer confirms whether the existing recursive `computeBodyThunks` machinery
 extends cleanly to `pending.recycles` in an each-body, or whether the positional-
 pairing invariant needs restructuring, and submits a plan before any `src/` touch.
+
+---
+
+### [2026-07-02] Follow-up A′ LANDED `3a3cdbe` — `<recycle>`-in-`<each>` emit support; 4th nesting direction closed; invariant made structural
+
+**Commission:** `commission-recycle-in-each-emit.md`. Closes the one nesting direction
+Follow-up A ([2026-07-01], `b0409cf`) left open.
+
+**Fork ruling — (a) stale-guard, empirically proven.** The commission required an
+(a)/(b) ruling before `src/`, and required the runtime axis be proven by a rendering
+fixture, not structural inference alone (the gap flagged in architect review of CC's
+pre-implementation ruling). Confirmed both ways: (1) structural — the top-level
+`pushRecycledListBinding` call, `toPendingBundle`, and `computeBodyThunks`'s
+`computeRecycledListThunks` call were already unconditional/uniform; only the
+binding-push gate + parse throw singled out each-bodies; (2) empirical — the two-line
+collapse (remove throw, remove `!isEachBody` gate) applied with **no other fix**, and
+the real-browser parity fixture (interpreter `mount()` vs. real Mode-A `.nv → esbuild →
+bundle`, fixed-value oracle) passed first run on Chromium/WebKit/Firefox. No latent (b)
+surfaced.
+
+**Change (nv-parser.ts only, +9/−19; verified empty core/interpreter/emitted-mount
+diff):** removed the parse throw + `!isEachBody` binding-push gate — `pushRecycledListBinding`
+now unconditional, symmetric with `pushListBinding`/`pushSwitchBinding` (one path, not a
+fourth — collapse discipline). Removed the now-dead `isEachBody` parameter from
+`buildNvSlotContentIR` outright (deviation beyond the plan's comment-only wording; a
+zero-read param would be a dead-code finding). Replaced the two stale "each-body can't
+handle `<recycle>`" comments — notably `computeBodyThunks`'s, which admitted its
+positional pairing was "safe TODAY only because" the throw kept `pending.recycles` empty;
+it now states the pairing holds by construction. **This closes the invariant-by-guard
+hazard flagged at the A landing** — correctness no longer depends on a parse throw
+staying in place.
+
+**Tests:** `P2C-NEST-03` rewritten (throw-assertion → correct nested-`ThunkSource`
+emission); new `P2C-NEST-03b` — invariant-by-construction proof (each-body `bodyIR` has
+exactly 1 `recycled-list` binding; `bodyRecycledListThunks.length` equals that count).
+Six new real-browser tests (×3 browsers = 18): DOM mount, two-back-end parity,
+reactivity-through-nesting, per-item recycling with cross-scope isolation, outer keyed
+identity across reorder, disposal-through-nesting (owner-tree deficit). Red→green proven
+via `git stash` round-trip to `7d94e0d`.
+
+**Deviations (both flagged, accepted):** (1) **two-back-end parity, not three** —
+`emitted-mount.ts`'s `recycled-list` case is a pre-existing unconditional stub
+(`RecycledListBinding not yet implemented in compiler back-end`, emitted-mount.ts:808–812),
+not on the v1 build-pipeline path, covering top-level `<recycle>` too. `<recycle>` can't
+be more parity-complete than the compiler back-end supports; the `each-in-recycle`
+precedent (Follow-up A) already established Mode-A-only parity for this. **The
+commission's three-back-end requirement was an architect overreach** — recycle-in-each
+parity is bounded by `<recycle>`'s own back-end coverage. Accepted. (2) `isEachBody`
+removed outright vs. comment-only — dead-code avoidance, in-spirit.
+
+**`ThunkSource`/pending shape:** unchanged, no new fields — reachability gap only.
+**Contract impact:** none. Template-IR unchanged (v0.4.5). reactive-core contract
+unchanged (v0.4.3).
+
+**Result:** all four Mode-A nesting directions (component/each/switch/recycle inside
+each/recycle/switch bodies) now closed. Follow-up A′ done. Follow-up B (combined perf
+harness) promoted from held → next.
