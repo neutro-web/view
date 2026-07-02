@@ -11,7 +11,7 @@
  * component-in-switch-fallback, switch-in-each-in-switch (deep 3-level nesting),
  * each-in-recycle (structural child nested inside a <recycle> body).
  *
- * Bundling convention copied verbatim (parameterized over six fixtures) from
+ * Bundling convention copied verbatim (parameterized over seven fixtures) from
  * nv-author-probe.spec.ts's single-bundle-built-once-in-beforeAll pattern.
  *
  * Run: pnpm test:browser test/browser/nested-structural.spec.ts
