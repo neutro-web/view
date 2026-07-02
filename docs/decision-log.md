@@ -29,7 +29,9 @@
 
 ## Current State
 
-_Last updated: 2026-07-01. Template-IR **v0.4.5**, reactive-core contract **v0.4.3**._
+_Last updated: 2026-07-01. Template-IR **v0.4.5**, reactive-core contract **v0.4.3**.
+Control-flow completion (PT-3) DONE. Follow-up A LANDED (3/4 nesting directions);
+A′ open (4th direction); B held._
 _Active frontier: v0.5.0 API-parity. Control-flow completion (PT-3) DONE. Performance arc CLOSED._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
@@ -70,24 +72,30 @@ _Active frontier: v0.5.0 API-parity. Control-flow completion (PT-3) DONE. Perfor
   open control-flow gap is closed.
 - **Tracked-open follow-ups (surfaced by the switch/match audit, neither on the roadmap —
   general misses, now logged not silent):**
-  - **Follow-up A — nested structural bindings on the Mode-A emit path (PRIORITY of the two).**
-    A component / `<each>` / `<recycle>` / `<switch>` nested inside a `<each>`/`<recycle>`/
-    `<switch>` body throws loudly at emit time (`computeBindingThunks`/`ThunkSource` only
-    threads primitive holes). **Pre-existing in `<each>`/`<recycle>`**, inherited by `<switch>`;
-    interpreter + `emitted-mount.ts` compiler handle nesting correctly — this is a **Mode-A
-    back-end asymmetry** (the drifting-path pattern collapse-don't-patch targets). Not a
-    `<switch>` blocker; `<switch>` is at-parity for what it claims. Real-app-relevant (nested
-    lists / component-in-row are table-stakes for the dashboard/grid workloads nv targets
-    strongest). **Recommend commissioning as a standalone unit** on the shared machinery.
-    See [2026-07-01] log entry.
+  - **Follow-up A — nested structural bindings on the Mode-A emit path — LANDED
+    `b0409cf` (3 of 4 nesting directions).** Recursive `ThunkSource` reconstruction
+    (Option 1; Option 2 dead — `bodyIR` is stub-accessor-built, emit needs source
+    strings). component/each/switch nest freely inside each/recycle/switch bodies on
+    all three back-ends, real-browser-gated. Two in-branch bug fixes (phantom
+    hole-thunk `7f00ae4`; bare-anchor multi-root `156a1ef`). Closure-clean (empty
+    `src/core/` diff). **One direction deferred → Follow-up A′.** See [2026-07-01]
+    log entry.
+  - **Follow-up A′ — `<recycle>`-in-`<each>` emit support — OPEN.** The 4th nesting
+    direction; currently a loud parse-time throw (nv-parser.ts:1329). Confirmed
+    nv-specific emit debt, not intrinsic — Solid (fine-grained foil) and Svelte 5
+    (compile-model foil) both nest control flow in all directions. The throw also
+    props up the fix's positional-pairing invariant (:3597), so closing it must
+    replace invariant-by-guard with invariant-by-construction/type. Commission
+    written; Gate-P-first. **Not blocked** — actionable now. See [2026-07-01] log
+    entry.
   - **Follow-up B — no dedicated perf benchmark for `<conditional>`/`<recycle>`/`<switch>`.**
     Only `<each>` has the jfb-style row app; the other three structural kinds never got one.
     Defensible given the performance arc closed on the shared-scaffolding finding (per-construct
     cost is structural, not per-kind), so marginal info from benchmarking `<switch>` specifically
     is low. **The real value is regression-guarding `<recycle>`**, whose entire justification is a
     perf claim (node-churn→0) currently resting on a one-shot verdict probe (`8da893a`), not a
-    standing benchmark. Scope as one combined harness (all three), **below Follow-up A**. See
-    [2026-07-01] log entry.
+    standing benchmark. Scope as one combined harness (all three). **HELD, behind Follow-up A′**
+    (per Kofi). See [2026-07-01] log entry.
 - **Build pipeline `.nv → .js`:** Mode A, landed. Executable-module gate closed.
   **[2026-06-25] `.nv` author path proven E2E in real browsers** (probe `8146d82`): `.nv` → plugin →
   esbuild → browser, click updates DOM, chromium+webkit. Authoring is assignment-form
@@ -5272,3 +5280,121 @@ contract unchanged (v0.4.3).
 
 **Result:** PT-3 (control-flow completion) DONE. `<switch>`/`<match>` was the last open
 control-flow construct.
+
+### [2026-07-01] Follow-up A LANDED `b0409cf` — nested structural bindings on the Mode-A emit path (3 of 4 nesting directions); recycle-in-each spun to A′
+
+**Commission:** `commission-nested-structural-emit.md` (Follow-up A from the
+[2026-07-01] `<switch>`/`<match>` audit). Close the Mode-A emit-path asymmetry:
+component / `<each>` / `<recycle>` / `<switch>` nested inside an each/recycle/switch
+body threw a "thunk kind mismatch" at emit time, because body reconstruction from
+erased source was flat (`bodyHoleIndices`-only), while the interpreter and
+`emitted-mount.ts` compiler handled nesting correctly by building `TemplateIR`
+directly.
+
+**Design fork ruled — Option 1 (recursive `ThunkSource` extension); Option 2 dead.**
+Confirmed at source: the pending-infos' `bodyIR` is built with **stub accessors**
+(`(() => undefined)`-style), so there is no path from an evaluated stub closure back
+to source text — and emit needs erased *source strings* to produce a re-executable
+module. Option 2 (emit from `bodyIR` directly) is therefore impossible, not merely
+inferior. Evidence in `docs/design/design-nested-structural-emit.md` (authored +
+committed before any `src/` change, per Gate-P). Verified against placed source:
+`NestedStructuralPending` (nv-parser.ts:533) threaded through
+`NvWalkedEach`/`NvWalkedRecycle`/`NvWalkedMatchBranch` + `PendingNv*Info`; four new
+`ThunkSource` body channels (`bodyComponentThunks`/`bodyListThunks`/
+`bodyRecycledListThunks`/`bodySwitchThunks`, nv-parser.ts:136–139); single recursive
+`computeBodyThunks` (nv-parser.ts:3538) shared across all four body sites, distinct
+from `computeBindingThunks` (:3633) — no duplicated per-kind logic (collapse
+discipline held). Emitter concatenates the five channels in the exact push order
+hole → component → list → recycledList → switch (nv-emitter.ts:178–184) — the
+correctness-critical ordering invariant.
+
+**Two bugs found via the real-browser gate (not unit tests) and fixed in-branch:**
+- **Phantom hole-thunk (`7f00ae4`):** `bodyHoleIndices` is the union of real leaf
+  holes AND holes consumed by nested structural children's own prop/`.of`/`key`/`when`;
+  mapping over the union produced a spurious thunk that desynced positional pairing —
+  the same "thunk kind mismatch" one layer deeper. Fixed by threading a separate
+  leaf-only field (`bodyLeafHoleIndices`, nv-parser.ts:547/550) used solely for
+  `bodyThunks`; the union field is untouched elsewhere. Added `emitModule`-level
+  regression tests across the matrix (the unit suite only exercised
+  `parseNvFileForEmit`).
+- **Bare-anchor multi-root (`156a1ef`):** an each/recycle body whose only content is a
+  single nested structural child with no wrapping element collapsed to a bare anchor,
+  inserting the child's DOM as a *sibling* → >1 top-level node → list runtime's
+  one-root-per-item invariant thrown, silently dropping all but the first item. Fixed
+  with a `needsSyntheticRoot` guard (nv-parser.ts:1293) auto-wrapping such bodies,
+  scoped narrowly to `<each>`/`<recycle>` bodies (not switch branches, not slot
+  content); provably no-op for the common single-root case, regression-tested.
+
+**G1 nesting matrix, real-browser gated** (Playwright, Chromium+WebKit+Firefox; JSDOM
+barred): component-in-each, each-in-each, switch-in-each, each-in-switch-branch,
+component-in-switch-fallback, switch-in-each-in-switch (3-level, proves recursion
+terminates), each-in-recycle. Three-back-end parity (interpreter / `emitted-mount.ts`
+/ Mode-A, same fixture), reactivity-through-nesting, disposal-through-nesting all
+gated.
+
+**One nesting direction NOT closed — `<recycle>` nested inside `<each>` — spun to
+Follow-up A′.** This throws a loud parse-time error (`[nv] <recycle> cannot be nested
+inside an <each> body`, nv-parser.ts:1329). Stated rationale in-code is capability,
+not semantics: "the emitter cannot handle it" (:1327). The throw additionally
+**props up the fix's own positional-pairing invariant** — the `bodyRecycledListThunks`
+assembly at :3603 is only safe today because `pending.recycles` is guaranteed empty in
+an each-body by this guard (:3597 comment); lifting the guard without updating the
+binding-push logic in lockstep would desync. So this is **nv-specific emit-path debt
+with a latent invariant hazard**, not an intrinsic limitation.
+
+**Verified against the foil set — this limitation exists in no comparable engine:**
+- **Solid** (fine-grained, no-VDOM — nv's architectural foil): `<For>`/`<Index>`
+  nest freely in all directions; control-flow constructs are runtime components whose
+  JSX-returning callback *is* the body, composing recursively by construction. No
+  emit-reconstruction path exists to desync. No such restriction.
+- **Svelte 5** (compiler-driven, `.svelte` → JS — nv's compile-model foil): nested
+  `{#each}` (keyed and unkeyed) is first-class and explicitly tested
+  (`transition-js-nested-each-keyed-move`). Keyed vs unkeyed is a per-block choice,
+  freely nestable. No such restriction.
+
+Both the fine-grained foil and the compile-model foil support arbitrary control-flow
+nesting; nv shipping 3-of-4 directions is a visible gap against both. Closing it is
+tracked as Follow-up A′ (below).
+
+**Deviations from commission (all in-spirit, none touching `src/core/`):** two
+in-branch bug fixes (above); one fixture (each-in-recycle) added post-matrix to close
+a coverage gap; `docs/gates/nested-structural-emit.md` authored retroactively (an
+AGENTS.md process deviation — gate file is required *before* CC starts — corrected
+before landing, deviation noted in the gate file). Two rounds of post-"done"
+adversarial review (CC-run) surfaced: a pre-existing component-slot-content nesting
+gap (out of scope, restored to landing report + `implementation-state.md`); the
+ordering-invariant + leaf/union split being convention-enforced not type-enforced
+(flagged as design debt, not a defect); and the missing gate file (fixed).
+
+**Also logged by CC as out-of-scope, not fixed (pre-existing, not regressions):**
+component slot-content nesting has the same hole-only limitation (never fixed
+anywhere); self-closing custom-element tags drop trailing siblings (HTML-parser
+quirk); all-static `$render` templates skip component-element detection. All three in
+`docs/design/nested-structural-emit-landing-report.md`; #1 also in
+`docs/implementation-state.md`.
+
+**Contract impact:** none (renderer/emit-path only). The `ThunkSource` body-shape
+change is an internal emit type, not a public IR kind — **no Template-IR version bump**
+(Template-IR stays v0.4.5; the change doesn't alter the public IR surface documented
+there). reactive-core contract unchanged (v0.4.3).
+
+**Result:** Follow-up A closed for 3 of 4 nesting directions. recycle-in-each →
+Follow-up A′.
+
+### [2026-07-01] Follow-up A′ opened — `<recycle>`-in-`<each>` emit support (close the 4th nesting direction)
+
+**Opened by:** Follow-up A landing ([2026-07-01], `b0409cf`), which closed 3 of 4
+Mode-A nesting directions. Verified against Solid + Svelte 5 that all-directions
+nesting is the foil-set norm; the remaining nv restriction is emit-path debt, not
+intrinsic.
+
+**Scope:** make `<recycle>` nested inside an `<each>` body emit correctly on the
+Mode-A path, reaching full four-direction parity, and remove the double-duty guard at
+nv-parser.ts:1329/:3597 (currently both a capability gate and an invariant prop) —
+replacing invariant-by-guard with invariant-by-construction or type. Commission:
+`commission-recycle-in-each-emit.md`.
+
+**Status:** OPEN. Held behind nothing (Follow-up A is done). Gate-P-first: the
+implementer confirms whether the existing recursive `computeBodyThunks` machinery
+extends cleanly to `pending.recycles` in an each-body, or whether the positional-
+pairing invariant needs restructuring, and submits a plan before any `src/` touch.
