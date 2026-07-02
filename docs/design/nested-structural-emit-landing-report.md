@@ -83,6 +83,20 @@ validating the decision to require a real-browser gate for this plan.
    during Task 5 fixture verification; not exercised by this plan's fixtures
    (all of which have holes) and not fixed, as it is unrelated to the nested-
    structural-emit gap this plan targets.
+3. **Component slot content still has the pre-existing hole-only limitation for
+   nested structural children.** Unlike each/recycle/switch bodies — which this
+   plan now handles recursively via `computeBodyThunks` — a component's own slot
+   content (`buildNvSlotContentIR` called with `isEachBody=false` at
+   `nv-parser.ts:923`/`:945`) does not get the new recursive treatment; structural
+   bindings nested directly inside a component's slot still fall back to the old
+   hole-only behavior. This was correctly identified as out-of-scope on day one
+   (see `docs/design/design-nested-structural-emit.md`, "Adjacent gap noted,
+   explicitly OUT of scope") because the G1 nesting matrix in this commission only
+   covers the four container kinds (`<each>`, `<recycle>`, `<switch>` branch,
+   `<switch>` fallback) — component slot bodies are not one of them. It was never
+   fixed anywhere in this plan; it is not a regression introduced by this branch,
+   just a pre-existing gap that remains open. Candidate for a separate follow-up
+   task with its own G1-style nesting matrix scoped to slot content.
 
 ## Final verification (Task 7)
 
