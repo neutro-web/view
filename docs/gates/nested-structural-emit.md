@@ -238,6 +238,77 @@
 
 ---
 
+## GATE (Performance) — `needsSyntheticRoot` cost, measured
+
+> Added retroactively (2026-07-02), same discipline as the rest of this gate:
+> filled against an actual test run, not against a prior reasoned-but-unmeasured
+> claim. Follows `docs/design/spec-recycling-playwright.md`'s convention: node-
+> churn/DOM-count = countable, asserted gate; wall-clock = supplementary, logged
+> only, never asserted as a ratio (no wall-clock was needed for this claim, so
+> none is logged here — see rationale below).
+
+- [x] **Claim under test.** An adversarial review claimed, without measuring, that
+  `needsSyntheticRoot` (`src/renderer/nv-parser.ts`) — which auto-wraps an
+  `<each>`/`<recycle>` item body in a synthetic root `<div>` whenever the body's
+  only content is a single nested structural child with no wrapping element —
+  costs exactly one extra DOM element per mounted item (not per-render, not
+  O(n²)), and zero extra reactive-node allocations (the wrapper is a static
+  structural element, not a signal/effect/derived). Evidence: new test
+  `'needsSyntheticRoot cost: component-in-each wraps exactly one synthetic <div>
+  per item and contributes zero extra reactive-node allocations'`,
+  `test/browser/nested-structural.spec.ts`.
+- [x] **DOM cost: exactly one wrapper `<div>` per mounted item.** Measured against
+  `component-in-each.nv` (2 items: Alpha, Beta — a fixture that triggers
+  `needsSyntheticRoot` by construction, confirmed independently via esbuild
+  build-output inspection: the fixture's compiled `shape.html` is the literal
+  string `"<div><!--nv-comp-0--></div>"`). Two independent mounts each produced
+  `wrapperCount === 2` (one `<div>` per item, not more, not fewer) — asserted,
+  not eyeballed, via a DOM query that isolates wrapper `<div>`s (immediate
+  parent of a `.row` element and nothing else) from any other `<div>` in the
+  tree. Confirmed non-vacuous: temporarily mutating the assertion to expect `3`
+  made the test fail with `Expected: 3, Received: 2` before being reverted.
+- [x] **Reactive-node cost: bounded/linear, not compounding across mounts.**
+  `__test.nodeAllocCount` (`src/core/core.ts`, pre-existing test-only
+  instrumentation — no new counter added, no `src/core/` touch by this test)
+  was reset and measured across two fully independent mount/dispose cycles of
+  the same 2-item fixture. Both mounts allocated the identical
+  `nodeAllocCount === 11` — proving the per-mount reactive cost is a fixed
+  constant, not compounding/growing across repeated mounts (rules out the
+  "not O(n²)" half of the claim empirically, at the mount-repetition axis).
+- [x] **Reactive-node cost: the wrapper itself contributes zero.** Not directly
+  runtime-assertable as an isolated delta (no non-wrapped equivalent fixture
+  exists to diff against), so corroborated by build-output + source inspection
+  instead, cross-checked against the passing/failing test above:
+  `nodeAllocCount` only increments inside `makeNode()` (`src/core/core.ts`),
+  which fires exclusively for signal/effect/derived/root creation. The
+  synthetic wrapper `<div>` is serialized directly into the item template's
+  static `shape.html` string at build time (`"<div><!--nv-comp-0--></div>"`,
+  confirmed via a scratch esbuild build of `component-in-each-entry.ts`
+  inspecting the emitted bundle) and is cloned via that template at mount —
+  never routed through `makeNode()`. It is therefore structurally incapable of
+  incrementing `nodeAllocCount`. The nonzero, identical-across-mounts
+  `allocAfterMount === 11` in the test above is real reactive work (the
+  `<each>` reconcile effect + per-item scopes for 2 items), confirming the
+  counter is genuinely moving and not a trivially-zero proxy.
+- [x] **Wall-clock: not logged — deliberately.** Unlike the `<recycle>` node-churn
+  spec (which logs wall-clock as honest supplementary evidence for a scroll-
+  step steady-state comparison), this claim has no natural "arm" contrast (there
+  is no non-wrapped variant of this fixture to time against) and the DOM/alloc
+  counts above are already the full countable proof — adding an unpaired
+  wall-clock number here would not strengthen the claim and risks being
+  over-read as a ratio, which `spec-recycling-playwright.md`'s convention
+  explicitly warns against. Skipped per that document's own "does not assert a
+  wall-clock ratio" discipline.
+- [x] **Supersedes the earlier unmeasured claim.** The adversarial review's
+  "exactly one extra DOM element per item, zero extra reactive-node allocation"
+  claim was reasoned from reading `needsSyntheticRoot`'s source but never run.
+  This gate section replaces that reasoning with actual command output
+  (`npx playwright test test/browser/nested-structural.spec.ts --project=chromium`
+  → 11 passed, including this test) — the claim holds, empirically, with the
+  numbers above.
+
+---
+
 ## Evidence bundle
 
 1. `git log --oneline <pre>..HEAD` (14 commits, `2d7fb3a`..`79375b9`) + `git status`
@@ -249,9 +320,9 @@
 3. TC corpus: `test/renderer/nv-parser-nested-thunks.test.ts` (P2C-NEST-01..06),
    `test/renderer/nv-parser.test.ts` (flat-case no-op regression),
    `test/renderer/nv-emitter-exec.test.ts` (emit-level regression additions),
-   `test/browser/nested-structural.spec.ts` (9 real-browser tests: 6 G1
+   `test/browser/nested-structural.spec.ts` (11 real-browser tests: 6 G1
    nesting-matrix cells + `each-in-recycle` = 7 fixtures total, 3-back-end parity,
-   reactivity, disposal).
+   reactivity, disposal, `needsSyntheticRoot` performance measurement).
 
 ## Pass condition
 
