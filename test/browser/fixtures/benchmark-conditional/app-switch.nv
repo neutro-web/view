@@ -1,0 +1,20 @@
+const AppSwitch = $component(() => {
+  $script(() => {
+    const mode = signal(0)
+    function cycle() {
+      mode.set((mode() + 1) % 5)
+    }
+  })
+  $render(() => html`
+    <div>
+      <button id="cycle" @click="${() => cycle()}">Cycle</button>
+      <switch>
+        <match when="${mode() === 0}"><div class="branch-0">Branch 0</div></match>
+        <match when="${mode() === 1}"><div class="branch-1">Branch 1</div></match>
+        <match when="${mode() === 2}"><div class="branch-2">Branch 2</div></match>
+        <match when="${mode() === 3}"><div class="branch-3">Branch 3</div></match>
+        <match><div class="branch-4">Branch 4</div></match>
+      </switch>
+    </div>
+  `)
+})

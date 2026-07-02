@@ -1,0 +1,16 @@
+const AppConditional = $component(() => {
+  $script(() => {
+    const flag = signal(true)
+    function toggle() {
+      flag.set(!flag())
+    }
+  })
+  $render(() => html`
+    <div>
+      <button id="toggle" @click="${() => toggle()}">Toggle</button>
+      ${flag()
+        ? html`<div class="branch-a"><p>Branch A</p></div>`
+        : html`<div class="branch-b"><p>Branch B</p></div>`}
+    </div>
+  `)
+})
