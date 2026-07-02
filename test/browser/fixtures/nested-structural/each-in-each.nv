@@ -1,9 +1,9 @@
-const Grid = $component(() => {
+// Task 6 deviation (see task-6-report.md): `rows` is threaded in as an external
+// prop (EX-EACH-02 pattern) instead of an internal $script signal, so the
+// reactivity-through-nesting test can drive it from outside the component.
+const Grid = $component((props) => {
   $script(() => {
-    const rows = signal([
-      { id: 1, cells: [{ id: 10, v: 'a' }, { id: 11, v: 'b' }] },
-      { id: 2, cells: [{ id: 20, v: 'c' }] },
-    ])
+    const { rows } = props
   })
   $render(() => html`<div class="grid"><each .of="${rows}" key="${(r) => r.id}" let={row}>
     <div class="row"><each .of="${row.cells}" key="${(c) => c.id}" let={cell}><span class="cell">${cell.v}</span></each></div>
