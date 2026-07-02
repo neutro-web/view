@@ -1528,3 +1528,35 @@ describe('<switch> nested inside <each> body', () => {
     expect(switchBinding.fallback).not.toBeNull()
   })
 })
+
+// ── needsSyntheticRoot flat-case no-op regression ────────────────────────────
+// Guards the fix in buildNvSlotContentIR (nv-parser.ts, see `needsSyntheticRoot`):
+// a normal <each> body that already resolves to exactly one top-level DOM
+// Element (e.g. a plain <li>...</li>) must NOT be wrapped in a synthetic root.
+// This is a provable no-op: it should pass unchanged before and after the fix.
+describe('needsSyntheticRoot: flat single-element <each> body is a no-op', () => {
+  it('a plain <li>${item.label}</li> body produces shape.html with no synthetic wrapper and no [0,...] path prefix', () => {
+    const source =
+      'const List = $component(() => {\n' +
+      '  $script(() => { const items = signal([{ id: 1, label: "A" }]) })\n' +
+      '  $render(() => html`<ul><each .of="${items}" key="${(i) => i.id}" let={item}><li>${item.label}</li></each></ul>`)\n' +
+      '})\n'
+    const results = parseNvFile(source, 'flat-list.nv', document)
+    const ir = results[0]!.ir
+    const listBinding = ir.bindings.find((b) => b.kind === 'list') as ListBinding
+    expect(listBinding).toBeDefined()
+    const stubVs = signal<unknown>(null)
+    const stubIs = signal<number>(0)
+    const itemIR = listBinding.itemTemplate(stubVs, stubIs)
+    // The root of shape.html is the <li> itself — no synthetic wrapping <div>.
+    expect(itemIR.shape.html.trim().startsWith('<li')).toBe(true)
+    expect(itemIR.shape.html).not.toContain('<div')
+    // The single hole binding's path is [0, 0]: index 0 is the <li>'s own
+    // text-node hole child, relative to the <li> root itself. If the
+    // needsSyntheticRoot fix incorrectly fired here, an extra synthetic
+    // wrapper level would push this to [0, 0, 0] (or deeper) and shape.html
+    // would contain a wrapping <div>.
+    expect(itemIR.shape.bindingPaths.length).toBe(1)
+    expect([...itemIR.shape.bindingPaths[0]!]).toStrictEqual([0, 0])
+  })
+})
