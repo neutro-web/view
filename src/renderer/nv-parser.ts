@@ -680,7 +680,6 @@ function walkNvNodeList(
           signals,
           letNames,
           undefined,
-          true, // isEachBody — <recycle> inside <each> body is unsupported
           true, // requireSingleRoot — list-item runtime tracks exactly one DOM node per item
         )
         for (const idx of bodyHoleIndices) consumed.add(idx)
@@ -794,7 +793,6 @@ function walkNvNodeList(
           signals,
           letNames,
           undefined,
-          false, // isEachBody — <recycle> body itself may nest a <switch>
           true, // requireSingleRoot — recycled-list-item runtime tracks exactly one DOM node per item
         )
         // Add body hole indices to consumed so processHtmlTemplate skips the sentinel check
@@ -1213,7 +1211,6 @@ function buildNvSlotContentIR(
   signals: ReadonlySet<string>,
   letNames: string[] = [],
   diagnostics: NvDiagnostic[] = [],
-  isEachBody = false,
   requireSingleRoot = false,
 ): {
   ir: TemplateIR
@@ -1323,16 +1320,10 @@ function buildNvSlotContentIR(
   for (const wl of slotLists) {
     pushListBinding(wl, allPaths, bindings, diagnostics)
   }
-  // <recycle> nested inside an <each> item body is a hard error —
-  // the emitter cannot handle it. Component slot bodies are supported via pushRecycledListBinding.
-  if (isEachBody && slotRecycledLists.length > 0) {
-    throw new Error('[nv] <recycle> cannot be nested inside an <each> body')
-  }
-  // Wire <recycle>-in-slot for component slot bodies (D-SS-2: same structural path as lists).
-  if (!isEachBody) {
-    for (const wl of slotRecycledLists) {
-      pushRecycledListBinding(wl, allPaths, bindings)
-    }
+  // Wire <recycle>-in-slot (D-SS-2: same structural path as lists), for both
+  // component slot bodies and <each> item bodies — same call as the top-level path.
+  for (const wl of slotRecycledLists) {
+    pushRecycledListBinding(wl, allPaths, bindings)
   }
   // Wire <switch>-in-slot for component slot bodies (D-SS-2: same structural path as lists).
   for (const ws of slotSwitches) {
@@ -3594,12 +3585,11 @@ function computeBodyThunks(
     diagnostics,
     propsParamName,
   )
-  // This unconditional call is safe TODAY only because <recycle> nested inside an
-  // <each> body is a loud parse-time error (see P2C-NEST-03), so pending.recycles
-  // is always empty when computeBodyThunks is invoked for an each-body. If that
-  // guard is ever lifted without also updating the corresponding binding-push
-  // logic above, this thunk array and the bindings array it must positionally
-  // pair with would desync.
+  // pending.recycles is populated symmetrically with the other three structural
+  // channels regardless of each-body/non-each-body (buildNvSlotContentIR's
+  // pushRecycledListBinding call is unconditional, matching pushListBinding and
+  // pushSwitchBinding) — this call's positional pairing with the bindings array
+  // holds by construction, not by a parse-time guard.
   const bodyRecycledListThunks = computeRecycledListThunks(
     pending.recycles,
     holeExprs,

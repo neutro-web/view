@@ -46,8 +46,8 @@ const Grid = $component(() => {
   })
 })
 
-describe('P2C-NEST-03  <recycle> nested inside <each> body remains a loud parse-time error', () => {
-  test('throws "[nv] <recycle> cannot be nested inside an <each> body"', () => {
+describe('P2C-NEST-03  recycle-in-each thunk assembly (Mode-A emit path)', () => {
+  test('nested <recycle> inside an <each> body produces a nested recycled-list ThunkSource, not a throw', () => {
     const source = `
 const Grid = $component(() => {
   $script(() => {
@@ -57,9 +57,47 @@ const Grid = $component(() => {
     <div><recycle .of="\${row.cells}" let={cell, i}><span>\${cell.v}</span></recycle></div>
   </each></div>\`)
 })`
-    expect(() => parseNvFileForEmit(source, 'grid.nv', document)).toThrow(
-      '[nv] <recycle> cannot be nested inside an <each> body',
-    )
+    const results = parseNvFileForEmit(source, 'grid.nv', document)
+    const outerList = results[0]!.emit!.bindingThunks.find((t) => t.kind === 'list')
+    expect(outerList).toBeDefined()
+    expect(outerList!.kind === 'list' && outerList!.bodyRecycledListThunks.length).toBe(1)
+    const innerRecycle =
+      outerList!.kind === 'list' ? outerList!.bodyRecycledListThunks[0] : undefined
+    expect(innerRecycle?.kind).toBe('recycled-list')
+  })
+})
+
+describe('P2C-NEST-03b  recycle-in-each binding-push/thunk-assembly positional pairing (invariant-by-construction)', () => {
+  test("the each-body's bodyIR has exactly one recycled-list binding, matching bodyRecycledListThunks.length", () => {
+    const source = `
+const Grid = $component(() => {
+  $script(() => {
+    const rows = signal([{ id: 1, cells: [{ id: 10, v: 'a' }] }])
+  })
+  $render(() => html\`<div><each .of="\${rows}" key="\${(r) => r.id}" let={row}>
+    <div><recycle .of="\${row.cells}" let={cell, i}><span>\${cell.v}</span></recycle></div>
+  </each></div>\`)
+})`
+    // Structural path (parseNvFile) exposes the each-body's real bodyIR via
+    // ListBinding.itemTemplate — this is where pushRecycledListBinding actually
+    // pushes the nested RecycledListBinding into bindings.
+    const structural = parseNvFile(source, 'grid.nv', document)
+    const outerListBinding = structural[0]!.ir.bindings.find((b) => b.kind === 'list') as
+      | ListBinding
+      | undefined
+    expect(outerListBinding).toBeDefined()
+    const bodyIR = outerListBinding!.itemTemplate(signal(undefined) as unknown as never, undefined)
+    const recycledBindingCount = bodyIR.bindings.filter((b) => b.kind === 'recycled-list').length
+    expect(recycledBindingCount).toBe(1)
+
+    // Emit path: bodyRecycledListThunks is assembled from pending.recycles by
+    // computeBodyThunks and must positionally pair with those same bindings.
+    const emitResults = parseNvFileForEmit(source, 'grid.nv', document)
+    const outerListThunk = emitResults[0]!.emit!.bindingThunks.find((t) => t.kind === 'list')
+    expect(outerListThunk).toBeDefined()
+    const thunkCount =
+      outerListThunk!.kind === 'list' ? outerListThunk!.bodyRecycledListThunks.length : -1
+    expect(thunkCount).toBe(recycledBindingCount)
   })
 })
 

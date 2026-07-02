@@ -38,6 +38,7 @@ const FIXTURES = [
   { name: 'component-in-switch-fallback', globalName: '__nvComponentInSwitchFallback' },
   { name: 'switch-in-each-in-switch', globalName: '__nvSwitchInEachInSwitch' },
   { name: 'each-in-recycle', globalName: '__nvEachInRecycle' },
+  { name: 'recycle-in-each', globalName: '__nvRecycleInEach' },
 ] as const
 
 // Reuse the "main" bundle already built by real-browser.spec.ts for the
@@ -193,6 +194,44 @@ test('G1 each-in-recycle: Mode-A emit mounts nested rows/cells inside a recycled
         }
       }
     ).__nvEachInRecycle
+    const rows = app.signal([
+      {
+        id: 1,
+        cells: [
+          { id: 10, v: 'a' },
+          { id: 11, v: 'b' },
+        ],
+      },
+      { id: 2, cells: [{ id: 20, v: 'c' }] },
+    ])
+    const parent = document.createElement('div')
+    document.body.appendChild(parent)
+    app.Grid.mount(parent, document, { rows: () => rows() })
+    app.flushSync()
+    return Array.from(parent.querySelectorAll('.row')).map((row) =>
+      Array.from(row.querySelectorAll('.cell')).map((c) => c.textContent),
+    )
+  })
+  expect(cellsByRow).toEqual([['a', 'b'], ['c']])
+})
+
+test('G1 recycle-in-each: Mode-A emit mounts nested cells inside a recycled list inside each row in real browser (Follow-up A′ — the 4th and final nesting direction)', async ({
+  page,
+}) => {
+  await page.goto('about:blank')
+  await page.addScriptTag({ path: requireBundle('recycle-in-each') })
+  const cellsByRow = await page.evaluate(() => {
+    const app = (
+      window as unknown as {
+        __nvRecycleInEach: {
+          Grid: {
+            mount: (p: Element, d: Document, props?: Record<string, () => unknown>) => void
+          }
+          flushSync: () => void
+          signal: <T>(v: T) => { (): T; set: (v: T) => void }
+        }
+      }
+    ).__nvRecycleInEach
     const rows = app.signal([
       {
         id: 1,
@@ -407,6 +446,124 @@ test('three-back-end parity: interpreter, emitted-mount, and Mode-A produce equi
         }
       }
     ).__nvEachInEach
+    const rows = app.signal([
+      {
+        id: 1,
+        cells: [
+          { id: 10, v: 'a' },
+          { id: 11, v: 'b' },
+        ],
+      },
+      { id: 2, cells: [{ id: 20, v: 'c' }] },
+    ])
+    const parent = document.createElement('div')
+    document.body.appendChild(parent)
+    app.Grid.mount(parent, document, { rows: () => rows() })
+    app.flushSync()
+    return Array.from(parent.querySelectorAll('.row')).map((row) =>
+      Array.from(row.querySelectorAll('.cell')).map((c) => c.textContent),
+    )
+  })
+
+  expect(modeACells).toEqual([['a', 'b'], ['c']])
+})
+
+// ── Follow-up A′: recycle-in-each — two-back-end parity ────────────────────────
+//
+// DEVIATION from the commission's literal "three-back-end parity" wording, per
+// docs/gates/recycle-in-each-emit.md's header-note correction: `emitted-mount.ts`'s
+// `recycled-list` case is a pre-existing, unconditional stub
+// (`throw new Error('[nv/emitted-mount] RecycledListBinding not yet implemented in
+// compiler back-end')`, src/compiler/emitted-mount.ts:808-812) — not each-body-
+// specific, predates A′, covers top-level <recycle> too. `each-in-recycle` (Follow-up
+// A) already established the precedent: Mode-A-only, no interpreter/emitted-mount
+// three-way test. This test follows that precedent: interpreter + Mode-A only.
+test('two-back-end parity: interpreter and Mode-A produce equivalent DOM for recycle-in-each', async ({
+  page,
+}) => {
+  await page.goto('about:blank')
+  await page.addScriptTag({ path: MAIN_BUNDLE }) // window.__nv (interpreter)
+
+  const interpreterCells = await page.evaluate(() => {
+    const { mount, flushSync } = window.__nv
+
+    // Hand-built TemplateIR mirroring recycle-in-each.nv's authored structure:
+    // rows = [{id:1, cells:[{id:10,v:'a'},{id:11,v:'b'}]}, {id:2, cells:[{id:20,v:'c'}]}]
+    const makeIR = () => ({
+      id: 'grid-nested-recycle',
+      shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0, 0]] },
+      bindings: [
+        {
+          kind: 'list' as const,
+          pathIndex: 0,
+          items: () => [
+            {
+              id: 1,
+              cells: [
+                { id: 10, v: 'a' },
+                { id: 11, v: 'b' },
+              ],
+            },
+            { id: 2, cells: [{ id: 20, v: 'c' }] },
+          ],
+          key: (row: unknown) => (row as { id: number }).id,
+          itemTemplate: (rowVs: WritableSignal<unknown>) =>
+            ({
+              id: 'row',
+              shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0, 0]] },
+              bindings: [
+                {
+                  kind: 'recycled-list' as const,
+                  pathIndex: 0,
+                  items: () => (rowVs() as { cells: unknown[] }).cells,
+                  itemTemplate: (cellVs: WritableSignal<unknown>) =>
+                    ({
+                      id: 'cell',
+                      shape: { html: '<span><!--nv-0--></span>', bindingPaths: [[0, 0]] },
+                      bindings: [
+                        {
+                          kind: 'text' as const,
+                          pathIndex: 0,
+                          expr: () => (cellVs() as { v: string }).v,
+                        },
+                      ],
+                    }) as TemplateIR,
+                },
+              ],
+            }) as TemplateIR,
+        },
+      ],
+    })
+
+    const pI = document.createElement('div')
+    document.body.appendChild(pI)
+    mount(makeIR(), pI, document)
+    flushSync()
+
+    const cellsFrom = (root: Element) =>
+      Array.from(root.querySelectorAll('div'))
+        .filter((d) => Array.from(d.children).some((c) => c.tagName === 'SPAN'))
+        .map((row) => Array.from(row.querySelectorAll('span')).map((s) => s.textContent))
+
+    return cellsFrom(pI)
+  })
+
+  expect(interpreterCells).toEqual([['a', 'b'], ['c']])
+
+  await page.goto('about:blank') // fresh context — no global collision with window.__nv
+  await page.addScriptTag({ path: requireBundle('recycle-in-each') })
+  const modeACells = await page.evaluate(() => {
+    const app = (
+      window as unknown as {
+        __nvRecycleInEach: {
+          Grid: {
+            mount: (p: Element, d: Document, props?: Record<string, () => unknown>) => void
+          }
+          flushSync: () => void
+          signal: <T>(v: T) => { (): T; set: (v: T) => void }
+        }
+      }
+    ).__nvRecycleInEach
     const rows = app.signal([
       {
         id: 1,
@@ -755,4 +912,334 @@ test('needsSyntheticRoot cost: component-in-each wraps exactly one synthetic <di
   // <each> reconcile effect, per-item scopes), i.e. this isn't a proxy counter
   // that's trivially zero for everything.
   expect(result.allocAfterMount1).toBeGreaterThan(0)
+})
+
+// ── Follow-up A′: recycle-in-each — reactivity, per-item recycling, keyed
+//    identity, and disposal through nesting ─────────────────────────────────
+
+test('recycle-in-each reactivity-through-nesting: external rows signal updates nested .cell text from within an each-item scope; node identity preserved by position', async ({
+  page,
+}) => {
+  await page.goto('about:blank')
+  await page.addScriptTag({ path: requireBundle('recycle-in-each') })
+
+  const result = await page.evaluate(() => {
+    const app = (
+      window as unknown as {
+        __nvRecycleInEach: {
+          Grid: {
+            mount: (p: Element, d: Document, props?: Record<string, () => unknown>) => void
+          }
+          flushSync: () => void
+          signal: <T>(v: T) => { (): T; set: (v: T) => void }
+        }
+      }
+    ).__nvRecycleInEach
+
+    type Cell = { id: number; v: string }
+    type Row = { id: number; cells: Cell[] }
+
+    const extRows = app.signal<Row[]>([
+      {
+        id: 1,
+        cells: [
+          { id: 10, v: 'a' },
+          { id: 11, v: 'b' },
+        ],
+      },
+      { id: 2, cells: [{ id: 20, v: 'c' }] },
+    ])
+
+    const parent = document.createElement('div')
+    document.body.appendChild(parent)
+    app.Grid.mount(parent, document, { rows: () => extRows() })
+    app.flushSync()
+
+    const cellsBefore = Array.from(parent.querySelectorAll('.cell'))
+    const textBefore = cellsBefore.map((c) => c.textContent)
+
+    // Same array length/positions — a pure value update, driving the inner
+    // <recycle>'s position-identity rebind path (Op-3), not grow/shrink.
+    extRows.set([
+      {
+        id: 1,
+        cells: [
+          { id: 10, v: 'a-updated' },
+          { id: 11, v: 'b' },
+        ],
+      },
+      { id: 2, cells: [{ id: 20, v: 'c' }] },
+    ])
+    app.flushSync()
+
+    const cellsAfter = Array.from(parent.querySelectorAll('.cell'))
+    const textAfter = cellsAfter.map((c) => c.textContent)
+
+    return {
+      textBefore,
+      textAfter,
+      sameNodeIdentity: cellsAfter[0] === cellsBefore[0] && cellsAfter[1] === cellsBefore[1],
+    }
+  })
+
+  expect(result.textBefore).toEqual(['a', 'b', 'c'])
+  expect(result.textAfter).toEqual(['a-updated', 'b', 'c'])
+  expect(
+    result.sameNodeIdentity,
+    'A′: nested <recycle> DOM nodes must be reused (rebound in place) across a reactive ' +
+      'value update driven from within the outer each-item scope',
+  ).toBe(true)
+})
+
+test("recycle-in-each per-item recycling behavior: inner <recycle> reuses the position-0 DOM node across a shrink-then-grow of one row's cells", async ({
+  page,
+}) => {
+  await page.goto('about:blank')
+  await page.addScriptTag({ path: requireBundle('recycle-in-each') })
+
+  const result = await page.evaluate(() => {
+    const app = (
+      window as unknown as {
+        __nvRecycleInEach: {
+          Grid: {
+            mount: (p: Element, d: Document, props?: Record<string, () => unknown>) => void
+          }
+          flushSync: () => void
+          signal: <T>(v: T) => { (): T; set: (v: T) => void }
+        }
+      }
+    ).__nvRecycleInEach
+
+    type Cell = { id: number; v: string }
+    type Row = { id: number; cells: Cell[] }
+
+    const extRows = app.signal<Row[]>([
+      {
+        id: 1,
+        cells: [
+          { id: 10, v: 'a' },
+          { id: 11, v: 'b' },
+        ],
+      },
+      { id: 2, cells: [{ id: 20, v: 'c' }] },
+    ])
+
+    const parent = document.createElement('div')
+    document.body.appendChild(parent)
+    app.Grid.mount(parent, document, { rows: () => extRows() })
+    app.flushSync()
+
+    const firstRow = () => parent.querySelectorAll('.row')[0] as Element
+    const secondRow = () => parent.querySelectorAll('.row')[1] as Element
+    const cellAt0 = () => firstRow().querySelectorAll('.cell')[0]
+
+    const node0Before = cellAt0()
+    // Sibling (row 2, untouched by the mutations below) — proves no cross-scope
+    // leakage: row 1's pool churn must not disturb row 2's item signal/pool at all.
+    const row2CellBefore = secondRow().querySelectorAll('.cell')[0]
+    const row2TextBefore = row2CellBefore?.textContent
+
+    // Shrink row 1's cells from 2 to 1 (recycle pool shrink: disposes slot 1, keeps slot 0).
+    extRows.set([
+      { id: 1, cells: [{ id: 10, v: 'a2' }] },
+      { id: 2, cells: [{ id: 20, v: 'c' }] },
+    ])
+    app.flushSync()
+    const node0AfterShrink = cellAt0()
+    const cellCountAfterShrink = firstRow().querySelectorAll('.cell').length
+
+    // Grow row 1's cells back to 2 (recycle pool grow: slot 0 rebound in place, slot 1 recreated).
+    extRows.set([
+      {
+        id: 1,
+        cells: [
+          { id: 10, v: 'a3' },
+          { id: 11, v: 'b2' },
+        ],
+      },
+      { id: 2, cells: [{ id: 20, v: 'c' }] },
+    ])
+    app.flushSync()
+    const node0AfterGrow = cellAt0()
+    const textsAfterGrow = Array.from(firstRow().querySelectorAll('.cell')).map(
+      (c) => c.textContent,
+    )
+    const row2CellAfter = secondRow().querySelectorAll('.cell')[0]
+
+    return {
+      cellCountAfterShrink,
+      textsAfterGrow,
+      position0StableAcrossShrink: node0AfterShrink === node0Before,
+      position0StableAcrossGrow: node0AfterGrow === node0Before,
+      row2NodeIdentityStable: row2CellAfter === row2CellBefore,
+      row2TextBefore,
+      row2TextAfter: row2CellAfter?.textContent,
+    }
+  })
+
+  expect(result.cellCountAfterShrink).toBe(1)
+  expect(result.textsAfterGrow).toEqual(['a3', 'b2'])
+  expect(
+    result.position0StableAcrossShrink,
+    "A′: shrinking the inner <recycle>'s pool must not dispose/recreate the surviving position-0 node",
+  ).toBe(true)
+  expect(
+    result.position0StableAcrossGrow,
+    "A′: growing the inner <recycle>'s pool back must rebind (not recreate) the already-pooled position-0 node",
+  ).toBe(true)
+  // No cross-scope leakage: row 2's outer item signal and inner recycle pool must
+  // be completely unaffected by row 1's pool shrink/grow churn.
+  expect(result.row2TextBefore).toBe('c')
+  expect(result.row2TextAfter).toBe('c')
+  expect(
+    result.row2NodeIdentityStable,
+    "A′: no cross-scope leakage — row 2's nested <recycle> DOM node must be untouched by row 1's pool churn",
+  ).toBe(true)
+})
+
+test('recycle-in-each outer keyed identity: outer <each> row node identity is unaffected by the nested <recycle>, stable across a reorder', async ({
+  page,
+}) => {
+  await page.goto('about:blank')
+  await page.addScriptTag({ path: requireBundle('recycle-in-each') })
+
+  const result = await page.evaluate(() => {
+    const app = (
+      window as unknown as {
+        __nvRecycleInEach: {
+          Grid: {
+            mount: (p: Element, d: Document, props?: Record<string, () => unknown>) => void
+          }
+          flushSync: () => void
+          signal: <T>(v: T) => { (): T; set: (v: T) => void }
+        }
+      }
+    ).__nvRecycleInEach
+
+    type Cell = { id: number; v: string }
+    type Row = { id: number; cells: Cell[] }
+
+    const extRows = app.signal<Row[]>([
+      { id: 1, cells: [{ id: 10, v: 'a' }] },
+      { id: 2, cells: [{ id: 20, v: 'c' }] },
+    ])
+
+    const parent = document.createElement('div')
+    document.body.appendChild(parent)
+    app.Grid.mount(parent, document, { rows: () => extRows() })
+    app.flushSync()
+
+    const rowsBefore = Array.from(parent.querySelectorAll('.row'))
+    const row1Before = rowsBefore[0]
+    const row2Before = rowsBefore[1]
+
+    // Reorder by key (same two rows, swapped) — same underlying row data/id.
+    extRows.set([
+      { id: 2, cells: [{ id: 20, v: 'c' }] },
+      { id: 1, cells: [{ id: 10, v: 'a' }] },
+    ])
+    app.flushSync()
+
+    const rowsAfter = Array.from(parent.querySelectorAll('.row'))
+
+    return {
+      textsAfter: rowsAfter.map((r) => r.textContent),
+      row1Identity: rowsAfter[1] === row1Before,
+      row2Identity: rowsAfter[0] === row2Before,
+    }
+  })
+
+  expect(result.textsAfter).toEqual(['c', 'a'])
+  expect(
+    result.row1Identity && result.row2Identity,
+    'A′: outer <each> keyed row identity must survive a reorder unaffected by the nested <recycle>',
+  ).toBe(true)
+})
+
+// Disposal deficit derivation (same methodology as each-in-each above): signal()
+// is intentionally owner-less (src/core/core.ts) and never freed via the owner-
+// tree cascade. Outer <each let={row}> has no index binding (itemReadsIndex
+// false) → 1 unowned valueSig per row (2 rows = 2). Inner <recycle let={cell, i}>
+// NEVER elides its indexSig (wireRecycledList mirrors wireList's Op-1 growth path
+// exactly but always allocates both valueSig and indexSig per pool slot) → 2
+// unowned signals per pooled cell (3 cells across both rows = 6). Total expected
+// deficit: 2 + 6 = 8.
+const RECYCLE_IN_EACH_EXPECTED_UNOWNED_SIGNALS = 8
+
+test("recycle-in-each disposal-through-nesting: tearing down an outer each-item disposes the nested recycle's pooled rows (owner-tree assertion, not DOM-count)", async ({
+  page,
+}) => {
+  await page.goto('about:blank')
+  await page.addScriptTag({ path: requireBundle('recycle-in-each') })
+
+  const result = await page.evaluate(() => {
+    const app = (
+      window as unknown as {
+        __nvRecycleInEach: {
+          Grid: {
+            mount: (p: Element, d: Document, props?: Record<string, () => unknown>) => () => void
+          }
+          flushSync: () => void
+          signal: <T>(v: T) => { (): T; set: (v: T) => void }
+          __test: {
+            nodeAllocCount: number
+            nodeFreeCount: number
+            resetNodeCounts: () => void
+          }
+        }
+      }
+    ).__nvRecycleInEach
+
+    type Cell = { id: number; v: string }
+    type Row = { id: number; cells: Cell[] }
+
+    const extRows = app.signal<Row[]>([
+      {
+        id: 1,
+        cells: [
+          { id: 10, v: 'a' },
+          { id: 11, v: 'b' },
+        ],
+      },
+      { id: 2, cells: [{ id: 20, v: 'c' }] },
+    ])
+
+    app.__test.resetNodeCounts()
+
+    const parent = document.createElement('div')
+    document.body.appendChild(parent)
+    const dispose = app.Grid.mount(parent, document, { rows: () => extRows() })
+    app.flushSync()
+
+    const allocAfterMount = app.__test.nodeAllocCount
+    const freeAfterMount = app.__test.nodeFreeCount
+
+    dispose()
+    app.flushSync()
+
+    const allocAfterDispose = app.__test.nodeAllocCount
+    const freeAfterDispose = app.__test.nodeFreeCount
+    const orphanedPooledDom = parent.querySelectorAll('.cell, .row').length
+
+    return {
+      allocAfterMount,
+      freeAfterMount,
+      allocAfterDispose,
+      freeAfterDispose,
+      orphanedPooledDom,
+    }
+  })
+
+  expect(result.allocAfterMount).toBeGreaterThan(0)
+  expect(result.freeAfterMount).toBe(0)
+  expect(result.allocAfterDispose).toBe(result.allocAfterMount)
+  expect(result.orphanedPooledDom, 'A′: dispose() must remove every pooled row/cell DOM node').toBe(
+    0,
+  )
+  expect(
+    result.allocAfterDispose - result.freeAfterDispose,
+    'A′: dispose() must free every EFFECT/DERIVED/root node allocated by the nested ' +
+      'recycle-in-each mount, leaving only the (by-design, owner-less) per-item/per-pool-slot ' +
+      'value+index signals unfreed — see the derivation comment above this test',
+  ).toBe(RECYCLE_IN_EACH_EXPECTED_UNOWNED_SIGNALS)
 })

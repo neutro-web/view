@@ -1,0 +1,14 @@
+// Follow-up A′: a <recycle> whose body is nested inside an <each> item body —
+// the 4th and final Mode-A nesting direction (inverted from each-in-recycle.nv,
+// which nests <each> inside <recycle>). Outer container is <each> (key-identity
+// diffing), inner container is <recycle> (position-identity pooling). <recycle>
+// requires let={item, i} with exactly two bound names (unlike <each>'s
+// single/optional-second binding) — see test/browser/fixtures/recycling-identity/app.nv.
+const Grid = $component((props) => {
+  $script(() => {
+    const { rows } = props
+  })
+  $render(() => html`<div class="grid"><each .of="${rows}" key="${(r) => r.id}" let={row}>
+    <div class="row"><recycle .of="${row.cells}" let={cell, i}><span class="cell">${cell.v}</span></recycle></div>
+  </each></div>`)
+})
