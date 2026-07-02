@@ -18,7 +18,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(__dirname, '../..')
 const fixtureDir = join(__dirname, 'fixtures/recycling-churn')
 const distDir = join(__dirname, 'dist')
-const BUNDLE = join(distDir, 'nv-recycling-churn-bundle.js')
+// Distinct filename from recycling-node-churn.spec.ts's bundle — both specs build
+// from the same entry.ts in beforeAll and could run in different Playwright workers
+// concurrently; sharing an outfile would be a torn-write race even though the two
+// builds are currently byte-identical.
+const BUNDLE = join(distDir, 'nv-recycling-churn-wallclock-bundle.js')
 
 const WARMUP_STEPS = 5
 const MEASURED_STEPS = 40
