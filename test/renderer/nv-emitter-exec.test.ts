@@ -1776,3 +1776,37 @@ const SyncInput = $component(() => {
     expect(input.value).toBe('initial')
   })
 })
+
+// ── G1 repro: <each> with a component-only body (Bug 1, task-6-bug2 spec) ────
+
+describe('G1-repro  component-in-each: <each> body whose ONLY content is a component', () => {
+  const source = `
+const Row = $component((props) => {
+  $script(() => {
+    const { label } = props
+  })
+  $render(() => html\`<li class="row">\${label}</li>\`)
+})
+const List = $component(() => {
+  $script(() => {
+    const items = signal([{ id: 1, label: 'Alpha' }, { id: 2, label: 'Beta' }])
+  })
+  $render(() => html\`<ul><each .of="\${items}" key="\${(i) => i.id}" let={item}><Row label="\${item.label}" /></each></ul>\`)
+})`
+
+  test('G1-repro  mounts N <li class="row"> elements, not 1', async () => {
+    const outFile = await buildListBundle(source)
+    const mod = (await import(outFile)) as ListBundleModule
+    const doc = makeDoc()
+    const parent = makeParent(doc)
+    const dispose = mod.List.mount(parent, doc)
+    mod.flushSync()
+
+    const rows = parent.querySelectorAll('.row')
+    expect(rows.length).toBe(2)
+    expect(rows[0]?.textContent).toBe('Alpha')
+    expect(rows[1]?.textContent).toBe('Beta')
+
+    dispose()
+  })
+})

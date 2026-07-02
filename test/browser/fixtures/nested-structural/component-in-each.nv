@@ -1,6 +1,24 @@
+// Task 6 deviation (see task-6-report.md): direct `${props.label}` member access
+// (without destructuring) is not a supported props-accessor pattern — the parser's
+// buildPropsAccessorMap only rewrites destructured `const { x } = props` bindings
+// (nv-parser.ts:2004-2056), so `props.label` used directly in a template hole was
+// emitted verbatim (the accessor function itself, never called) instead of being
+// erased to `props.label()`. Destructuring matches every other fixture/test's
+// convention (e.g. EX-EACH-02) and is the supported way to read a prop's value.
 const Row = $component((props) => {
-  $render(() => html`<li class="row">${props.label}</li>`)
+  $script(() => {
+    const { label } = props
+  })
+  $render(() => html`<li class="row">${label}</li>`)
 })
+// Bug 1 fix (task-6-bug2-fix-report.md): a component-only <each> body (no
+// wrapping element) used to collapse to a bare anchor comment at emit time,
+// which the runtime's single-root list-item invariant couldn't satisfy once
+// the component's own rendered content was mounted as a sibling of that
+// anchor ("[nv] Multi-root list items are not supported..."). nv-parser.ts's
+// buildNvSlotContentIR now auto-wraps such bodies in a synthetic root element
+// (needsSyntheticRoot) — the fix removes the need for this fixture to hand-wrap
+// <Row/> in a <div>.
 const List = $component(() => {
   $script(() => {
     const items = signal([{ id: 1, label: 'Alpha' }, { id: 2, label: 'Beta' }])

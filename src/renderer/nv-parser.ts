@@ -681,6 +681,7 @@ function walkNvNodeList(
           letNames,
           undefined,
           true, // isEachBody — <recycle> inside <each> body is unsupported
+          true, // requireSingleRoot — list-item runtime tracks exactly one DOM node per item
         )
         for (const idx of bodyHoleIndices) consumed.add(idx)
 
@@ -784,6 +785,9 @@ function walkNvNodeList(
           `recycle:body:${recycledLists.length}`,
           signals,
           letNames,
+          undefined,
+          false, // isEachBody — <recycle> body itself may nest a <switch>
+          true, // requireSingleRoot — recycled-list-item runtime tracks exactly one DOM node per item
         )
         // Add body hole indices to consumed so processHtmlTemplate skips the sentinel check
         // for holes that appear exclusively inside the body (they have no outer sentinel).
@@ -1202,6 +1206,7 @@ function buildNvSlotContentIR(
   letNames: string[] = [],
   diagnostics: NvDiagnostic[] = [],
   isEachBody = false,
+  requireSingleRoot = false,
 ): {
   ir: TemplateIR
   holeIndices: number[]
@@ -1257,7 +1262,32 @@ function buildNvSlotContentIR(
   const preLiftBindings: Binding[] = []
   liftStaticClassBindings(fragWrapper, allPaths, preLiftBindings)
 
-  const rawHtml = fragWrapper.innerHTML.replace(
+  // Single-root guard: list items (and other single-root-required contexts, e.g.
+  // recycle-item bodies) require the mounted template to produce EXACTLY one
+  // top-level DOM node. Normally that's the slot content's own single wrapping
+  // element and we strip fragWrapper via innerHTML. But when a structural child
+  // (component/each/switch/list) is consumed down to a BARE anchor comment with
+  // no surrounding element — e.g. `<each ...><Row/></each>` with no wrapping tag
+  // — fragWrapper.innerHTML collapses to just that comment, and the nested
+  // child's own rendered content is inserted as a SIBLING of the anchor at mount
+  // time (see wireComponent/wireList: content is inserted before the anchor,
+  // which stays as a permanent marker). That produces >1 top-level node at mount
+  // time even though this function only sees 1 (the comment) at emit time —
+  // exactly the failure behind "[nv] Multi-root list items are not supported"
+  // for component-only <each> bodies. Fix: keep fragWrapper itself (a real
+  // element) as the single top-level root whenever the body doesn't already
+  // resolve to exactly one top-level Element — same effect as hand-wrapping the
+  // body in a <div> (a documented workaround), but automatic. All previously
+  // computed paths are relative to fragWrapper's children, so they need a
+  // leading 0 (fragWrapper is now childNodes[0] of the serialized root) — done
+  // once, after all path arrays (holePaths/component/list/switch anchors) are
+  // finalized below.
+  const needsSyntheticRoot =
+    requireSingleRoot &&
+    (fragWrapper.childNodes.length !== 1 ||
+      fragWrapper.firstChild?.nodeType !== 1) /* ELEMENT_NODE */
+
+  const rawHtml = (needsSyntheticRoot ? fragWrapper.outerHTML : fragWrapper.innerHTML).replace(
     new RegExp(`\\s+data-nv-${NV_SENTINEL_KINDS}-\\d+="[^"]*"`, 'g'),
     '',
   )
@@ -1306,10 +1336,16 @@ function buildNvSlotContentIR(
 
   const nested = toPendingBundle(components, slotLists, slotRecycledLists, slotSwitches)
 
+  // fragWrapper is now serialized as the literal root element (see needsSyntheticRoot
+  // above) — every previously computed path was relative to fragWrapper's children,
+  // so it must be re-rooted one level deeper: fragWrapper itself is childNodes[0] of
+  // the freshly parsed template at mount time.
+  const finalPaths = needsSyntheticRoot ? allPaths.map((p) => [0, ...p]) : allPaths
+
   return {
     ir: {
       id: slotId,
-      shape: { html: rawHtml, bindingPaths: allPaths },
+      shape: { html: rawHtml, bindingPaths: finalPaths },
       bindings,
       meta: { frontEnd: 'nv-file' },
     },
