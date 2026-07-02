@@ -40,3 +40,20 @@ const Grid = $component(() => {
     expect(innerList?.kind).toBe('list')
   })
 })
+
+describe('P2C-NEST-03  <recycle> nested inside <each> body remains a loud parse-time error', () => {
+  test('throws "[nv] <recycle> cannot be nested inside an <each> body"', () => {
+    const source = `
+const Grid = $component(() => {
+  $script(() => {
+    const rows = signal([{ id: 1, cells: [{ id: 10, v: 'a' }] }])
+  })
+  $render(() => html\`<div><each .of="\${rows}" key="\${(r) => r.id}" let={row}>
+    <div><recycle .of="\${row.cells}" let={cell, i}><span>\${cell.v}</span></recycle></div>
+  </each></div>\`)
+})`
+    expect(() => parseNvFileForEmit(source, 'grid.nv', document)).toThrow(
+      '[nv] <recycle> cannot be nested inside an <each> body',
+    )
+  })
+})
