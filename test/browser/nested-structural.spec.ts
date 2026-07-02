@@ -6,9 +6,10 @@
  * in a real browser (Chromium) across all three back-ends: interpreter `mount()`,
  * emitted `emitMount()`, and full Mode-A (.nv → esbuild bundle) compilation.
  *
- * Six fixtures under test/browser/fixtures/nested-structural/ cover the nesting
+ * Seven fixtures under test/browser/fixtures/nested-structural/ cover the nesting
  * matrix: component-in-each, each-in-each, switch-in-each, each-in-switch-branch,
- * component-in-switch-fallback, switch-in-each-in-switch (deep 3-level nesting).
+ * component-in-switch-fallback, switch-in-each-in-switch (deep 3-level nesting),
+ * each-in-recycle (structural child nested inside a <recycle> body).
  *
  * Bundling convention copied verbatim (parameterized over six fixtures) from
  * nv-author-probe.spec.ts's single-bundle-built-once-in-beforeAll pattern.
@@ -36,6 +37,7 @@ const FIXTURES = [
   { name: 'each-in-switch-branch', globalName: '__nvEachInSwitchBranch' },
   { name: 'component-in-switch-fallback', globalName: '__nvComponentInSwitchFallback' },
   { name: 'switch-in-each-in-switch', globalName: '__nvSwitchInEachInSwitch' },
+  { name: 'each-in-recycle', globalName: '__nvEachInRecycle' },
 ] as const
 
 // Reuse the "main" bundle already built by real-browser.spec.ts for the
@@ -44,8 +46,8 @@ const FIXTURES = [
 const MAIN_BUNDLE = join(distDir, 'nv-bundle.js')
 
 const bundlePaths: Record<string, string> = {}
-// If a fixture's esbuild.build() throws (e.g. a real nv-emitter.ts bug —
-// see task-6-report.md), record the error here instead of letting beforeAll
+// If a fixture's esbuild.build() throws (e.g. a real nv-emitter.ts bug),
+// record the error here instead of letting beforeAll
 // abort the whole file. Each fixture's tests below check this map first so a
 // single broken fixture surfaces as a clear, attributable per-test failure
 // rather than nuking all 9 tests in this file via a failed beforeAll.
@@ -104,8 +106,8 @@ function requireBundle(name: string): string {
   const err = buildErrors[name]
   if (err !== undefined) {
     throw new Error(
-      `[G1] esbuild.build() for fixture '${name}' failed — see task-6-report.md for root-cause ` +
-        `analysis (nv-emitter.ts computeBodyThunks/emitBindingLiteral divergence). Build error: ${err}`,
+      `[G1] esbuild.build() for fixture '${name}' failed — likely an nv-emitter.ts ` +
+        `computeBodyThunks/emitBindingLiteral divergence. Build error: ${err}`,
     )
   }
   const p = bundlePaths[name]
@@ -153,6 +155,44 @@ test('G1 each-in-each: Mode-A emit mounts nested rows/cells in real browser', as
         }
       }
     ).__nvEachInEach
+    const rows = app.signal([
+      {
+        id: 1,
+        cells: [
+          { id: 10, v: 'a' },
+          { id: 11, v: 'b' },
+        ],
+      },
+      { id: 2, cells: [{ id: 20, v: 'c' }] },
+    ])
+    const parent = document.createElement('div')
+    document.body.appendChild(parent)
+    app.Grid.mount(parent, document, { rows: () => rows() })
+    app.flushSync()
+    return Array.from(parent.querySelectorAll('.row')).map((row) =>
+      Array.from(row.querySelectorAll('.cell')).map((c) => c.textContent),
+    )
+  })
+  expect(cellsByRow).toEqual([['a', 'b'], ['c']])
+})
+
+test('G1 each-in-recycle: Mode-A emit mounts nested rows/cells inside a recycled list in real browser', async ({
+  page,
+}) => {
+  await page.goto('about:blank')
+  await page.addScriptTag({ path: requireBundle('each-in-recycle') })
+  const cellsByRow = await page.evaluate(() => {
+    const app = (
+      window as unknown as {
+        __nvEachInRecycle: {
+          Grid: {
+            mount: (p: Element, d: Document, props?: Record<string, () => unknown>) => void
+          }
+          flushSync: () => void
+          signal: <T>(v: T) => { (): T; set: (v: T) => void }
+        }
+      }
+    ).__nvEachInRecycle
     const rows = app.signal([
       {
         id: 1,
@@ -471,7 +511,7 @@ test('reactivity-through-nesting: external rows signal updates nested .cell text
 // derived, effect — including per-item scopes created by the nested <each>
 // lists) increments nodeAllocCount on creation.
 //
-// Bug 2 investigation (task-6-bug2-fix-report.md): naive alloc === free parity
+// Bug 2 investigation: naive alloc === free parity
 // does NOT hold, even for a fully-correct dispose() — and this is by design,
 // not a leak. src/core/core.ts's signal() (unlike effect()/derived()/
 // createRoot()) never sets `.owner` and never calls addChild(currentOwner, ...)

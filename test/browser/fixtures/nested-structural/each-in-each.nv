@@ -1,4 +1,4 @@
-// Task 6 deviation (see task-6-report.md): `rows` is threaded in as an external
+// Task 6 deviation: `rows` is threaded in as an external
 // prop (EX-EACH-02 pattern) instead of an internal $script signal, so the
 // reactivity-through-nesting test can drive it from outside the component.
 const Grid = $component((props) => {

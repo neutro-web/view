@@ -1,4 +1,4 @@
-// Task 6 deviation (see task-6-report.md): direct `${props.label}` member access
+// Task 6 deviation: direct `${props.label}` member access
 // (without destructuring) is not a supported props-accessor pattern — the parser's
 // buildPropsAccessorMap only rewrites destructured `const { x } = props` bindings
 // (nv-parser.ts:2004-2056), so `props.label` used directly in a template hole was
@@ -11,7 +11,7 @@ const Row = $component((props) => {
   })
   $render(() => html`<li class="row">${label}</li>`)
 })
-// Bug 1 fix (task-6-bug2-fix-report.md): a component-only <each> body (no
+// Bug 1 fix: a component-only <each> body (no
 // wrapping element) used to collapse to a bare anchor comment at emit time,
 // which the runtime's single-root list-item invariant couldn't satisfy once
 // the component's own rendered content was mounted as a sibling of that

@@ -1,0 +1,14 @@
+// Recycle-container coverage (final-review Task 1): a <recycle> whose body
+// contains a nested <each>. Closest existing pattern is each-in-each.nv, but
+// the outer container here is <recycle> (position-identity pooling) instead
+// of <each> (key-identity diffing). Note <recycle> requires let={item, i}
+// with exactly two bound names (unlike <each>'s single/optional-second
+// binding) — see test/browser/fixtures/recycling-identity/app.nv.
+const Grid = $component((props) => {
+  $script(() => {
+    const { rows } = props
+  })
+  $render(() => html`<div class="grid"><recycle .of="${rows}" let={row, i}>
+    <div class="row"><each .of="${row.cells}" key="${(c) => c.id}" let={cell}><span class="cell">${cell.v}</span></each></div>
+  </recycle></div>`)
+})

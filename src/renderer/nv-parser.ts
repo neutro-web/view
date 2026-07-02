@@ -687,6 +687,14 @@ function walkNvNodeList(
 
         // Compute itemReadsIndex: true iff the body (not the key) references the index binding
         const indexName = letNames[1] // undefined if no second let-binding
+        // Deliberately scans the full bodyHoleIndices union rather than the narrower
+        // bodyLeafHoleIndices (introduced by the phantom-hole-thunk fix, see
+        // computeBodyThunks above): a hole consumed solely by a nested structural
+        // child's prop/.of/key/when can still reference the index binding, and we
+        // want itemReadsIndex to stay true in that case too. This is conservative-
+        // but-safe — at worst it allocates an unnecessary index signal when the
+        // index is only referenced inside such a consumed hole and never in real
+        // per-item DOM; it never produces wrong output.
         const itemReadsIndex =
           indexName === undefined
             ? false
@@ -3586,6 +3594,12 @@ function computeBodyThunks(
     diagnostics,
     propsParamName,
   )
+  // This unconditional call is safe TODAY only because <recycle> nested inside an
+  // <each> body is a loud parse-time error (see P2C-NEST-03), so pending.recycles
+  // is always empty when computeBodyThunks is invoked for an each-body. If that
+  // guard is ever lifted without also updating the corresponding binding-push
+  // logic above, this thunk array and the bindings array it must positionally
+  // pair with would desync.
   const bodyRecycledListThunks = computeRecycledListThunks(
     pending.recycles,
     holeExprs,

@@ -149,6 +149,7 @@ describe('P2C-NEST-04  all nesting-matrix fixtures parse and emit without throwi
     'each-in-switch-branch',
     'component-in-switch-fallback',
     'switch-in-each-in-switch',
+    'each-in-recycle',
   ])('%s', (name) => {
     const source = readFileSync(join(fixturesDir, `${name}.nv`), 'utf8')
     expect(() => parseNvFileForEmit(source, `${name}.nv`, document)).not.toThrow()
@@ -164,6 +165,7 @@ describe('P2C-NEST-05  all nesting-matrix fixtures emit real Mode-A module sourc
     'each-in-switch-branch',
     'component-in-switch-fallback',
     'switch-in-each-in-switch',
+    'each-in-recycle',
   ])('%s', (name) => {
     const source = readFileSync(join(fixturesDir, `${name}.nv`), 'utf8')
     const results = parseNvFileForEmit(source, `${name}.nv`, document)
