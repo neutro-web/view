@@ -2,14 +2,43 @@ const AppRecycled = $component(() => {
   $script(() => {
     const M = 10000
     const S = 25
-    const allRows = []
-    for (let i = 0; i < M; i++) allRows.push({ id: i, label: 'row-' + i })
+    const K = 20
 
+    function makeRows(count, offset) {
+      const out = []
+      for (let i = 0; i < count; i++) out.push({ id: offset + i, label: 'row-' + (offset + i) })
+      return out
+    }
+
+    const allRows = signal(makeRows(M, 0))
     const windowStart = signal(0)
     const windowN = signal(50)
+    let nextId = M
+    let replaceVersion = 0
 
     function scrollStep() {
-      windowStart.set((windowStart() + S) % (M - 100))
+      windowStart.set((windowStart() + S) % (allRows().length - 100))
+    }
+    function replaceAll() {
+      replaceVersion++
+      const v = replaceVersion
+      allRows.set(allRows().map((r) => ({ id: r.id, label: 'v' + v + '-' + r.id })))
+    }
+    function appendRows() {
+      const added = makeRows(K, nextId)
+      nextId += K
+      const next = [...allRows(), ...added]
+      allRows.set(next)
+      // Keep a trailing full-size window so the appended rows are actually visible —
+      // pinning windowStart to the appended slice alone would collapse the window
+      // to K rows instead of exercising the documented 50/100-row size.
+      windowStart.set(Math.max(0, next.length - windowN()))
+    }
+    function prependRows() {
+      const added = makeRows(K, nextId)
+      nextId += K
+      allRows.set([...added, ...allRows()])
+      windowStart.set(0)
     }
   })
   $render(() => html`
@@ -17,7 +46,10 @@ const AppRecycled = $component(() => {
       <button id="scroll-step" @click="${() => scrollStep()}">Scroll</button>
       <button id="set-n-50" @click="${() => windowN.set(50)}">N=50</button>
       <button id="set-n-100" @click="${() => windowN.set(100)}">N=100</button>
-      <recycle .of="${allRows.slice(windowStart(), windowStart() + windowN())}" let={item, i}>
+      <button id="replace-all" @click="${() => replaceAll()}">Replace</button>
+      <button id="append-rows" @click="${() => appendRows()}">Append</button>
+      <button id="prepend-rows" @click="${() => prependRows()}">Prepend</button>
+      <recycle .of="${allRows().slice(windowStart(), windowStart() + windowN())}" let={item, i}>
         <div class="row" data-id="${item.id}">${item.label}</div>
       </recycle>
     </div>
