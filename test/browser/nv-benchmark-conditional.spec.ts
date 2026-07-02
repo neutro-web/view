@@ -4,6 +4,13 @@
  * No load-bearing perf claim exists for these constructs; this records wall-clock
  * + node-alloc/free numbers for future same-session before/after comparison.
  * ADVISORY ONLY — logged, never asserted (no failable perf gate on these constructs).
+ *
+ * Note on the alloc/free numbers: both fixture branches are deliberately static
+ * (no reactive bindings inside a branch), so the logged "1 node per swap" reflects
+ * the cheapest possible branch content — one reactive scope node per subtree, and
+ * nothing else. Do not generalize this to "<conditional>/<switch> cost 1 node" —
+ * a branch with bindings/effects inside it would add nodes per binding, the same
+ * way the recycling-churn fixture's keyed rows resolve to ~4 nodes/row.
  */
 import { mkdir } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
@@ -126,7 +133,7 @@ async function measure(
 test('ADVISORY: conditional branch-swap baseline (logged, never asserted)', async ({ page }) => {
   const r = await measure(page, 'AppConditional', '#toggle')
   console.log(
-    `\nADVISORY [conditional toggle] avg=${r.avgMs.toFixed(2)}ms max=${r.maxMs.toFixed(2)}ms alloc=${r.allocCount} free=${r.freeCount} over ${MEASURED_STEPS} toggles`,
+    `\nADVISORY [conditional toggle] avg=${r.avgMs.toFixed(2)}ms max=${r.maxMs.toFixed(2)}ms alloc=${r.allocCount} free=${r.freeCount} over ${MEASURED_STEPS} toggles (round-trip incl. IPC; not isolated in-page timing)`,
   )
   expect(true).toBe(true)
 })
@@ -134,7 +141,7 @@ test('ADVISORY: conditional branch-swap baseline (logged, never asserted)', asyn
 test('ADVISORY: switch 5-branch cycle baseline (logged, never asserted)', async ({ page }) => {
   const r = await measure(page, 'AppSwitch', '#cycle')
   console.log(
-    `\nADVISORY [switch cycle] avg=${r.avgMs.toFixed(2)}ms max=${r.maxMs.toFixed(2)}ms alloc=${r.allocCount} free=${r.freeCount} over ${MEASURED_STEPS} cycles`,
+    `\nADVISORY [switch cycle] avg=${r.avgMs.toFixed(2)}ms max=${r.maxMs.toFixed(2)}ms alloc=${r.allocCount} free=${r.freeCount} over ${MEASURED_STEPS} cycles (round-trip incl. IPC; not isolated in-page timing)`,
   )
   expect(true).toBe(true)
 })
