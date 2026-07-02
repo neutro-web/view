@@ -11,6 +11,11 @@ import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
 import * as esbuild from 'esbuild'
 import { nvPlugin } from '../../src/renderer/nv-esbuild-plugin.js'
+import {
+  type MutationScenario,
+  SCENARIOS,
+  mutationStep,
+} from './fixtures/recycling-churn/scenarios.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(__dirname, '../..')
@@ -97,6 +102,39 @@ async function scrollStep(page: import('@playwright/test').Page): Promise<void> 
   await page.locator('#scroll-step').click()
   await page.evaluate(() => {
     ;(window as unknown as { __nvChurn: ChurnGlobal }).__nvChurn.flushSync()
+  })
+}
+
+async function flushChurn(page: import('@playwright/test').Page): Promise<void> {
+  await page.evaluate(() => {
+    ;(window as unknown as { __nvChurn: ChurnGlobal }).__nvChurn.flushSync()
+  })
+}
+
+async function runChurnScenario(
+  page: import('@playwright/test').Page,
+  arm: 'AppRecycled' | 'AppKeyed',
+  scenario: MutationScenario,
+): Promise<{ allocCount: number; freeCount: number }> {
+  await mountArm(page, arm)
+
+  await page.evaluate(() => {
+    ;(window as unknown as { __nvChurn: ChurnGlobal }).__nvChurn.__test.resetNodeCounts()
+  })
+  for (let i = 0; i < WARMUP_STEPS; i++) {
+    await mutationStep(page, scenario, () => flushChurn(page))
+  }
+
+  await page.evaluate(() => {
+    ;(window as unknown as { __nvChurn: ChurnGlobal }).__nvChurn.__test.resetNodeCounts()
+  })
+  for (let i = 0; i < MEASURED_STEPS; i++) {
+    await mutationStep(page, scenario, () => flushChurn(page))
+  }
+
+  return page.evaluate(() => {
+    const g = (window as unknown as { __nvChurn: ChurnGlobal }).__nvChurn
+    return { allocCount: g.__test.nodeAllocCount, freeCount: g.__test.nodeFreeCount }
   })
 }
 
@@ -213,3 +251,33 @@ test('A3 wall-clock: log scroll-step timing both arms, N=50 and N=100 (supplemen
   // No timing assertion — supplementary evidence only
   expect(true).toBe(true)
 })
+
+for (const scenario of SCENARIOS) {
+  if (scenario.mode === 'failable') {
+    test(`A2 matrix — ${scenario.label} — recycled: zero churn (FIRE)`, async ({ page }) => {
+      const { allocCount, freeCount } = await runChurnScenario(page, 'AppRecycled', scenario)
+      console.log(`\nA2 matrix [${scenario.key}] recycled — alloc=${allocCount} free=${freeCount}`)
+      expect(allocCount, `${scenario.key}: zero ReactiveNode allocations`).toBe(0)
+      expect(freeCount, `${scenario.key}: zero ReactiveNode frees`).toBe(0)
+    })
+
+    test(`A2 matrix — ${scenario.label} — keyed control: churn > 0`, async ({ page }) => {
+      const { allocCount } = await runChurnScenario(page, 'AppKeyed', scenario)
+      console.log(`\nA2 matrix [${scenario.key}] keyed — alloc=${allocCount}`)
+      expect(
+        allocCount,
+        `${scenario.key}: keyed control shows non-zero allocations (proves churn detectable)`,
+      ).toBeGreaterThan(0)
+    })
+  } else {
+    test(`ADVISORY A2 matrix — ${scenario.label} — recycled (logged, never asserted — no zero-churn guarantee across window resize)`, async ({
+      page,
+    }) => {
+      const { allocCount, freeCount } = await runChurnScenario(page, 'AppRecycled', scenario)
+      console.log(
+        `\nADVISORY A2 matrix [${scenario.key}] recycled — alloc=${allocCount} free=${freeCount} (known gap: no free-list retention across windowN resize — follow-up-commission candidate)`,
+      )
+      expect(true).toBe(true)
+    })
+  }
+}
