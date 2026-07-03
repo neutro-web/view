@@ -19,25 +19,17 @@ export type MutationScenario = {
 // Note: 'grow' and 'shrink' are the same N-oscillation (50↔100) with the click
 // order reversed, not independently-designed mutations — both directions of the
 // documented "window grow/shrink" requirement are covered this way without a
-// separate windowN size to add.
+// separate windowN size to add. Same shape for grow-medium/shrink-medium
+// (500↔1000) and grow-large-spike/shrink-large-spike (100↔5000).
 //
-// grow/shrink were advisory because the pre-collapse wireRecycledList (a separate,
-// non-retaining implementation, deleted in Follow-up B' Phase 2) had no free-list
-// retention across a resize. Post-collapse, wireRecycledList IS the HWM-pooling
-// implementation and grow/shrink (N=50<->100) and grow-medium/shrink-medium
-// (N=500<->1000) are genuinely zero-churn — see
-// docs/superpowers/handoffs/2026-07-03-followup-b-prime-phase2-landing.md.
-// Left as `mode: 'advisory'` deliberately: tightening to 'failable' is a distinct
-// decision (whether to make this a build-blocking gate), not decided by this task.
-//
-// EXCEPTION [Follow-up B'-cap, 2026-07-03]: grow-large-spike/shrink-large-spike
-// (N=100<->5000, a 50:1 ratio) are NOT zero-churn. wireRecycledList's retention is
-// capped at RETENTION_CAP_MULTIPLE (=2) x activeCount (docs/decision-log.md
-// [2026-07-03] ruling — the uncapped version violated a locked retention-cap
-// roadmap note). A 50:1 shrink/regrow ratio exceeds the 2x cap, so most of the
-// pool is evicted and reallocated on every cycle — this scenario shows real,
-// substantial churn (alloc=960000 free=576000 measured), unlike its 2:1-ratio
-// siblings above. This is expected under the cap, not a regression.
+// All grow/shrink/grow-medium/shrink-medium/grow-large-spike/shrink-large-spike
+// scenarios are advisory (never failable): wireRecycledList is dispose-on-shrink
+// (restored [2026-07-03] after Follow-up B'/B'-cap's HWM-pooling detour was
+// reversed — see docs/decision-log.md) and genuinely churns on every resize
+// regardless of magnitude, since it sizes its pool to exact windowN on every
+// reconcile with no free-list retention. This is expected implementation
+// behavior, not a regression — retention is re-filed as a v1.0.0 probe-first
+// item, evidence-based from the B' arc's measurements.
 export const SCENARIOS: MutationScenario[] = [
   {
     key: 'grow',

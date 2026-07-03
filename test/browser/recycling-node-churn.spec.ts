@@ -270,16 +270,12 @@ for (const scenario of SCENARIOS) {
       ).toBeGreaterThan(0)
     })
   } else {
-    test(`ADVISORY A2 matrix — ${scenario.label} — recycled (logged, never asserted — retained for historical trend evidence)`, async ({
+    test(`ADVISORY A2 matrix — ${scenario.label} — recycled (logged, never asserted — dispose-on-shrink churns on every resize, no free-list retention)`, async ({
       page,
     }) => {
       const { allocCount, freeCount } = await runChurnScenario(page, 'AppRecycled', scenario)
-      const isLargeSpike = scenario.key.includes('large-spike')
-      const expectationNote = isLargeSpike
-        ? "wireRecycledList's retention is capped at RETENTION_CAP_MULTIPLE (=2) x activeCount (Follow-up B'-cap) — this scenario's 50:1 shrink/regrow ratio exceeds the cap, so non-zero churn here is expected, not a regression"
-        : 'wireRecycledList retains pool state across windowN resize (within the 2x cap for this ratio), so this is expected to be zero'
       console.log(
-        `\nADVISORY A2 matrix [${scenario.key}] recycled — alloc=${allocCount} free=${freeCount} (post-Follow-up-B' collapse: ${expectationNote} — kept advisory rather than promoted to failable per docs/superpowers/plans/2026-07-03-followup-b-prime-phase2-hwm-hardening.md Step 3c)`,
+        `\nADVISORY A2 matrix [${scenario.key}] recycled — alloc=${allocCount} free=${freeCount} (dispose-on-shrink: wireRecycledList sizes the pool to exact windowN every reconcile, no free-list retention across resize — non-zero churn here is the current, expected implementation behavior; retention was tried as HWM pooling in Follow-up B'/B'-cap and reverted [2026-07-03] — see docs/decision-log.md; HWM retention re-filed as a v1.0.0 probe-first item)`,
       )
       expect(true).toBe(true)
     })
