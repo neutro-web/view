@@ -105,19 +105,13 @@ _Active frontier: v0.5.0 API-parity. Control-flow completion (PT-3) DONE. Perfor
     previously-undocumented gap, not a regression; tracked advisory → Follow-up B′.
     conditional/switch have floor baselines (binding-free, don't generalize). Test-infra
     only (zero `src/` diff).
-  - **Follow-up B′ — HWM pooling for `<recycle>` resize — LANDED `0ac39f9`, but
-    VIOLATES the retention-cap lock.** Mechanism sound (≥42.9% resize win, inertness
-    producer-side, collapsed to sole path, no contract impact). But retention is
-    **uncapped** — bounded only by high-water-mark, sole path, no opt-out, in v0.5.0 —
-    against the locked "retention requires cap; measure before building" (v1.0.0
-    probe-first). Architect-owned miss (the B′ commission authorized uncapped). **Not
-    closed → reopens as B′-cap, required before v0.5.0 tag.** Plus: inertness holds only
-    for own-row-signal templates; external/global-signal reads keep live subscribed
-    effects on detached rows (perf cliff without a cap). See [2026-07-03] log entry.
-  - **Follow-up B′-cap — bound the `<recycle>` HWM retention — OPEN, REQUIRED BEFORE
-    v0.5.0 TAG.** Cap the high-water-mark (retain to a bounded multiple of active, evict
-    beyond) + address external-signal subscription cost on detached rows. Blocks tag.
-    See [2026-07-03] log entry.
+  - **Follow-up B′ (HWM pooling for `<recycle>` resize) — REVERSED [2026-07-03].**
+    Landed uncapped (`0ac39f9`), capped at k=2 (`e3efc9b`), then reversed: at the lock-
+    compliant cap the win is inert where the cap doesn't fire (within-2:1) and negative
+    where it does (spike, chromium −5.4%); `<recycle>`'s design target (fixed virtual-
+    scroll) never needed HWM; and retention is a v1.0.0 probe-first item by the retention
+    lock. Reverted to dispose-on-shrink (sole path). Evidence base + semantics rulings
+    kept; HWM code in git history. Re-filed → v1.0.0. See [2026-07-03] reversal entry.
 - **Build pipeline `.nv → .js`:** Mode A, landed. Executable-module gate closed.
   **[2026-06-25] `.nv` author path proven E2E in real browsers** (probe `8146d82`): `.nv` → plugin →
   esbuild → browser, click updates DOM, chromium+webkit. Authoring is assignment-form
@@ -182,8 +176,15 @@ _Active frontier: v0.5.0 API-parity. Control-flow completion (PT-3) DONE. Perfor
 - **Roadmap:** `<Index>` gap closed by `<recycle>`. Retention/keep-alive named as a
   **v1.0.0 probe-first candidate** (second member of the avoid-create family; distinct
   from recycling; unbounded-memory footgun requires cap; measure before building).
-  — NOTE [2026-07-03]: an uncapped HWM implementation landed early (`0ac39f9`, v0.5.0)
-  against this lock; B′-cap reopened as a required-before-tag gate to restore compliance.
+  — [2026-07-03]: the premature v0.5.0 HWM landing was REVERSED; retention
+  remains v1.0.0 probe-first as originally locked, now with the B′ measurement as its
+  evidence base.
+- **HWM retention pooling for `<recycle>` — v1.0.0 probe-first.** Measurement done
+  (B′ arc): capped retention wins only within the cap ratio; needs a magnitude-aware
+  cap policy + hysteresis (2:1 boundary churn) + a resolution for external-signal
+  subscription cost on detached rows (possible contract question — quiescing a detached
+  row's externally-driven effect may need suspend/resume, absent from the four-primitive
+  set). Revive from git `9c1c7fd`..`e3efc9b`. See [2026-07-03] reversal entry.
 - **Reconcile Lever A+B perf (2026-06-29):** remove-one script −60% (1.5→0.6ms, near vanilla 0.5ms); wall-clock −3% (paint-bound — 90% of 17ms confirmed by Probe 2 DevTools trace); swap no-regress; key-call 4n→n. C-paint CLEAR (staging no effect, layout intrinsic). C-create CLEAR on node-weight hypothesis; redirect to C-create-B (DOM-stamping census).
 - **Standing CP-2d board (current = post-A1 CP-2d-REMEASURE, L4633):** create-1k 1.78×, swap 0.29×, select 0.27×, update-10th 0.18×, remove-one **script-parity with vanilla** (0.6ms vs 0.5ms) / wall-clock 1.23× (paint-bound), memory **2.154×** (post-elision). Note: tight mutation baselines (0.29×/0.27×/0.18×) are JIT-warmed session-specific.
 - **v0.1.0 — TAG-READY.** CP-4 docs placed. Swap deficit is v0.5.0; no blocking items remain.
@@ -1306,3 +1307,56 @@ bounds this; without a cap it is a perf cliff.** Fold into B′-cap, do not defe
 
 **Contract impact:** none. **Result:** B′ mechanism landed and sound; retention-cap
 compliance is NOT met. B′ is **not closed** — it reopens as B′-cap.
+
+### [2026-07-03] Follow-up B′ REVERSED — HWM pooling removed from v0.5.0, re-filed as v1.0.0 probe-first
+
+**Supersedes:** [2026-07-03] "Follow-up B′ HWM pooling LANDED `0ac39f9`" and the
+[2026-07-03] B′-cap landing (`e3efc9b`). Those entries stand as history; this reverses
+the decision they recorded.
+
+**Decision:** revert HWM pooling from `wireRecycledList`; restore the pre-B′
+dispose-on-shrink implementation as the sole path. Re-file HWM retention as a **v1.0.0
+probe-first item** — the milestone the retention lock (Current State retention entry)
+always assigned it.
+
+**Grounds (tag timing explicitly excluded — v0.5.0 tag is not imminent; open parity
+targets remain. The revert stands on merits, not schedule):**
+1. **Lock violation.** Uncapped HWM on the sole path in v0.5.0 breached the retention
+   lock on three axes (uncapped / no-opt-out / wrong-milestone). B′-cap fixed the first
+   two but not the milestone — retention is a v1.0.0 probe-first candidate by the lock.
+2. **At the lock-compliant cap, the feature does not earn its complexity.** Measured
+   (`e3efc9b`, k=2): the win survives only where the cap is *inert* — small (50↔100) and
+   medium (500↔1000) oscillate at exactly the 2:1 ratio, so eviction never fires and they
+   run the identical path an uncapped pool would (91–100% win, but cap-untouched — not
+   evidence the cap "lets you win"). Where the cap *engages* (large-spike 100↔5000, 50:1),
+   the win collapses to 9–14% with chromium net-negative (−5.4%). So capped-HWM equals
+   dispose where the cap is inert and loses to it where the cap bites. HWM's surface
+   (retention, eviction, external-signal subscription cost, core-quiescence dependency,
+   2:1 boundary-oscillation churn) is not paid for.
+3. **Off-design target.** `<recycle>`'s design target is fixed-window virtual scroll —
+   zero-churn without HWM. No resize-hot workload is on record. HWM optimizes a path the
+   construct isn't for.
+
+**Reversal of a prior in-session call:** the [2026-07-03] B′ landing ruling rejected
+"dispose as opt-in" as a re-split hazard, on the belief capped-HWM had a real win to
+defend. The k=2 measurement falsifies that belief; the rejection is withdrawn. Dispose-
+default is not a degraded second path — it is the simpler correct default.
+
+**Architect-owned root cause:** the [2026-07-02] B′ commission authorized "unbounded
+high-water-mark accepted, eviction deferred" without cross-checking the retention lock.
+That is what turned a locked v1.0.0 probe into a v0.5.0 land-then-revert. The measurement
+was always needed; the landing-then-reverting is the avoidable cost, and it is an
+architect error, not a CC miss.
+
+**What the arc produced that is KEPT (not wasted):**
+- The measured evidence base — k=2 tradeoff table, 2:1-cap-inert insight, boundary-
+  oscillation churn, external-signal subscription cost. This is the lock's "measure
+  before building," now done. v1.0.0 HWM design starts from data.
+- Semantics rulings — inertness is producer-side; sound only under demand-driven effect
+  quiescence; own-row case needs no contract primitive; external-signal case is the open
+  question. All reusable.
+- Implementation-agnostic tests (see commission §What-stays).
+- HWM code is preserved in git history (`9c1c7fd`..`e3efc9b`) for v1.0.0 revival.
+
+**Contract impact:** none. **Result:** B′ reversed. `<recycle>` returns to dispose-on-
+shrink. HWM → v1.0.0 probe-first. B′ and B′-cap both CLOSED (reversed).
