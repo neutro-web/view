@@ -2,8 +2,8 @@
 import { createRoot, flushSync, signal } from '@neutro/view/core'
 import { wireRecycledList } from '@neutro/view/renderer/internal'
 
-export function mount(parent: Element, doc: Document) {
-  const M = 10000
+export function mount(parent: Element, doc: Document, poolSize = 10000) {
+  const M = poolSize
   function makeRows(count: number, offset: number) {
     const out = []
     for (let i = 0; i < count; i++)
