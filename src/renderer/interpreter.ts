@@ -176,9 +176,6 @@ function wireBinding(
       break
     }
     case 'recycled-list': {
-      // wireRecycledList is the HWM-pooling implementation (Follow-up B', collapsed
-      // from a separate wireRecycledListHWM prototype — see decision log). The
-      // optional 4th (onPoolReady) param is test-only introspection, unused here.
       wireRecycledList(binding, targetNode, doc)
       break
     }
@@ -777,52 +774,13 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
   })
 }
 
-// B'-cap: retained-inactive rows are bounded to this multiple of the current
-// active count (Gate-P ruling — recorded in docs/superpowers/plans/2026-07-03-
-// followup-b-prime-cap.md, not in decision-log.md, which records only that a cap
-// is required, not this policy/value). A hypothesis to measure, not a locked
-// constant — see Task 2 of the B'-cap plan for the win-retention measurement this
-// value was chosen against (large-spike win eroded from ~74-94% uncapped to
-// ~9-14% at k=2 — a real tradeoff, not free; see the B'-cap landing report).
-const RETENTION_CAP_MULTIPLE = 2
-
-/**
- * High-water-mark pooling for <recycle> (positional list), bounded by a cap. On
- * shrink, retains rows (detaches DOM, stops feeding signals) instead of disposing
- * immediately — but retained-inactive rows are capped at RETENTION_CAP_MULTIPLE x
- * the current active count; rows beyond the cap are disposed (evicted), not kept.
- * On regrow, retained slots within the cap are reused before allocating new ones.
- *
- * Retention (for rows within the cap) is sound only because nv's effects are
- * demand/change-driven: an unwritten signal drives no scheduler work, so a
- * detached, unfed row costs nothing at rest (verified against src/core/core.ts's
- * propagate/flush path, Follow-up B' semantics-fork ruling). If nv's effects ever
- * become eager or polling, this inertness guarantee breaks silently — this
- * function's correctness is coupled to that core scheduling semantic.
- *
- * The cap also bounds a second cost: a retained row whose item template reads an
- * EXTERNAL signal (not its own row signal) keeps a live, still-subscribed effect
- * that re-runs on every external write, even while detached — cost proportional
- * to retained-row count. The cap bounds this to RETENTION_CAP_MULTIPLE x active
- * count rather than the historical high-water-mark (Gate-P ruling: bounding, not
- * quiescing, resolves this — genuine quiescing would require threading an active-
- * gate through the generic binding-wiring machinery, a materially larger change
- * this defect doesn't warrant).
- */
-export function wireRecycledList(
-  binding: RecycledListBinding,
-  anchorNode: Node,
-  doc: Document,
-  onPoolReady?: (pool: readonly RecycledRecord[]) => void,
-): void {
+function wireRecycledList(binding: RecycledListBinding, anchorNode: Node, doc: Document): void {
   const parent = anchorNode.parentNode
   if (parent === null) {
-    throw new Error('[nv/interpreter] RecycledListBinding (HWM): anchor has no parent')
+    throw new Error('[nv/interpreter] RecycledListBinding: anchor has no parent')
   }
 
   const pool: RecycledRecord[] = []
-  onPoolReady?.(pool)
-  let activeCount = 0
   const listOwner = getOwner()
 
   effect(() => {
@@ -830,107 +788,63 @@ export function wireRecycledList(
     const N = next.length
     const P = pool.length
 
-    // Rebind already-active slots that remain active — pure Op-3, unchanged.
-    const rebindCount = Math.min(N, activeCount)
+    // Re-bind existing slots [0, min(N,P)) — pure Op-3. No dispose, no create.
+    const rebindCount = Math.min(N, P)
     for (let i = 0; i < rebindCount; i++) {
-      // biome-ignore lint/style/noNonNullAssertion: i < activeCount <= pool.length
+      // biome-ignore lint/style/noNonNullAssertion: i < P = pool.length, in-bounds
       const rec = pool[i]!
       rec.valueSig.set(next[i])
       rec.indexSig.set(i)
     }
 
-    if (N > activeCount) {
-      // Reuse retained-inactive slots [activeCount, min(N,P)) before allocating.
-      // activeCount is committed per-iteration (not once after the loop): if a
-      // reuse or allocation throws partway through (e.g. the itemTemplate below
-      // throws — the reactive core swallows this via routeErrorFrom and does not
-      // propagate it out of flushSync, so the caller never sees it), activeCount
-      // must reflect exactly what was actually committed so far. Committing only
-      // after the whole loop would leave activeCount understating the real DOM
-      // state on a partial failure — later resizes would then be unable to tell
-      // which rows are genuinely active, leaving the ones the failed run did
-      // manage to create permanently un-reclaimable (they'd never fall inside
-      // any future shrink's [N, activeCount) range).
-      const reuseEnd = Math.min(N, P)
-      for (let i = activeCount; i < reuseEnd; i++) {
-        // biome-ignore lint/style/noNonNullAssertion: i < P = pool.length, in-bounds
-        const rec = pool[i]!
-        rec.valueSig.set(next[i])
-        rec.indexSig.set(i)
-        parent.insertBefore(rec.rootEl, anchorNode)
-        activeCount = i + 1
-      }
+    // Grow [P, N) — create only the delta.
+    // IMPORTANT: mirrors wireList Op-1 exactly (L543–578). indexSig always allocated (no elision).
+    for (let i = P; i < N; i++) {
+      const valueSig = signal<unknown>(next[i])
+      const indexSig = signal<number>(i)
+      let mountedRoot!: Node
 
-      // Allocate brand new slots [P, N) — mirrors wireRecycledList's grow path exactly.
-      for (let i = P; i < N; i++) {
-        const valueSig = signal<unknown>(next[i])
-        const indexSig = signal<number>(i)
-        let mountedRoot!: Node
-
-        // biome-ignore lint/style/noNonNullAssertion: runWithOwner returns non-null when owner is non-null
-        const dispose = runWithOwner(listOwner, () =>
-          createRoot((d) => {
-            const itemIR = binding.itemTemplate(valueSig, indexSig)
-            const { roots } = mountFragment(itemIR, parent, doc, anchorNode)
-            const contentRoots = roots.filter(
-              (n) => n.nodeType !== 3 /* TEXT_NODE */ || (n.textContent?.trim() ?? '') !== '',
+      // biome-ignore lint/style/noNonNullAssertion: runWithOwner returns non-null when owner is non-null
+      const dispose = runWithOwner(listOwner, () =>
+        createRoot((d) => {
+          const itemIR = binding.itemTemplate(valueSig, indexSig)
+          const { roots } = mountFragment(itemIR, parent, doc, anchorNode)
+          const contentRoots = roots.filter(
+            (n) => n.nodeType !== 3 /* TEXT_NODE */ || (n.textContent?.trim() ?? '') !== '',
+          )
+          const [root] = contentRoots
+          if (root === undefined || contentRoots.length !== 1) {
+            throw new Error(
+              '[nv] Multi-root list items are not supported in v1. Wrap the item template in a single root element.',
             )
-            const [root] = contentRoots
-            if (root === undefined || contentRoots.length !== 1) {
-              throw new Error(
-                '[nv] Multi-root list items are not supported in v1. Wrap the item template in a single root element.',
-              )
-            }
-            mountedRoot = root
-            onCleanup(() => {
-              if (mountedRoot.parentNode !== null) mountedRoot.parentNode.removeChild(mountedRoot)
-            })
-            return d
-          }),
-        )!
+          }
+          mountedRoot = root
+          onCleanup(() => {
+            if (mountedRoot.parentNode !== null) mountedRoot.parentNode.removeChild(mountedRoot)
+          })
+          return d
+        }),
+      )!
 
-        pool.push({ valueSig, indexSig, rootEl: mountedRoot, dispose })
-        activeCount = pool.length
-      }
-    } else if (N < activeCount) {
-      // Shrink: deactivate [N, activeCount) — detach DOM, stop feeding. DO NOT DISPOSE
-      // deactivated rows outright — retain them up to the cap (see eviction below).
-      for (let i = N; i < activeCount; i++) {
-        // biome-ignore lint/style/noNonNullAssertion: i < activeCount <= pool.length
-        const rec = pool[i]!
-        if (rec.rootEl.parentNode !== null) rec.rootEl.parentNode.removeChild(rec.rootEl)
-      }
-      activeCount = N
+      pool.push({ valueSig, indexSig, rootEl: mountedRoot, dispose })
+    }
 
-      // B'-cap: bound retained-inactive rows to RETENTION_CAP_MULTIPLE x activeCount.
-      // Evaluated fresh on every shrink (no floor, no history-smoothing — ruled
-      // in-session at Gate-P; see docs/superpowers/plans/2026-07-03-followup-b-
-      // prime-cap.md for the rationale, since it isn't recorded in decision-log.md).
-      // Eviction only needs to run
-      // here, in the shrink branch — growth (whether it allocates or purely
-      // reuses retained slots) can never violate the cap. Proof: after every
-      // shrink, this line enforces pool.length <= 2*activeCount. Any later grow
-      // to N' > activeCount can only RAISE the cap (2*N' > 2*activeCount >=
-      // pool.length), so pool.length is always strictly below the new cap right
-      // after a grow — whether or not that grow allocated fresh rows. (It is NOT
-      // generally true that activeCount === pool.length after a grow — that only
-      // holds when the grow required allocation; a pure-reuse grow into already-
-      // retained slots leaves pool.length at its unchanged, larger value.)
-      const maxPoolLength = N * RETENTION_CAP_MULTIPLE
-      if (pool.length > maxPoolLength) {
-        for (let i = maxPoolLength; i < pool.length; i++) {
-          // biome-ignore lint/style/noNonNullAssertion: i < pool.length, in-bounds
-          pool[i]!.dispose()
-        }
-        pool.length = maxPoolLength
+    // Shrink [N, P) — dispose only the delta.
+    // Per-entry try/catch ensures all entries [N, P) are attempted for disposal even if
+    // one throws; pool.length = N runs unconditionally after all entries are attempted.
+    for (let i = N; i < P; i++) {
+      try {
+        // biome-ignore lint/style/noNonNullAssertion: i < P = pool.length, in-bounds
+        pool[i]!.dispose()
+      } catch {
+        // swallow per-entry errors; all entries must be attempted
       }
     }
+    pool.length = N
   })
-
   onCleanup(() => {
     for (const rec of pool) rec.dispose()
     pool.length = 0
-    activeCount = 0
   })
 }
 
