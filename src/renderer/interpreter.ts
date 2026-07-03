@@ -863,6 +863,7 @@ export function wireRecycledListHWM(
   binding: RecycledListBinding,
   anchorNode: Node,
   doc: Document,
+  onPoolReady?: (pool: readonly RecycledRecord[]) => void,
 ): void {
   const parent = anchorNode.parentNode
   if (parent === null) {
@@ -870,6 +871,7 @@ export function wireRecycledListHWM(
   }
 
   const pool: RecycledRecord[] = []
+  onPoolReady?.(pool)
   let activeCount = 0
   const listOwner = getOwner()
 
