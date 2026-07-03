@@ -777,6 +777,15 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
   })
 }
 
+// B'-cap: retained-inactive rows are bounded to this multiple of the current
+// active count (Gate-P ruling — recorded in docs/superpowers/plans/2026-07-03-
+// followup-b-prime-cap.md, not in decision-log.md, which records only that a cap
+// is required, not this policy/value). A hypothesis to measure, not a locked
+// constant — see Task 2 of the B'-cap plan for the win-retention measurement this
+// value was chosen against (large-spike win eroded from ~74-94% uncapped to
+// ~9-14% at k=2 — a real tradeoff, not free; see the B'-cap landing report).
+const RETENTION_CAP_MULTIPLE = 2
+
 /**
  * High-water-mark pooling for <recycle> (positional list), bounded by a cap. On
  * shrink, retains rows (detaches DOM, stops feeding signals) instead of disposing
@@ -800,12 +809,6 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
  * gate through the generic binding-wiring machinery, a materially larger change
  * this defect doesn't warrant).
  */
-// B'-cap: retained-inactive rows are bounded to this multiple of the current
-// active count (Gate-P ruling, docs/decision-log.md [2026-07-03]). A hypothesis
-// to measure, not a locked constant — see Task 2 of the B'-cap plan for the
-// win-retention measurement this value was chosen against.
-const RETENTION_CAP_MULTIPLE = 2
-
 export function wireRecycledList(
   binding: RecycledListBinding,
   anchorNode: Node,
@@ -901,8 +904,9 @@ export function wireRecycledList(
 
       // B'-cap: bound retained-inactive rows to RETENTION_CAP_MULTIPLE x activeCount.
       // Evaluated fresh on every shrink (no floor, no history-smoothing — ruled
-      // in-session at Gate-P; see this function's own history in git log for the
-      // rationale, since it isn't recorded elsewhere). Eviction only needs to run
+      // in-session at Gate-P; see docs/superpowers/plans/2026-07-03-followup-b-
+      // prime-cap.md for the rationale, since it isn't recorded in decision-log.md).
+      // Eviction only needs to run
       // here, in the shrink branch — growth (whether it allocates or purely
       // reuses retained slots) can never violate the cap. Proof: after every
       // shrink, this line enforces pool.length <= 2*activeCount. Any later grow

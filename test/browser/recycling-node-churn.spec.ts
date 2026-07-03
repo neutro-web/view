@@ -274,8 +274,12 @@ for (const scenario of SCENARIOS) {
       page,
     }) => {
       const { allocCount, freeCount } = await runChurnScenario(page, 'AppRecycled', scenario)
+      const isLargeSpike = scenario.key.includes('large-spike')
+      const expectationNote = isLargeSpike
+        ? "wireRecycledList's retention is capped at RETENTION_CAP_MULTIPLE (=2) x activeCount (Follow-up B'-cap) — this scenario's 50:1 shrink/regrow ratio exceeds the cap, so non-zero churn here is expected, not a regression"
+        : 'wireRecycledList retains pool state across windowN resize (within the 2x cap for this ratio), so this is expected to be zero'
       console.log(
-        `\nADVISORY A2 matrix [${scenario.key}] recycled — alloc=${allocCount} free=${freeCount} (post-Follow-up-B' collapse: wireRecycledList retains pool state across windowN resize, so this is expected to be zero — kept advisory rather than promoted to failable per docs/superpowers/plans/2026-07-03-followup-b-prime-phase2-hwm-hardening.md Step 3c)`,
+        `\nADVISORY A2 matrix [${scenario.key}] recycled — alloc=${allocCount} free=${freeCount} (post-Follow-up-B' collapse: ${expectationNote} — kept advisory rather than promoted to failable per docs/superpowers/plans/2026-07-03-followup-b-prime-phase2-hwm-hardening.md Step 3c)`,
       )
       expect(true).toBe(true)
     })
