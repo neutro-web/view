@@ -1,7 +1,16 @@
 import type { Page } from '@playwright/test'
 
 export type MutationScenario = {
-  key: 'grow' | 'shrink' | 'replace' | 'append' | 'prepend'
+  key:
+    | 'grow'
+    | 'shrink'
+    | 'replace'
+    | 'append'
+    | 'prepend'
+    | 'grow-medium'
+    | 'shrink-medium'
+    | 'grow-large-spike'
+    | 'shrink-large-spike'
   label: string
   stepButtonIds: string[]
   mode: 'failable' | 'advisory'
@@ -37,6 +46,30 @@ export const SCENARIOS: MutationScenario[] = [
   { key: 'replace', label: 'full replace', stepButtonIds: ['#replace-all'], mode: 'failable' },
   { key: 'append', label: 'append tail', stepButtonIds: ['#append-rows'], mode: 'failable' },
   { key: 'prepend', label: 'prepend head', stepButtonIds: ['#prepend-rows'], mode: 'failable' },
+  {
+    key: 'grow-medium',
+    label: 'window grow (N=500→1000)',
+    stepButtonIds: ['#set-n-500', '#set-n-1000'],
+    mode: 'advisory',
+  },
+  {
+    key: 'shrink-medium',
+    label: 'window shrink (N=1000→500)',
+    stepButtonIds: ['#set-n-1000', '#set-n-500'],
+    mode: 'advisory',
+  },
+  {
+    key: 'grow-large-spike',
+    label: 'window grow-spike (N=100→5000)',
+    stepButtonIds: ['#set-n-100', '#set-n-5000'],
+    mode: 'advisory',
+  },
+  {
+    key: 'shrink-large-spike',
+    label: 'window shrink-spike (N=5000→100)',
+    stepButtonIds: ['#set-n-5000', '#set-n-100'],
+    mode: 'advisory',
+  },
 ]
 
 export async function mutationStep(

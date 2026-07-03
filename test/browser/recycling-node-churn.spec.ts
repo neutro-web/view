@@ -281,3 +281,45 @@ for (const scenario of SCENARIOS) {
     })
   }
 }
+
+async function assertResizeCorrectness(
+  page: import('@playwright/test').Page,
+  arm: 'AppRecycled' | 'AppKeyed',
+): Promise<void> {
+  await mountArm(page, arm)
+  for (const [lowBtn, highBtn] of [
+    ['#set-n-50', '#set-n-100'],
+    ['#set-n-500', '#set-n-1000'],
+    ['#set-n-100', '#set-n-5000'],
+  ] as const) {
+    await page.locator(highBtn).click()
+    await flushChurn(page)
+    const highCount = await page.locator('.row').count()
+    await page.locator(lowBtn).click()
+    await flushChurn(page)
+    const lowCount = await page.locator('.row').count()
+    await page.locator(highBtn).click()
+    await flushChurn(page)
+    const regrowCount = await page.locator('.row').count()
+    const regrowIds = await page
+      .locator('.row')
+      .evaluateAll((els) => els.map((el) => el.getAttribute('data-id')))
+    expect(new Set(regrowIds).size, `${highBtn}: regrown rows have unique data-id`).toBe(
+      regrowIds.length,
+    )
+    expect(regrowCount, `${highBtn}: regrow count matches high-N click`).toBe(highCount)
+    expect(lowCount, `${lowBtn}: shrink count matches low-N click`).toBeLessThan(highCount)
+  }
+}
+
+test('standing resize correctness: rows render correctly across all magnitudes (recycled)', async ({
+  page,
+}) => {
+  await assertResizeCorrectness(page, 'AppRecycled')
+})
+
+test('standing resize correctness: rows render correctly across all magnitudes (keyed)', async ({
+  page,
+}) => {
+  await assertResizeCorrectness(page, 'AppKeyed')
+})

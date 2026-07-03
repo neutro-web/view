@@ -1,6 +1,6 @@
 const AppKeyed = $component(() => {
   $script(() => {
-    const M = 10000
+    const M = 20000
     const S = 25
     const K = 20
 
@@ -49,6 +49,9 @@ const AppKeyed = $component(() => {
       <button id="scroll-step" @click="${() => scrollStep()}">Scroll</button>
       <button id="set-n-50" @click="${() => windowN.set(50)}">N=50</button>
       <button id="set-n-100" @click="${() => windowN.set(100)}">N=100</button>
+      <button id="set-n-500" @click="${() => windowN.set(500)}">N=500</button>
+      <button id="set-n-1000" @click="${() => windowN.set(1000)}">N=1000</button>
+      <button id="set-n-5000" @click="${() => windowN.set(5000)}">N=5000</button>
       <button id="replace-all" @click="${() => replaceAll()}">Replace</button>
       <button id="append-rows" @click="${() => appendRows()}">Append</button>
       <button id="prepend-rows" @click="${() => prependRows()}">Prepend</button>
