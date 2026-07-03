@@ -270,12 +270,12 @@ for (const scenario of SCENARIOS) {
       ).toBeGreaterThan(0)
     })
   } else {
-    test(`ADVISORY A2 matrix — ${scenario.label} — recycled (logged, never asserted — no zero-churn guarantee across window resize)`, async ({
+    test(`ADVISORY A2 matrix — ${scenario.label} — recycled (logged, never asserted — retained for historical trend evidence)`, async ({
       page,
     }) => {
       const { allocCount, freeCount } = await runChurnScenario(page, 'AppRecycled', scenario)
       console.log(
-        `\nADVISORY A2 matrix [${scenario.key}] recycled — alloc=${allocCount} free=${freeCount} (known gap: no free-list retention across windowN resize — follow-up-commission candidate)`,
+        `\nADVISORY A2 matrix [${scenario.key}] recycled — alloc=${allocCount} free=${freeCount} (post-Follow-up-B' collapse: wireRecycledList retains pool state across windowN resize, so this is expected to be zero — kept advisory rather than promoted to failable per docs/superpowers/plans/2026-07-03-followup-b-prime-phase2-hwm-hardening.md Step 3c)`,
       )
       expect(true).toBe(true)
     })
