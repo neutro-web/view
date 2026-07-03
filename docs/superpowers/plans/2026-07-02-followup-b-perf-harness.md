@@ -1,10 +1,10 @@
-# Follow-up B: Perf Harness for `<recycle>`/`<conditional>`/`<switch>` Implementation Plan
+# Follow-up B: Perf Harness for `<recycle>`/conditional/`<switch>` Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Extend the standing `<recycle>` node-churn gate (`8da893a`) from one scroll-window scenario to a five-scenario mutation matrix (grow, shrink, full-replace, append, prepend), all failable and real-browser; add an nv-only wall-clock logging companion for those scenarios; and add advisory (non-failable) wall-clock + node-alloc baselines for `<conditional>` and `<switch>` branch-swap, which have no fixture today.
+**Goal:** Extend the standing `<recycle>` node-churn gate (`8da893a`) from one scroll-window scenario to a five-scenario mutation matrix (grow, shrink, full-replace, append, prepend), all failable and real-browser; add an nv-only wall-clock logging companion for those scenarios; and add advisory (non-failable) wall-clock + node-alloc baselines for conditional and `<switch>` branch-swap, which have no fixture today.
 
-**Architecture:** Convert the existing `recycling-churn` fixture's backing array from a plain array to a signal so it supports structural mutation (not just window-position mutation), add three buttons (replace/append/prepend) alongside the existing scroll/set-n buttons, and extract a shared `MutationScenario` helper so the churn spec parametrizes one assertion path across five scenarios instead of forking five specs. A second, advisory-only spec reuses the same fixture to log wall-clock timing. A third, wholly new fixture pair covers `<conditional>` (ternary-in-template syntax) and `<switch>`/`<match>` branch-swap, advisory-only.
+**Architecture:** Convert the existing `recycling-churn` fixture's backing array from a plain array to a signal so it supports structural mutation (not just window-position mutation), add three buttons (replace/append/prepend) alongside the existing scroll/set-n buttons, and extract a shared `MutationScenario` helper so the churn spec parametrizes one assertion path across five scenarios instead of forking five specs. A second, advisory-only spec reuses the same fixture to log wall-clock timing. A third, wholly new fixture pair covers conditional (ternary-in-template syntax) and `<switch>`/`<match>` branch-swap, advisory-only.
 
 **Tech Stack:** Playwright (real-browser, Chromium+WebKit+Firefox), esbuild + `nvPlugin`, TypeScript, `.nv` component syntax, existing `__test.{nodeAllocCount,nodeFreeCount,resetNodeCounts}` core instrumentation (consumed, not modified).
 
@@ -13,7 +13,7 @@
 - No `src/core/` diff of any kind (instrumentation is consumed, not extended). Any perceived need for new instrumentation is a stop-and-escalate condition, not a task in this plan.
 - The existing `8da893a` scroll-window churn assertion (`test/browser/recycling-node-churn.spec.ts`, tests `A2 recycled` / `A2 keyed control` / `A3 wall-clock`) must remain unmodified and passing — extend around it, do not touch its body.
 - No wall-clock timing may ever be turned into a failable `expect`. Timing is `console.log`'d only, mirroring the existing `A3 wall-clock` test's `expect(true).toBe(true)` sentinel pattern.
-- `<conditional>`/`<switch>` baselines are advisory only — never gated with a real assertion beyond the `expect(true).toBe(true)` sentinel.
+- conditional/`<switch>` baselines are advisory only — never gated with a real assertion beyond the `expect(true).toBe(true)` sentinel.
 - No JSDOM anywhere in a churn-verdict path — all churn/alloc assertions run via Playwright's real-browser `page` fixture.
 - One churn-measurement path: grow/shrink/replace/append/prepend share `app-recycled.nv`/`app-keyed.nv` (extended, not forked) and one parametrized assertion helper — not five copy-pasted spec bodies.
 - `pnpm typecheck` (`tsc -p tsconfig.json --noEmit`) and `pnpm lint` (`biome check .`) must be clean at the end.
@@ -567,7 +567,7 @@ git commit -m "test(benchmark): advisory wall-clock logging for recycle mutation
 
 ---
 
-## Task 5: `<conditional>`/`<switch>` advisory fixtures and spec
+## Task 5: conditional/`<switch>` advisory fixtures and spec
 
 **Files:**
 - Create: `test/browser/fixtures/benchmark-conditional/app-conditional.nv`
@@ -577,7 +577,7 @@ git commit -m "test(benchmark): advisory wall-clock logging for recycle mutation
 
 **Interfaces:**
 - Produces: nothing consumed elsewhere — terminal, advisory-logging deliverable.
-- Note on syntax: this codebase has no `<conditional>` XML tag. `${cond ? html\`...\` : html\`...\`}` (a ternary whose branches are `html` tagged templates) compiles to IR kind `'conditional'` (`src/renderer/nv-parser.ts:391-409`, `src/renderer/interpreter.ts:143`). `<switch>`/`<match when="...">` is the multi-branch construct (`src/renderer/interpreter.ts:147`, precedent: `test/browser/fixtures/nested-structural/switch-in-each.nv`).
+- Note on syntax: conditional is not an XML element — there is no `<conditional>`/`<if>`/`<iff>` tag in this codebase. `${cond ? html\`...\` : html\`...\`}` (a ternary whose branches are `html` tagged templates) compiles to IR kind `'conditional'` (`src/renderer/nv-parser.ts:391-409`, `src/renderer/interpreter.ts:143`). `<switch>`/`<match when="...">` is the multi-branch construct and IS a real element (`src/renderer/interpreter.ts:147`, precedent: `test/browser/fixtures/nested-structural/switch-in-each.nv`).
 
 - [ ] **Step 1: Write `app-conditional.nv` — boolean branch-swap**
 
@@ -640,7 +640,7 @@ export { __test } from '@neutro/view/core/internal'
 
 ```typescript
 /**
- * nv-benchmark-conditional — ADVISORY baseline for <conditional> and <switch>
+ * nv-benchmark-conditional — ADVISORY baseline for conditional and `<switch>`
  *
  * No load-bearing perf claim exists for these constructs; this records wall-clock
  * + node-alloc/free numbers for future same-session before/after comparison.

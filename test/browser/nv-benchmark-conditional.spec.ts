@@ -1,5 +1,5 @@
 /**
- * nv-benchmark-conditional — ADVISORY baseline for <conditional> and <switch>
+ * nv-benchmark-conditional — ADVISORY baseline for conditional and `<switch>`
  *
  * No load-bearing perf claim exists for these constructs; this records wall-clock
  * + node-alloc/free numbers for future same-session before/after comparison.
@@ -8,7 +8,7 @@
  * Note on the alloc/free numbers: both fixture branches are deliberately static
  * (no reactive bindings inside a branch), so the logged "1 node per swap" reflects
  * the cheapest possible branch content — one reactive scope node per subtree, and
- * nothing else. Do not generalize this to "<conditional>/<switch> cost 1 node" —
+ * nothing else. Do not generalize this to "conditional/switch cost 1 node" —
  * a branch with bindings/effects inside it would add nodes per binding, the same
  * way the recycling-churn fixture's keyed rows resolve to ~4 nodes/row.
  */

@@ -38,6 +38,11 @@ _Active frontier: v0.5.0 API-parity. Control-flow completion (PT-3) DONE. Perfor
 > `decision-log-archive.md` (moved 2026-06-21).
 
 ### Status at a glance
+- **Nomenclature (LOCKED [2026-07-02]):** angle brackets = real `.nv` element. Elements:
+  `<each>` (`'list'`), `<recycle>` (`'recycled-list'`), `<switch>`/`<match>` (`'switch'`).
+  **conditional is NOT an element** — IR kind `'conditional'`, authored as `.nv` ternary
+  or tagged `iff()`. Write bare "conditional" for the construct, `'conditional'` for the
+  IR kind. Never `<conditional>`.
 - **Reactive core:** Contract **v0.4.3**, conformance green. DOM-free. Field order
   locked (cache-load-bearing). `getOwner`/`runWithOwner` in §6.1/§11/§12.24.
 - **Compiler specialization (steps 1–4):** all wired + gated + measured. Step 3
@@ -1091,3 +1096,49 @@ unchanged (v0.4.3).
 **Result:** all four Mode-A nesting directions (component/each/switch/recycle inside
 each/recycle/switch bodies) now closed. Follow-up A′ done. Follow-up B (combined perf
 harness) promoted from held → next.
+
+---
+
+### [2026-07-02] Nomenclature LOCKED — "conditional" is an IR kind, not an element; `<conditional>` is wrong everywhere
+
+**Problem:** `<conditional>` (angle-bracketed) leaked into prose starting with the
+[2026-07-01] follow-up notes and propagated through the Follow-up B commission, its
+plan, spec comments, and Current State. **There is no `<conditional>` element.**
+Verified at source (`209c33b`):
+
+**Authoring surface — what is and isn't an element (nv-parser.ts):**
+- `<each>` — element (`data-nv-each`, :628). IR kind `'list'` (ir.ts:194).
+- `<recycle>` — element (`data-nv-recycle`, :729). IR kind `'recycled-list'` (ir.ts:226).
+- `<switch>`/`<match>` — elements (`data-nv-switch`/`data-nv-match`, :824-919). IR kind
+  `'switch'` (ir.ts:170).
+- **conditional — NOT an element.** IR kind `'conditional'` (ir.ts:153). Authored as a
+  `.nv` ternary (`${cond ? html`` : html``}`, nv-parser.ts:391) or the tagged `iff()`
+  builder. nv has no `<if>`/`<iff>`/`<conditional>` element by design — ternary is native
+  (this was settled at the `<switch>`/`<match>` shape ruling, [2026-07-01]).
+
+**Ruling — locked vocabulary:**
+| Construct | Correct prose | IR kind | Authoring surface |
+|-----------|---------------|---------|-------------------|
+| 2-branch conditional | **conditional** (no brackets) | `'conditional'` | `.nv` ternary / tagged `iff()` |
+| multi-branch | **`<switch>`/`<match>`** | `'switch'` | `.nv` element / tagged `match()` |
+| keyed list | **`<each>`** | `'list'` | `.nv` element / tagged `each()` |
+| positional list | **`<recycle>`** | `'recycled-list'` | `.nv` element / tagged `recycle()` |
+
+- Angle brackets denote a real `.nv` element. Never write `<conditional>` — it implies a
+  tag that does not exist. Write **conditional** (bare) for the construct, or
+  **`'conditional'`** (quoted) when referring specifically to the IR kind.
+- Do not conflate a construct with its IR-kind name. `'list'` is the IR kind; `<each>`
+  is the construct/element. They are not interchangeable in prose.
+
+**Scope of correction:** the Follow-up B closure delta is corrected before paste (bare
+"conditional"). 16 committed occurrences of `<conditional>` remain in source
+(`nv-benchmark-conditional.spec.ts` header comments, the B plan doc, and the
+[2026-07-01] follow-up-note + [2026-07-02] B entries in this log). **These are prose/
+comment-only — no code or filename is affected** (`benchmark-conditional` as a fixture/
+spec *name* is accurate and stays). CC to grep-and-fix the angle-bracketed prose in the
+two committed files (`test/browser/nv-benchmark-conditional.spec.ts`,
+`docs/superpowers/plans/2026-07-02-followup-b-perf-harness.md`) in a docs-only pass. The
+prior dated Log entries are **not** rewritten (append-only) — this entry supersedes their
+vocabulary by citation.
+
+**Contract impact:** none. Naming convention only.
