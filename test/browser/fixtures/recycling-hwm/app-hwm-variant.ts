@@ -11,6 +11,11 @@ export function mount(parent: Element, doc: Document, poolSize = 10000) {
   }
   const allRows = signal(makeRows(M, 0))
   const windowN = signal(50)
+  // Test-only fault-injection: when set, itemTemplate throws while constructing
+  // the row whose id matches this value — used to prove wireRecycledList's
+  // activeCount/pool bookkeeping stays consistent (no orphan-counting) when a
+  // grow/reuse iteration fails partway through.
+  let throwOnId: number | null = null
 
   const wrapper = doc.createElement('div')
   wrapper.id = 'variant-root'
@@ -33,6 +38,9 @@ export function mount(parent: Element, doc: Document, poolSize = 10000) {
         kind: 'recycled-list',
         items: () => allRows().slice(0, windowN()),
         itemTemplate: (valueSig, indexSig) => {
+          if (throwOnId !== null && valueSig().id === throwOnId) {
+            throw new Error(`fault-injected: itemTemplate threw for id=${throwOnId}`)
+          }
           return {
             id: 'hwm-row',
             shape: { html: '<div><!--nv-0--></div>', bindingPaths: [[0], [0, 0]] },
@@ -102,6 +110,10 @@ export function mount(parent: Element, doc: Document, poolSize = 10000) {
     },
     flush: () => {
       flushSync()
+    },
+    // Fault injection for throw-safety tests — see `throwOnId` above.
+    setThrowOnId: (id: number | null) => {
+      throwOnId = id
     },
   }
 }

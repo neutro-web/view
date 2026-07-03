@@ -28,6 +28,7 @@ type VariantHandle = {
   prependRows(count: number): void
   setNNoFlush(n: number): void
   flush(): void
+  setThrowOnId(id: number | null): void
 }
 
 type HWMGlobal = {
@@ -340,4 +341,52 @@ test('BOUNDED MEMORY: reactive-node count stabilizes after high-water-mark is re
     'zero further reactive-node allocation once the high-water-mark is established — retained nodes are reused, not reallocated, so held cost does not grow with cycle count',
   ).toBe(0)
   expect(result.freeAfter30Cycles, 'zero disposal during resize — retention, not teardown').toBe(0)
+})
+
+test('FAULT TOLERANCE: partial grow failure keeps activeCount/pool bookkeeping consistent (self-heals on next resize)', async ({
+  page,
+}) => {
+  // NOTE: mount + fault injection + first resize must all happen inside ONE
+  // page.evaluate() call. effect() schedules an async flush at creation
+  // (core.ts scheduleFlush) — if mounting and the first setN() are split
+  // across two separate evaluate() calls (as mountVariant()+a later evaluate
+  // would do), the IPC round-trip between them is enough of an event-loop
+  // turn for that scheduled flush to fire on its own, rendering the default
+  // windowN=50 BEFORE setThrowOnId() is ever set — turning "grow 0->5 with a
+  // fault" into an untested "shrink 50->5 with no fault" instead.
+  await page.goto('about:blank')
+  await page.addScriptTag({ path: BUNDLE })
+  const result = await page.evaluate(() => {
+    const g = (window as unknown as { __nvHwm: HWMGlobal }).__nvHwm
+    const h = g.mountVariant(document.body, document)
+    // Run 1: grow 0 -> 5, itemTemplate throws while constructing the row for id=3
+    // (the reactive core swallows the throw internally — routeErrorFrom finds no
+    // errorBoundary and logs to console; it never rethrows out of flushSync()).
+    h.setThrowOnId(3)
+    h.setN(5)
+    const domCountAfterFault = h.root.querySelectorAll('[data-id]').length
+
+    // Run 2: shrink to 1, fault cleared. If activeCount correctly reflects only
+    // the rows actually committed before the Run-1 throw (not the full requested
+    // N=5), this shrink must reclaim every row above index 0 — including the
+    // ones Run 1 created before failing — leaving exactly 1 row in the DOM.
+    h.setThrowOnId(null)
+    h.setN(1)
+    const domCountAfterRecovery = h.root.querySelectorAll('[data-id]').length
+
+    return { domCountAfterFault, domCountAfterRecovery }
+  })
+  // Run 1 partially succeeds (rows for id=0,1,2 construct fine before id=3 throws) —
+  // some rows are expected in the DOM, just not the full requested 5.
+  expect(result.domCountAfterFault, 'partial grow leaves the successfully-built rows visible').toBe(
+    3,
+  )
+  // The load-bearing assertion: after Run 1's partial failure, a subsequent shrink
+  // to N=1 must leave exactly 1 row — not 3 — proving activeCount tracked the real
+  // committed state (3), not an unadvanced stale value that would leave rows 1
+  // and 2 permanently orphaned and un-reclaimable by any future resize.
+  expect(
+    result.domCountAfterRecovery,
+    'a later resize must reclaim every row the failed grow left behind, not just the requested delta',
+  ).toBe(1)
 })

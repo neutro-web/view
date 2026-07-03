@@ -823,6 +823,16 @@ export function wireRecycledList(
 
     if (N > activeCount) {
       // Reuse retained-inactive slots [activeCount, min(N,P)) before allocating.
+      // activeCount is committed per-iteration (not once after the loop): if a
+      // reuse or allocation throws partway through (e.g. the itemTemplate below
+      // throws — the reactive core swallows this via routeErrorFrom and does not
+      // propagate it out of flushSync, so the caller never sees it), activeCount
+      // must reflect exactly what was actually committed so far. Committing only
+      // after the whole loop would leave activeCount understating the real DOM
+      // state on a partial failure — later resizes would then be unable to tell
+      // which rows are genuinely active, leaving the ones the failed run did
+      // manage to create permanently un-reclaimable (they'd never fall inside
+      // any future shrink's [N, activeCount) range).
       const reuseEnd = Math.min(N, P)
       for (let i = activeCount; i < reuseEnd; i++) {
         // biome-ignore lint/style/noNonNullAssertion: i < P = pool.length, in-bounds
@@ -830,8 +840,8 @@ export function wireRecycledList(
         rec.valueSig.set(next[i])
         rec.indexSig.set(i)
         parent.insertBefore(rec.rootEl, anchorNode)
+        activeCount = i + 1
       }
-      activeCount = reuseEnd
 
       // Allocate brand new slots [P, N) — mirrors wireRecycledList's grow path exactly.
       for (let i = P; i < N; i++) {
@@ -862,8 +872,8 @@ export function wireRecycledList(
         )!
 
         pool.push({ valueSig, indexSig, rootEl: mountedRoot, dispose })
+        activeCount = pool.length
       }
-      activeCount = N
     } else if (N < activeCount) {
       // Shrink: deactivate [N, activeCount) — detach DOM, stop feeding. DO NOT DISPOSE.
       for (let i = N; i < activeCount; i++) {
