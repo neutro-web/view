@@ -31,7 +31,8 @@
 
 _Last updated: 2026-07-02. Template-IR **v0.4.5**, reactive-core contract **v0.4.3**.
 Control-flow completion (PT-3) DONE. Mode-A nested structural: all 4 directions closed
-(A `b0409cf`, A′ `3a3cdbe`). Follow-up B next._
+(A `b0409cf`, A′ `3a3cdbe`). Follow-up B LANDED (`209c33b`) — `<recycle>` churn gated
+across scroll/replace/append/prepend; grow/shrink advisory → B′ open (design)._
 _Active frontier: v0.5.0 API-parity. Control-flow completion (PT-3) DONE. Performance arc CLOSED._
 
 > History before `Component API spec APPROVED [2026-06-20]` is in
@@ -94,14 +95,21 @@ _Active frontier: v0.5.0 API-parity. Control-flow completion (PT-3) DONE. Perfor
     stub, not on v1 path — `<recycle>` parity bounded by its own back-end coverage;
     three-back-end was a commission overreach, accepted). Closure-clean (empty
     core/interpreter/emitted-mount diff). See [2026-07-02] log entry.
-  - **Follow-up B — combined perf harness for `<conditional>`/`<recycle>`/`<switch>` —
-    NEXT (was held behind A′; A′ landed `3a3cdbe`).** Only `<each>` has the jfb-style
-    row app; the other three structural kinds never got one. Defensible given the
-    performance arc closed on the shared-scaffolding finding (per-construct cost is
-    structural). **The real value is regression-guarding `<recycle>`**, whose node-churn→0
-    claim rests on a one-shot verdict probe (`8da893a`), not a standing benchmark. Scope
-    as one combined harness (all three). Commission not yet written. See [2026-07-01] +
-    [2026-07-02] log entries.
+  - **Follow-up B — perf harness for conditional / `<recycle>` / `<switch>` — LANDED
+    `209c33b`.** `<recycle>` churn now failable-gated across replace/append/prepend (+
+    pre-existing scroll-window `8da893a`), keyed-contrast-validated, real-browser ×3.
+    Two scope corrections: (#1) no in-repo foil venue exists — CP-2d was external/manual,
+    never committed; Deliverables 2/3 built nv-only advisory (commission's foil premise
+    was an architect error). (#2) `<recycle>` has no zero-churn guarantee across window
+    grow/shrink — `wireRecycledList` has no free-list retention (`alloc=10000 free=6000`);
+    previously-undocumented gap, not a regression; tracked advisory → Follow-up B′.
+    conditional/switch have floor baselines (binding-free, don't generalize). Test-infra
+    only (zero `src/` diff).
+  - **Follow-up B′ — high-water-mark pooling for `<recycle>` window resize — OPEN
+    (design, unprioritized).** Grow/shrink churns because `wireRecycledList` sizes the
+    pool to exact length, no free-list retention. Churn-vs-memory tradeoff, not a bug.
+    Advisory grow/shrink logs are the evidence base. Decide worth-building before
+    commissioning. See [2026-07-02] log entry.
 - **Build pipeline `.nv → .js`:** Mode A, landed. Executable-module gate closed.
   **[2026-06-25] `.nv` author path proven E2E in real browsers** (probe `8146d82`): `.nv` → plugin →
   esbuild → browser, click updates DOM, chromium+webkit. Authoring is assignment-form
@@ -1142,3 +1150,98 @@ prior dated Log entries are **not** rewritten (append-only) — this entry super
 vocabulary by citation.
 
 **Contract impact:** none. Naming convention only.
+
+---
+
+### [2026-07-02] Follow-up B LANDED `209c33b` — perf harness for conditional / `<recycle>` / `<switch>`; two scope corrections
+
+**Commission:** `commission-followup-b-perf-harness.md`. Extend the existing `<recycle>`
+node-churn gate to a scenario matrix (failable), add conditional/switch advisory
+baselines, integrate the jfb foil venue.
+
+**Premise correction (carried from the commission, now recorded permanently).** The
+[2026-07-01] Follow-up B note claimed `<recycle>`'s node-churn→0 rested on "a one-shot
+verdict probe (`8da893a`), not a standing benchmark." **False.** Verified at `ce81714`:
+`recycling-node-churn.spec.ts` (`8da893a`) was already a standing, failable,
+real-browser gate (asserts `nodeAllocCount===0 && nodeFreeCount===0`, keyed contrast,
+default `pnpm test:browser`, no skip). B extended its scenario coverage; it did not
+create a gate. The original three tests (`A2 recycled`, `A2 keyed control`, `A3
+wall-clock`) are byte-unmodified across the branch (verified: no `-` removals in the
+diff).
+
+**Landed (test/benchmark infra only, zero `src/` diff, verified):**
+- **Deliverable 1 — churn matrix, failable, real-browser (Chromium+WebKit+Firefox).**
+  `recycling-node-churn.spec.ts` extended with a parametrized matrix — one shared
+  `runChurnScenario` helper over a `SCENARIOS` table, not forked specs (collapse
+  discipline held, verified at spec:254-280). **Failable** (recycled `alloc===0 &&
+  free===0`, keyed-contrast `toBeGreaterThan(0)` proving churn is detectable):
+  **replace, append, prepend** — all pass; keyed arm shows scenario-proportional churn
+  (~4 ReactiveNodes/newly-keyed row). **Advisory** (logged, never asserted): grow,
+  shrink (see scope correction #2).
+- **Deliverable 2 — nv-only wall-clock venue** (`nv-benchmark-recycle.spec.ts`, 10
+  scenario×arm tests, sentinel-only, timing never asserted) — see scope correction #1.
+- **Deliverable 3 — conditional/switch advisory baseline** (`nv-benchmark-conditional.spec.ts`
+  + `fixtures/benchmark-conditional/`, none existed before). Records wall-clock +
+  alloc/free per branch swap. **Caveat recorded in-file:** the measured 1-node-alloc/
+  1-free-per-swap reflects deliberately *binding-free static* branch content; it does
+  not generalize to branches containing real bindings. This is a floor baseline, not a
+  representative one.
+
+**Scope correction #1 — the in-repo jfb foil venue does not exist.** The commission's
+Deliverables 2/3 assumed an in-repo, CI-runnable Solid/Svelte/Lit/React/Vanilla harness.
+Verified false: no foil deps in `package.json`; the real 5-framework comparison (CP-2d)
+was a one-off external manual Puppeteer run against a cloned `js-framework-benchmark`,
+never committed here. **The commission's foil-venue premise was an architect error.**
+Resolution: Deliverables 2/3 built as nv-only advisory venue (same esbuild+Playwright
+pattern as `nv-benchmark-probe.spec.ts`), real numbers logged, no live foil comparison.
+A foil comparison remains the external CP-2d-style manual process — a separately-scoped
+workstream (vendoring 4 frameworks + a non-Playwright driver), not buildable inside this
+deliverable.
+
+**Scope correction #2 — `<recycle>` has no zero-churn guarantee across a window-size
+resize.** Verified at source (`wireRecycledList`, interpreter.ts:777-849): the pool
+re-binds slots `[0, min(N,P))` with zero churn (the constant-window fast path
+`8da893a` covers), but **grows** by allocating fresh records `[P,N)` (createRoot +
+pool.push) and **shrinks** by disposing `[N,P)` + truncating `pool.length=N` — **no
+free-list retention across a resize.** Reproduced: `alloc=10000 free=6000` for grow and
+shrink over the 40-step window. **This is a previously-undocumented gap, not a
+regression** — `8da893a`'s claim only ever covered a fixed-size sliding window; source
+confirms resize was never zero-churn. Resolution (Kofi-confirmed): grow/shrink tracked
+**advisory** (logged every run, standing evidence trail), not dropped. Opens a follow-up
+candidate (below).
+
+**Deviations (all flagged, none touching `src/`):** `replaceAll` fixture preserved row
+ids (keyed contrast couldn't detect churn) — fixed to assign new ids; single-body
+10-combo wall-clock test timed out on Firefox — split per scenario×arm; shared `dist/`
+bundle path between two specs (benign byte-identical race) — tidied; two measurement-audit
+caveats added (IPC-timing note, fixture-specific-figure note).
+
+**Contract/Template-IR:** unchanged (v0.4.3 / v0.4.5) — benchmark/test infra only.
+
+**Result:** Follow-up B done. `<recycle>` churn now gated across replace/append/prepend
+(plus the pre-existing scroll-window); grow/shrink advisory with a standing evidence
+trail; conditional/switch have floor baselines. Follow-up A/A′/B all closed — the
+control-flow arc's tracked debt is clear except the new grow/shrink candidate.
+
+---
+
+### [2026-07-02] Follow-up B′ opened — high-water-mark pooling for `<recycle>` window resize (churn-vs-memory tradeoff)
+
+**Opened by:** Follow-up B scope-correction #2 ([2026-07-02], `209c33b`). Grow/shrink
+window resize churns (`alloc=10000 free=6000` measured) because `wireRecycledList`
+(interpreter.ts:777-849) sizes the pool to exact current length with no free-list
+retention.
+
+**Question (design-open, not a bug):** should `wireRecycledList` retain a high-water-mark
+pool — keep disposed slots on a free-list across shrink, reuse them on regrow — to make
+resize zero-churn, at the cost of holding memory for the largest window ever seen? This
+is a **churn-vs-memory tradeoff**, not a correctness fix. The advisory grow/shrink logs
+(Deliverable 1) are the standing evidence base for deciding whether it pays.
+
+**Escalation note:** likely in-stream (renderer pool-management data structure, no §1
+invariant, doesn't change what a computation observes) — but the free-list retention
+touches `wireRecycledList`'s disposal timing, so read the seam and confirm it doesn't
+alter observable disposal semantics before ruling. If it does, escalate.
+
+**Status:** OPEN, unprioritized. Not blocking. Decide worth-building from the logged
+numbers before commissioning.
