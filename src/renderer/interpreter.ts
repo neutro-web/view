@@ -774,7 +774,11 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
   })
 }
 
-function wireRecycledList(binding: RecycledListBinding, anchorNode: Node, doc: Document): void {
+export function wireRecycledList(
+  binding: RecycledListBinding,
+  anchorNode: Node,
+  doc: Document,
+): void {
   const parent = anchorNode.parentNode
   if (parent === null) {
     throw new Error('[nv/interpreter] RecycledListBinding: anchor has no parent')
@@ -845,6 +849,103 @@ function wireRecycledList(binding: RecycledListBinding, anchorNode: Node, doc: D
   onCleanup(() => {
     for (const rec of pool) rec.dispose()
     pool.length = 0
+  })
+}
+
+/**
+ * PROTOTYPE — Follow-up B′ Phase 1. High-water-mark variant of wireRecycledList.
+ * NOT wired into the <recycle> binding dispatch — unreachable from .nv authoring.
+ * On shrink: detaches DOM + stops feeding signals (retains owner/signals/DOM alive-but-inert)
+ * instead of disposing. On regrow: reuses retained inactive slots before allocating new ones.
+ * Pool never shrinks below its high-water-mark (unbounded retention — eviction deferred).
+ */
+export function wireRecycledListHWM(
+  binding: RecycledListBinding,
+  anchorNode: Node,
+  doc: Document,
+): void {
+  const parent = anchorNode.parentNode
+  if (parent === null) {
+    throw new Error('[nv/interpreter] RecycledListBinding (HWM): anchor has no parent')
+  }
+
+  const pool: RecycledRecord[] = []
+  let activeCount = 0
+  const listOwner = getOwner()
+
+  effect(() => {
+    const next = binding.items()
+    const N = next.length
+    const P = pool.length
+
+    // Rebind already-active slots that remain active — pure Op-3, unchanged.
+    const rebindCount = Math.min(N, activeCount)
+    for (let i = 0; i < rebindCount; i++) {
+      // biome-ignore lint/style/noNonNullAssertion: i < activeCount <= pool.length
+      const rec = pool[i]!
+      rec.valueSig.set(next[i])
+      rec.indexSig.set(i)
+    }
+
+    if (N > activeCount) {
+      // Reuse retained-inactive slots [activeCount, min(N,P)) before allocating.
+      const reuseEnd = Math.min(N, P)
+      for (let i = activeCount; i < reuseEnd; i++) {
+        // biome-ignore lint/style/noNonNullAssertion: i < P = pool.length, in-bounds
+        const rec = pool[i]!
+        rec.valueSig.set(next[i])
+        rec.indexSig.set(i)
+        parent.insertBefore(rec.rootEl, anchorNode)
+      }
+      activeCount = reuseEnd
+
+      // Allocate brand new slots [P, N) — mirrors wireRecycledList's grow path exactly.
+      for (let i = P; i < N; i++) {
+        const valueSig = signal<unknown>(next[i])
+        const indexSig = signal<number>(i)
+        let mountedRoot!: Node
+
+        // biome-ignore lint/style/noNonNullAssertion: runWithOwner returns non-null when owner is non-null
+        const dispose = runWithOwner(listOwner, () =>
+          createRoot((d) => {
+            const itemIR = binding.itemTemplate(valueSig, indexSig)
+            const { roots } = mountFragment(itemIR, parent, doc, anchorNode)
+            const contentRoots = roots.filter(
+              (n) => n.nodeType !== 3 /* TEXT_NODE */ || (n.textContent?.trim() ?? '') !== '',
+            )
+            const [root] = contentRoots
+            if (root === undefined || contentRoots.length !== 1) {
+              throw new Error(
+                '[nv] Multi-root list items are not supported in v1. Wrap the item template in a single root element.',
+              )
+            }
+            mountedRoot = root
+            onCleanup(() => {
+              if (mountedRoot.parentNode !== null) mountedRoot.parentNode.removeChild(mountedRoot)
+            })
+            return d
+          }),
+        )!
+
+        pool.push({ valueSig, indexSig, rootEl: mountedRoot, dispose })
+      }
+      activeCount = N
+    } else if (N < activeCount) {
+      // Shrink: deactivate [N, activeCount) — detach DOM, stop feeding. DO NOT DISPOSE.
+      for (let i = N; i < activeCount; i++) {
+        // biome-ignore lint/style/noNonNullAssertion: i < activeCount <= pool.length
+        const rec = pool[i]!
+        if (rec.rootEl.parentNode !== null) rec.rootEl.parentNode.removeChild(rec.rootEl)
+      }
+      activeCount = N
+    }
+    // pool.length is the high-water-mark — it never shrinks in Phase 1 (eviction deferred).
+  })
+
+  onCleanup(() => {
+    for (const rec of pool) rec.dispose()
+    pool.length = 0
+    activeCount = 0
   })
 }
 
