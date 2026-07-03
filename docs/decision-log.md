@@ -105,11 +105,19 @@ _Active frontier: v0.5.0 API-parity. Control-flow completion (PT-3) DONE. Perfor
     previously-undocumented gap, not a regression; tracked advisory → Follow-up B′.
     conditional/switch have floor baselines (binding-free, don't generalize). Test-infra
     only (zero `src/` diff).
-  - **Follow-up B′ — high-water-mark pooling for `<recycle>` window resize — OPEN
-    (design, unprioritized).** Grow/shrink churns because `wireRecycledList` sizes the
-    pool to exact length, no free-list retention. Churn-vs-memory tradeoff, not a bug.
-    Advisory grow/shrink logs are the evidence base. Decide worth-building before
-    commissioning. See [2026-07-02] log entry.
+  - **Follow-up B′ — HWM pooling for `<recycle>` resize — LANDED `0ac39f9`, but
+    VIOLATES the retention-cap lock.** Mechanism sound (≥42.9% resize win, inertness
+    producer-side, collapsed to sole path, no contract impact). But retention is
+    **uncapped** — bounded only by high-water-mark, sole path, no opt-out, in v0.5.0 —
+    against the locked "retention requires cap; measure before building" (v1.0.0
+    probe-first). Architect-owned miss (the B′ commission authorized uncapped). **Not
+    closed → reopens as B′-cap, required before v0.5.0 tag.** Plus: inertness holds only
+    for own-row-signal templates; external/global-signal reads keep live subscribed
+    effects on detached rows (perf cliff without a cap). See [2026-07-03] log entry.
+  - **Follow-up B′-cap — bound the `<recycle>` HWM retention — OPEN, REQUIRED BEFORE
+    v0.5.0 TAG.** Cap the high-water-mark (retain to a bounded multiple of active, evict
+    beyond) + address external-signal subscription cost on detached rows. Blocks tag.
+    See [2026-07-03] log entry.
 - **Build pipeline `.nv → .js`:** Mode A, landed. Executable-module gate closed.
   **[2026-06-25] `.nv` author path proven E2E in real browsers** (probe `8146d82`): `.nv` → plugin →
   esbuild → browser, click updates DOM, chromium+webkit. Authoring is assignment-form
@@ -174,6 +182,8 @@ _Active frontier: v0.5.0 API-parity. Control-flow completion (PT-3) DONE. Perfor
 - **Roadmap:** `<Index>` gap closed by `<recycle>`. Retention/keep-alive named as a
   **v1.0.0 probe-first candidate** (second member of the avoid-create family; distinct
   from recycling; unbounded-memory footgun requires cap; measure before building).
+  — NOTE [2026-07-03]: an uncapped HWM implementation landed early (`0ac39f9`, v0.5.0)
+  against this lock; B′-cap reopened as a required-before-tag gate to restore compliance.
 - **Reconcile Lever A+B perf (2026-06-29):** remove-one script −60% (1.5→0.6ms, near vanilla 0.5ms); wall-clock −3% (paint-bound — 90% of 17ms confirmed by Probe 2 DevTools trace); swap no-regress; key-call 4n→n. C-paint CLEAR (staging no effect, layout intrinsic). C-create CLEAR on node-weight hypothesis; redirect to C-create-B (DOM-stamping census).
 - **Standing CP-2d board (current = post-A1 CP-2d-REMEASURE, L4633):** create-1k 1.78×, swap 0.29×, select 0.27×, update-10th 0.18×, remove-one **script-parity with vanilla** (0.6ms vs 0.5ms) / wall-clock 1.23× (paint-bound), memory **2.154×** (post-elision). Note: tight mutation baselines (0.29×/0.27×/0.18×) are JIT-warmed session-specific.
 - **v0.1.0 — TAG-READY.** CP-4 docs placed. Swap deficit is v0.5.0; no blocking items remain.
@@ -1245,3 +1255,54 @@ alter observable disposal semantics before ruling. If it does, escalate.
 
 **Status:** OPEN, unprioritized. Not blocking. Decide worth-building from the logged
 numbers before commissioning.
+
+### [2026-07-03] Follow-up B′ HWM pooling LANDED `0ac39f9` — but violates the retention-cap lock; B′-cap required before v0.5.0 tag
+
+**Landed (verified at SHA, empty core diff):** high-water-mark pooling for `<recycle>`
+resize. Phase 1 measured ≥42.9% resize wall-clock win across all 9 magnitude/browser
+cells (up to 97.8%); Phase 2 hardened + collapsed. **Callsite ruling: collapse** —
+`wireRecycledList` is now the sole path (HWM-based); the old dispose-on-shrink path was
+deleted, not kept as an alt. Inertness is producer-side by loop bounds (verified Phase 1,
+`98f08a1`): shrink detaches DOM + stops feeding `[N, activeCount)`, never disposes; no
+code path writes a slot ≥ activeCount. No contract impact — inertness-by-not-feeding, not
+suspend/resume. Post-landing deep review fixed a real fault-tolerance bug (`0ac39f9`): a
+throwing item template mid-grow orphaned DOM rows because `activeCount` only advanced
+after the full loop — fixed to advance incrementally, with a fault-injection regression
+test.
+
+**Core-semantics dependency (on record per Phase 2 authorization):** HWM inertness is
+sound **only because** fine-grained effects are demand/change-driven — an unwritten
+signal drives no work, so a detached-but-live row is quiescent at rest. If nv's effects
+ever became eager/polling, HWM inertness breaks silently.
+
+**LOCK VIOLATION (caught by cross-cutting deep review, not either phase's scoped review;
+architect-owned miss).** The Current State header ([retention entry], decision-log.md:174-176)
+locks retention/keep-alive as a **v1.0.0 probe-first candidate** requiring a **cap**
+("unbounded-memory footgun requires cap; measure before building"). What landed is
+**uncapped** retention (pool bounded only by its own high-water-mark — a list that spikes
+to N holds N rows' live reactive graph forever), **collapsed to the sole `<recycle>`
+path** (no opt-out), in **v0.5.0** (not v1.0.0). Three deviations from the lock at once.
+**Root cause: the B′ commission ([2026-07-02]) authorized "unbounded high-water-mark
+accepted, eviction deferred" without cross-checking the retention lock — an architect
+error, not a CC miss.** Phase reviews weren't scoped to the roadmap; the deep review was
+and caught it.
+
+**Ruling — do not reverse the lock; cap the implementation.** Steelman for accepting
+as-is: wins are large and real, memory is bounded by high-water-mark (not unbounded per
+op). Where it leaks: "bounded by high-water-mark" is *exactly* the footgun the lock
+names — spike-then-shrink holds the spike's full graph indefinitely, on the sole path,
+no opt-out. The lock exists precisely so a good speed number doesn't buy past the memory
+cost. **A cap is required, not optional.** Since v0.5.0 is not tagged, the uncapped
+version may sit on main *temporarily* as a known defect while B′-cap is built — no
+interim revert needed — but **B′-cap is a required-before-v0.5.0-tag gate.**
+
+**Second finding folded in (more serious than "lower-priority"):** inertness soundness
+only holds for item templates reading **their own row's signals**. A template reading an
+external/global signal (theme, locale, viewport) keeps a **live, still-subscribed effect
+on a detached row** — every external write does work proportional to the high-water-mark.
+Reading a global from a list row is common, not edge. Combined with uncapped retention,
+worst case is N detached-but-subscribed effects all reacting to one global write. **A cap
+bounds this; without a cap it is a perf cliff.** Fold into B′-cap, do not defer.
+
+**Contract impact:** none. **Result:** B′ mechanism landed and sound; retention-cap
+compliance is NOT met. B′ is **not closed** — it reopens as B′-cap.
