@@ -21,15 +21,13 @@ export type MutationScenario = {
 // documented "window grow/shrink" requirement are covered this way without a
 // separate windowN size to add.
 //
-// grow/shrink are 'advisory', not 'failable': <recycle>'s pool
-// (wireRecycledList, src/renderer/interpreter.ts:777-849) sizes to exactly the
-// current list length on every run with no free-list retention across a
-// resize — shrinking disposes the excess pool entries, growing allocates
-// fresh ones. There is no zero-churn guarantee across a windowN change (only
-// the fixed-size sliding-window scroll, 8da893a's original claim, is
-// zero-churn). Discovered during Task 3 implementation — see plan's
-// "Deviation discovered during execution" section. Logged for a future
-// commission to decide whether high-water-mark pooling is worth building.
+// grow/shrink were advisory because the pre-collapse wireRecycledList (a separate,
+// non-retaining implementation, deleted in Follow-up B' Phase 2) had no free-list
+// retention across a resize. Post-collapse, wireRecycledList IS the HWM-pooling
+// implementation and grow/shrink are now genuinely zero-churn — see
+// docs/superpowers/handoffs/2026-07-03-followup-b-prime-phase2-landing.md.
+// Left as `mode: 'advisory'` deliberately: tightening to 'failable' is a distinct
+// decision (whether to make this a build-blocking gate), not decided by this task.
 export const SCENARIOS: MutationScenario[] = [
   {
     key: 'grow',

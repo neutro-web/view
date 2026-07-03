@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { createRoot, flushSync, signal } from '@neutro/view/core'
-import { wireRecycledListHWM } from '@neutro/view/renderer/internal'
+import { wireRecycledList } from '@neutro/view/renderer/internal'
 
 export function mount(parent: Element, doc: Document, poolSize = 10000) {
   const M = poolSize
@@ -16,7 +16,7 @@ export function mount(parent: Element, doc: Document, poolSize = 10000) {
   wrapper.id = 'variant-root'
   parent.appendChild(wrapper)
 
-  // Test-only introspection: wireRecycledListHWM's debug hook hands back a live
+  // Test-only introspection: wireRecycledList's debug hook hands back a live
   // reference to its real internal `pool` array (same identity it mutates
   // internally — pushes on grow, never removed). Reading pool[i].rootEl gives the
   // real mounted node for slot i, including while it is retained-but-detached
@@ -28,7 +28,7 @@ export function mount(parent: Element, doc: Document, poolSize = 10000) {
     dispose = d
     const anchor = doc.createComment('recycle-anchor')
     wrapper.appendChild(anchor)
-    wireRecycledListHWM(
+    wireRecycledList(
       {
         kind: 'recycled-list',
         items: () => allRows().slice(0, windowN()),
@@ -84,7 +84,7 @@ export function mount(parent: Element, doc: Document, poolSize = 10000) {
       flushSync()
     },
     // Mutates the *backing data source* (allRows), not the pooled valueSig directly —
-    // exercises wireRecycledListHWM's own resize/rebind effect, proving its rebind
+    // exercises wireRecycledList's own resize/rebind effect, proving its rebind
     // loop (i < activeCount) never reads/writes an inactive row's slice of `next`.
     pokeBackingRow: (rowIndex: number, newLabel: string) => {
       const rows = allRows().slice()

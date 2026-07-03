@@ -1,0 +1,21 @@
+const AppRecycleIntegration = $component(() => {
+  $script(() => {
+    const rows = signal(Array.from({ length: 50 }, (_, i) => ({ id: i, label: 'row-' + i })))
+    function grow() {
+      const added = Array.from({ length: 50 }, (_, i) => ({ id: 50 + i, label: 'row-' + (50 + i) }))
+      rows.set([...rows(), ...added])
+    }
+    function shrink() {
+      rows.set(rows().slice(0, 50))
+    }
+  })
+  $render(() => html`
+    <div>
+      <button id="grow" @click="${() => grow()}">Grow</button>
+      <button id="shrink" @click="${() => shrink()}">Shrink</button>
+      <recycle .of="${rows()}" let={item, i}>
+        <div class="row" data-id="${item.id}">${item.label}</div>
+      </recycle>
+    </div>
+  `)
+})

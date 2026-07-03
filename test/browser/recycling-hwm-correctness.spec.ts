@@ -1,6 +1,8 @@
 /**
- * recycling-hwm-correctness — Follow-up B′ Phase 1, G1 correctness gates.
- * Tests the wireRecycledListHWM prototype in isolation (not wired to <recycle> authoring).
+ * recycling-hwm-correctness — Follow-up B′ Phase 2, G1 correctness gates.
+ * Tests wireRecycledList (the collapsed, HWM-pooling production implementation) via the
+ * test-only mountVariant bypass harness (direct function construction, not .nv authoring —
+ * see recycling-collapse-integration.spec.ts for the real-.nv-compilation counterpart).
  */
 import { mkdir } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
@@ -15,7 +17,6 @@ const fixtureDir = join(__dirname, 'fixtures/recycling-hwm')
 const distDir = join(__dirname, 'dist')
 const BUNDLE = join(distDir, 'nv-recycling-hwm-bundle.js')
 
-type CurrentHandle = { root: Element; dispose(): void; setN(n: number): void }
 type VariantHandle = {
   root: Element
   dispose(): void
@@ -30,13 +31,12 @@ type VariantHandle = {
 }
 
 type HWMGlobal = {
-  mountCurrent(p: Element, d: Document): CurrentHandle
   mountVariant(p: Element, d: Document): VariantHandle
   flushSync(): void
   __test: { nodeAllocCount: number; nodeFreeCount: number; resetNodeCounts(): void }
 }
 
-type Handles = { current: CurrentHandle; variant: VariantHandle }
+type Handles = { variant: VariantHandle }
 
 test.beforeAll(async () => {
   await mkdir(distDir, { recursive: true })
@@ -79,43 +79,39 @@ test.beforeAll(async () => {
   })
 })
 
-async function mountBoth(page: import('@playwright/test').Page): Promise<void> {
+async function mountVariant(page: import('@playwright/test').Page): Promise<void> {
   await page.goto('about:blank')
   await page.addScriptTag({ path: BUNDLE })
   await page.evaluate(() => {
     const g = (window as unknown as { __nvHwm: HWMGlobal }).__nvHwm
     ;(window as unknown as { __handles: unknown }).__handles = {
-      current: g.mountCurrent(document.body, document),
       variant: g.mountVariant(document.body, document),
     }
   })
 }
 
-test('G1.1 reuse correctness: shrink/regrow sequence renders identical row sets on current vs variant', async ({
+test('G1.1 reuse correctness: shrink/regrow sequence renders correct, unique rows', async ({
   page,
 }) => {
-  await mountBoth(page)
+  await mountVariant(page)
   const sequence = [100, 50, 100, 500, 100]
   for (const n of sequence) {
-    const [currentIds, variantIds] = await page.evaluate((nn) => {
+    const ids = await page.evaluate((nn) => {
       const h = (window as unknown as { __handles: Handles }).__handles
-      h.current.setN(nn)
       h.variant.setN(nn)
-      const idsOf = (root: Element) =>
-        Array.from(root.querySelectorAll('[data-id]'))
-          .map((el) => el.getAttribute('data-id'))
-          .sort((a, b) => Number(a) - Number(b))
-      return [idsOf(h.current.root), idsOf(h.variant.root)]
+      return Array.from(h.variant.root.querySelectorAll('[data-id]'))
+        .map((el) => el.getAttribute('data-id'))
+        .sort((a, b) => Number(a) - Number(b))
     }, n)
-    expect(variantIds, `mismatch at N=${n}`).toEqual(currentIds)
-    expect(currentIds.length, `N=${n} row count`).toBe(n)
+    expect(ids.length, `N=${n} row count`).toBe(n)
+    expect(new Set(ids).size, `N=${n} unique data-id count`).toBe(n)
   }
 })
 
 test('G1.2 inertness: shrunk-out row is not updated when the backing data source mutates', async ({
   page,
 }) => {
-  await mountBoth(page)
+  await mountVariant(page)
   const result = await page.evaluate(() => {
     const h = (window as unknown as { __handles: Handles }).__handles
     // Grow to 100 so row 60 gets allocated.
@@ -127,7 +123,7 @@ test('G1.2 inertness: shrunk-out row is not updated when the backing data source
     // Shrink to 50 so row 60 becomes inactive (detached, not disposed).
     h.variant.setN(50)
 
-    // Mutate the *backing data source* at index 60 — wireRecycledListHWM's own
+    // Mutate the *backing data source* at index 60 — wireRecycledList's own
     // resize/rebind effect must not propagate this into the inactive slot, since
     // its rebind loop only touches [0, activeCount).
     h.variant.pokeBackingRow(60, 'MUTATED')
@@ -149,63 +145,37 @@ test('G1.2 inertness: shrunk-out row is not updated when the backing data source
   expect(result.labelAfter).not.toBe('MUTATED')
 })
 
-test('G1.3 churn elimination: variant shows zero alloc/free on shrink/regrow cycle; current does not', async ({
+test('G1.3 churn elimination: variant shows zero alloc/free on shrink/regrow cycle', async ({
   page,
 }) => {
-  await mountBoth(page)
+  await mountVariant(page)
   const result = await page.evaluate(() => {
     const g = (window as unknown as { __nvHwm: HWMGlobal }).__nvHwm
     const h = (window as unknown as { __handles: Handles }).__handles
-    // Warm both up to 100 first so subsequent 100<->50 cycling is pure reuse/dispose,
-    // not first-allocation.
-    h.current.setN(100)
     h.variant.setN(100)
-    g.__test.resetNodeCounts()
-    for (let i = 0; i < 10; i++) {
-      h.current.setN(50)
-      h.current.setN(100)
-    }
-    const currentAlloc = g.__test.nodeAllocCount
-    const currentFree = g.__test.nodeFreeCount
     g.__test.resetNodeCounts()
     for (let i = 0; i < 10; i++) {
       h.variant.setN(50)
       h.variant.setN(100)
     }
-    const variantAlloc = g.__test.nodeAllocCount
-    const variantFree = g.__test.nodeFreeCount
-    return { currentAlloc, currentFree, variantAlloc, variantFree }
+    return { variantAlloc: g.__test.nodeAllocCount, variantFree: g.__test.nodeFreeCount }
   })
   expect(result.variantAlloc).toBe(0)
   expect(result.variantFree).toBe(0)
-  expect(result.currentAlloc).toBeGreaterThan(0)
 })
 
-test('G1.4 no regression to the fast path: same-N mutations allocate nothing on either implementation', async ({
-  page,
-}) => {
-  await mountBoth(page)
+test('G1.4 no regression to the fast path: same-N mutations allocate nothing', async ({ page }) => {
+  await mountVariant(page)
   const result = await page.evaluate(() => {
     const g = (window as unknown as { __nvHwm: HWMGlobal }).__nvHwm
     const h = (window as unknown as { __handles: Handles }).__handles
-    h.current.setN(100)
     h.variant.setN(100)
-    g.__test.resetNodeCounts()
-    for (let i = 0; i < 10; i++) {
-      h.current.setN(100)
-    }
-    const currentAlloc = g.__test.nodeAllocCount
-    const currentFree = g.__test.nodeFreeCount
     g.__test.resetNodeCounts()
     for (let i = 0; i < 10; i++) {
       h.variant.setN(100)
     }
-    const variantAlloc = g.__test.nodeAllocCount
-    const variantFree = g.__test.nodeFreeCount
-    return { currentAlloc, currentFree, variantAlloc, variantFree }
+    return { variantAlloc: g.__test.nodeAllocCount, variantFree: g.__test.nodeFreeCount }
   })
-  expect(result.currentAlloc).toBe(0)
-  expect(result.currentFree).toBe(0)
   expect(result.variantAlloc).toBe(0)
   expect(result.variantFree).toBe(0)
 })
@@ -249,7 +219,7 @@ test('G1.5 disposal on teardown: dispose() frees the entire retained pool, not j
 })
 
 test('ADVERSARIAL: rapid grow/shrink/grow does not corrupt pool bookkeeping', async ({ page }) => {
-  await mountBoth(page)
+  await mountVariant(page)
   const result = await page.evaluate(() => {
     const h = (window as unknown as { __handles: Handles }).__handles
     const seq = [100, 50, 200, 10, 500, 50, 100]
@@ -264,7 +234,7 @@ test('ADVERSARIAL: rapid grow/shrink/grow does not corrupt pool bookkeeping', as
 })
 
 test('ADVERSARIAL: resize to 0 and back regrows correctly', async ({ page }) => {
-  await mountBoth(page)
+  await mountVariant(page)
   const result = await page.evaluate(() => {
     const h = (window as unknown as { __handles: Handles }).__handles
     h.variant.setN(100)
@@ -284,7 +254,7 @@ test('ADVERSARIAL: resize to 0 and back regrows correctly', async ({ page }) => 
 test('ADVERSARIAL: resize interleaved with replace/append/prepend stays correct', async ({
   page,
 }) => {
-  await mountBoth(page)
+  await mountVariant(page)
   const result = await page.evaluate(() => {
     const h = (window as unknown as { __handles: Handles }).__handles
     h.variant.setN(100)
@@ -306,7 +276,7 @@ test('ADVERSARIAL: resize interleaved with replace/append/prepend stays correct'
 test('ADVERSARIAL: resize during pending effects does not lose or duplicate rows', async ({
   page,
 }) => {
-  await mountBoth(page)
+  await mountVariant(page)
   const result = await page.evaluate(() => {
     const h = (window as unknown as { __handles: Handles }).__handles
     // Rapid unflushed setN calls before any flush — exercises the resize effect
@@ -327,7 +297,7 @@ test('ADVERSARIAL: resize during pending effects does not lose or duplicate rows
 test('BOUNDED MEMORY: repeated 50<->100 resize loop never grows pool past the high-water-mark', async ({
   page,
 }) => {
-  await mountBoth(page)
+  await mountVariant(page)
   const result = await page.evaluate(() => {
     const h = (window as unknown as { __handles: Handles }).__handles
     h.variant.setN(100) // establish high-water-mark = 100
@@ -348,7 +318,7 @@ test('BOUNDED MEMORY: repeated 50<->100 resize loop never grows pool past the hi
 test('BOUNDED MEMORY: reactive-node count stabilizes after high-water-mark is reached (Addition 1)', async ({
   page,
 }) => {
-  await mountBoth(page)
+  await mountVariant(page)
   const result = await page.evaluate(() => {
     const g = (window as unknown as { __nvHwm: HWMGlobal }).__nvHwm
     const h = (window as unknown as { __handles: Handles }).__handles

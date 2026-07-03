@@ -176,6 +176,9 @@ function wireBinding(
       break
     }
     case 'recycled-list': {
+      // wireRecycledList is the HWM-pooling implementation (Follow-up B', collapsed
+      // from a separate wireRecycledListHWM prototype — see decision log). The
+      // optional 4th (onPoolReady) param is test-only introspection, unused here.
       wireRecycledList(binding, targetNode, doc)
       break
     }
@@ -774,92 +777,21 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
   })
 }
 
-export function wireRecycledList(
-  binding: RecycledListBinding,
-  anchorNode: Node,
-  doc: Document,
-): void {
-  const parent = anchorNode.parentNode
-  if (parent === null) {
-    throw new Error('[nv/interpreter] RecycledListBinding: anchor has no parent')
-  }
-
-  const pool: RecycledRecord[] = []
-  const listOwner = getOwner()
-
-  effect(() => {
-    const next = binding.items()
-    const N = next.length
-    const P = pool.length
-
-    // Re-bind existing slots [0, min(N,P)) — pure Op-3. No dispose, no create.
-    const rebindCount = Math.min(N, P)
-    for (let i = 0; i < rebindCount; i++) {
-      // biome-ignore lint/style/noNonNullAssertion: i < P = pool.length, in-bounds
-      const rec = pool[i]!
-      rec.valueSig.set(next[i])
-      rec.indexSig.set(i)
-    }
-
-    // Grow [P, N) — create only the delta.
-    // IMPORTANT: mirrors wireList Op-1 exactly (L543–578). indexSig always allocated (no elision).
-    for (let i = P; i < N; i++) {
-      const valueSig = signal<unknown>(next[i])
-      const indexSig = signal<number>(i)
-      let mountedRoot!: Node
-
-      // biome-ignore lint/style/noNonNullAssertion: runWithOwner returns non-null when owner is non-null
-      const dispose = runWithOwner(listOwner, () =>
-        createRoot((d) => {
-          const itemIR = binding.itemTemplate(valueSig, indexSig)
-          const { roots } = mountFragment(itemIR, parent, doc, anchorNode)
-          const contentRoots = roots.filter(
-            (n) => n.nodeType !== 3 /* TEXT_NODE */ || (n.textContent?.trim() ?? '') !== '',
-          )
-          const [root] = contentRoots
-          if (root === undefined || contentRoots.length !== 1) {
-            throw new Error(
-              '[nv] Multi-root list items are not supported in v1. Wrap the item template in a single root element.',
-            )
-          }
-          mountedRoot = root
-          onCleanup(() => {
-            if (mountedRoot.parentNode !== null) mountedRoot.parentNode.removeChild(mountedRoot)
-          })
-          return d
-        }),
-      )!
-
-      pool.push({ valueSig, indexSig, rootEl: mountedRoot, dispose })
-    }
-
-    // Shrink [N, P) — dispose only the delta.
-    // Per-entry try/catch ensures all entries [N, P) are attempted for disposal even if
-    // one throws; pool.length = N runs unconditionally after all entries are attempted.
-    for (let i = N; i < P; i++) {
-      try {
-        // biome-ignore lint/style/noNonNullAssertion: i < P = pool.length, in-bounds
-        pool[i]!.dispose()
-      } catch {
-        // swallow per-entry errors; all entries must be attempted
-      }
-    }
-    pool.length = N
-  })
-  onCleanup(() => {
-    for (const rec of pool) rec.dispose()
-    pool.length = 0
-  })
-}
-
 /**
- * PROTOTYPE — Follow-up B′ Phase 1. High-water-mark variant of wireRecycledList.
- * NOT wired into the <recycle> binding dispatch — unreachable from .nv authoring.
- * On shrink: detaches DOM + stops feeding signals (retains owner/signals/DOM alive-but-inert)
- * instead of disposing. On regrow: reuses retained inactive slots before allocating new ones.
- * Pool never shrinks below its high-water-mark (unbounded retention — eviction deferred).
+ * High-water-mark pooling for <recycle> (positional list). On shrink, retains
+ * rows (detaches DOM, stops feeding signals) instead of disposing; on regrow,
+ * reuses retained slots before allocating new ones. Pool never shrinks below
+ * its high-water-mark (unbounded retention — eviction deferred, see decision
+ * log Follow-up B' entry).
+ *
+ * Retention is sound only because nv's effects are demand/change-driven: an
+ * unwritten signal drives no scheduler work, so a detached, unfed row costs
+ * nothing at rest (verified against src/core/core.ts's propagate/flush path,
+ * Follow-up B' semantics-fork ruling). If nv's effects ever become eager or
+ * polling, this inertness guarantee breaks silently — this function's
+ * correctness is coupled to that core scheduling semantic.
  */
-export function wireRecycledListHWM(
+export function wireRecycledList(
   binding: RecycledListBinding,
   anchorNode: Node,
   doc: Document,
