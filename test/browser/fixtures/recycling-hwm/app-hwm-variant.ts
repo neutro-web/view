@@ -51,6 +51,30 @@ export function mount(parent: Element, doc: Document, poolSize = 10000) {
     )
   })
 
+  let nextId = M
+  let replaceVersion = 0
+  function replaceAll() {
+    replaceVersion++
+    const v = replaceVersion
+    // Negative-id namespace keeps replaceAll's generated ids disjoint from
+    // appendRows/prependRows's positive namespace (which starts at nextId = M),
+    // so interleaving these mutations can never produce a coincidental id collision.
+    allRows.set(allRows().map((r, idx) => ({ id: -(v * M + idx) - 1, label: `v${v}-${idx}` })))
+    flushSync()
+  }
+  function appendRows(count: number) {
+    const added = makeRows(count, nextId)
+    nextId += count
+    allRows.set([...allRows(), ...added])
+    flushSync()
+  }
+  function prependRows(count: number) {
+    const added = makeRows(count, nextId)
+    nextId += count
+    allRows.set([...added, ...allRows()])
+    flushSync()
+  }
+
   return {
     root: wrapper,
     dispose,
@@ -68,6 +92,15 @@ export function mount(parent: Element, doc: Document, poolSize = 10000) {
       if (row === undefined) throw new Error(`pokeBackingRow: no row at index ${rowIndex}`)
       rows[rowIndex] = { ...row, label: newLabel }
       allRows.set(rows)
+      flushSync()
+    },
+    replaceAll,
+    appendRows,
+    prependRows,
+    setNNoFlush: (n: number) => {
+      windowN.set(n)
+    },
+    flush: () => {
       flushSync()
     },
   }

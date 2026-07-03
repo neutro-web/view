@@ -22,6 +22,11 @@ type VariantHandle = {
   setN(n: number): void
   pool: Record<number, { valueSig: unknown; rootEl: Element | null }>
   pokeBackingRow(rowIndex: number, newLabel: string): void
+  replaceAll(): void
+  appendRows(count: number): void
+  prependRows(count: number): void
+  setNNoFlush(n: number): void
+  flush(): void
 }
 
 type HWMGlobal = {
@@ -241,4 +246,80 @@ test('G1.5 disposal on teardown: dispose() frees the entire retained pool, not j
     result.freeNoShrink,
   )
   expect(result.freeAfterShrink).toBeGreaterThan(0)
+})
+
+test('ADVERSARIAL: rapid grow/shrink/grow does not corrupt pool bookkeeping', async ({ page }) => {
+  await mountBoth(page)
+  const result = await page.evaluate(() => {
+    const h = (window as unknown as { __handles: Handles }).__handles
+    const seq = [100, 50, 200, 10, 500, 50, 100]
+    for (const n of seq) h.variant.setN(n)
+    const ids = Array.from(h.variant.root.querySelectorAll('[data-id]'))
+      .map((el) => el.getAttribute('data-id'))
+      .sort((a, b) => Number(a) - Number(b))
+    return { finalCount: ids.length, uniqueCount: new Set(ids).size, expectedN: seq.at(-1) }
+  })
+  expect(result.finalCount, 'row count matches final N').toBe(result.expectedN)
+  expect(result.uniqueCount, 'no duplicate data-id after rapid resize').toBe(result.finalCount)
+})
+
+test('ADVERSARIAL: resize to 0 and back regrows correctly', async ({ page }) => {
+  await mountBoth(page)
+  const result = await page.evaluate(() => {
+    const h = (window as unknown as { __handles: Handles }).__handles
+    h.variant.setN(100)
+    h.variant.setN(0)
+    const zeroCount = h.variant.root.querySelectorAll('[data-id]').length
+    h.variant.setN(100)
+    const ids = Array.from(h.variant.root.querySelectorAll('[data-id]'))
+      .map((el) => el.getAttribute('data-id'))
+      .sort((a, b) => Number(a) - Number(b))
+    return { zeroCount, regrowCount: ids.length, uniqueCount: new Set(ids).size }
+  })
+  expect(result.zeroCount, 'N=0 renders zero rows').toBe(0)
+  expect(result.regrowCount, 'regrow from 0 matches N=100').toBe(100)
+  expect(result.uniqueCount, 'no duplicate ids on regrow-from-0').toBe(100)
+})
+
+test('ADVERSARIAL: resize interleaved with replace/append/prepend stays correct', async ({
+  page,
+}) => {
+  await mountBoth(page)
+  const result = await page.evaluate(() => {
+    const h = (window as unknown as { __handles: Handles }).__handles
+    h.variant.setN(100)
+    h.variant.replaceAll()
+    h.variant.setN(50)
+    h.variant.appendRows(20)
+    h.variant.setN(150)
+    h.variant.prependRows(10)
+    h.variant.setN(80)
+    const ids = Array.from(h.variant.root.querySelectorAll('[data-id]'))
+      .map((el) => el.getAttribute('data-id'))
+      .sort((a, b) => Number(a) - Number(b))
+    return { count: ids.length, uniqueCount: new Set(ids).size }
+  })
+  expect(result.count, 'final row count matches final N').toBe(80)
+  expect(result.uniqueCount, 'no duplicate ids after interleaved mutation').toBe(80)
+})
+
+test('ADVERSARIAL: resize during pending effects does not lose or duplicate rows', async ({
+  page,
+}) => {
+  await mountBoth(page)
+  const result = await page.evaluate(() => {
+    const h = (window as unknown as { __handles: Handles }).__handles
+    // Rapid unflushed setN calls before any flush — exercises the resize effect
+    // coalescing multiple pending writes into one recompute, not one per call.
+    h.variant.setNNoFlush(100)
+    h.variant.setNNoFlush(30)
+    h.variant.setNNoFlush(300)
+    h.variant.flush()
+    const ids = Array.from(h.variant.root.querySelectorAll('[data-id]'))
+      .map((el) => el.getAttribute('data-id'))
+      .sort((a, b) => Number(a) - Number(b))
+    return { count: ids.length, uniqueCount: new Set(ids).size }
+  })
+  expect(result.count, 'coalesced resize lands on final N').toBe(300)
+  expect(result.uniqueCount, 'no duplicate ids after coalesced resize').toBe(300)
 })
