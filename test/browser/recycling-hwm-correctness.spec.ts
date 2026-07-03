@@ -20,7 +20,7 @@ type VariantHandle = {
   root: Element
   dispose(): void
   setN(n: number): void
-  pool: Record<number, { valueSig: unknown; rootEl: Element | null }>
+  pool: readonly { valueSig: unknown; rootEl: Element | null }[]
   pokeBackingRow(rowIndex: number, newLabel: string): void
   replaceAll(): void
   appendRows(count: number): void
@@ -322,4 +322,52 @@ test('ADVERSARIAL: resize during pending effects does not lose or duplicate rows
   })
   expect(result.count, 'coalesced resize lands on final N').toBe(300)
   expect(result.uniqueCount, 'no duplicate ids after coalesced resize').toBe(300)
+})
+
+test('BOUNDED MEMORY: repeated 50<->100 resize loop never grows pool past the high-water-mark', async ({
+  page,
+}) => {
+  await mountBoth(page)
+  const result = await page.evaluate(() => {
+    const h = (window as unknown as { __handles: Handles }).__handles
+    h.variant.setN(100) // establish high-water-mark = 100
+    const hwmAfterFirstGrow = h.variant.pool.length
+    for (let i = 0; i < 20; i++) {
+      h.variant.setN(50)
+      h.variant.setN(100)
+    }
+    return { hwmAfterFirstGrow, poolLengthAfter20Cycles: h.variant.pool.length }
+  })
+  expect(result.hwmAfterFirstGrow, 'pool reaches exactly 100 on first grow').toBe(100)
+  expect(
+    result.poolLengthAfter20Cycles,
+    'pool length never exceeds the high-water-mark across repeated cycles',
+  ).toBe(100)
+})
+
+test('BOUNDED MEMORY: reactive-node count stabilizes after high-water-mark is reached (Addition 1)', async ({
+  page,
+}) => {
+  await mountBoth(page)
+  const result = await page.evaluate(() => {
+    const g = (window as unknown as { __nvHwm: HWMGlobal }).__nvHwm
+    const h = (window as unknown as { __handles: Handles }).__handles
+    const test = g.__test
+    h.variant.setN(100) // establish high-water-mark = 100, discard this allocation from the count
+    test.resetNodeCounts()
+    // 30 more resize cycles at or below the established high-water-mark.
+    for (let i = 0; i < 30; i++) {
+      h.variant.setN(50)
+      h.variant.setN(100)
+    }
+    return {
+      allocAfter30Cycles: test.nodeAllocCount,
+      freeAfter30Cycles: test.nodeFreeCount,
+    }
+  })
+  expect(
+    result.allocAfter30Cycles,
+    'zero further reactive-node allocation once the high-water-mark is established — retained nodes are reused, not reallocated, so held cost does not grow with cycle count',
+  ).toBe(0)
+  expect(result.freeAfter30Cycles, 'zero disposal during resize — retention, not teardown').toBe(0)
 })
