@@ -778,19 +778,34 @@ function wireList(binding: ListBinding, anchorNode: Node, doc: Document): void {
 }
 
 /**
- * High-water-mark pooling for <recycle> (positional list). On shrink, retains
- * rows (detaches DOM, stops feeding signals) instead of disposing; on regrow,
- * reuses retained slots before allocating new ones. Pool never shrinks below
- * its high-water-mark (unbounded retention — eviction deferred, see decision
- * log Follow-up B' entry).
+ * High-water-mark pooling for <recycle> (positional list), bounded by a cap. On
+ * shrink, retains rows (detaches DOM, stops feeding signals) instead of disposing
+ * immediately — but retained-inactive rows are capped at RETENTION_CAP_MULTIPLE x
+ * the current active count; rows beyond the cap are disposed (evicted), not kept.
+ * On regrow, retained slots within the cap are reused before allocating new ones.
  *
- * Retention is sound only because nv's effects are demand/change-driven: an
- * unwritten signal drives no scheduler work, so a detached, unfed row costs
- * nothing at rest (verified against src/core/core.ts's propagate/flush path,
- * Follow-up B' semantics-fork ruling). If nv's effects ever become eager or
- * polling, this inertness guarantee breaks silently — this function's
- * correctness is coupled to that core scheduling semantic.
+ * Retention (for rows within the cap) is sound only because nv's effects are
+ * demand/change-driven: an unwritten signal drives no scheduler work, so a
+ * detached, unfed row costs nothing at rest (verified against src/core/core.ts's
+ * propagate/flush path, Follow-up B' semantics-fork ruling). If nv's effects ever
+ * become eager or polling, this inertness guarantee breaks silently — this
+ * function's correctness is coupled to that core scheduling semantic.
+ *
+ * The cap also bounds a second cost: a retained row whose item template reads an
+ * EXTERNAL signal (not its own row signal) keeps a live, still-subscribed effect
+ * that re-runs on every external write, even while detached — cost proportional
+ * to retained-row count. The cap bounds this to RETENTION_CAP_MULTIPLE x active
+ * count rather than the historical high-water-mark (Gate-P ruling: bounding, not
+ * quiescing, resolves this — genuine quiescing would require threading an active-
+ * gate through the generic binding-wiring machinery, a materially larger change
+ * this defect doesn't warrant).
  */
+// B'-cap: retained-inactive rows are bounded to this multiple of the current
+// active count (Gate-P ruling, docs/decision-log.md [2026-07-03]). A hypothesis
+// to measure, not a locked constant — see Task 2 of the B'-cap plan for the
+// win-retention measurement this value was chosen against.
+const RETENTION_CAP_MULTIPLE = 2
+
 export function wireRecycledList(
   binding: RecycledListBinding,
   anchorNode: Node,
@@ -875,15 +890,37 @@ export function wireRecycledList(
         activeCount = pool.length
       }
     } else if (N < activeCount) {
-      // Shrink: deactivate [N, activeCount) — detach DOM, stop feeding. DO NOT DISPOSE.
+      // Shrink: deactivate [N, activeCount) — detach DOM, stop feeding. DO NOT DISPOSE
+      // deactivated rows outright — retain them up to the cap (see eviction below).
       for (let i = N; i < activeCount; i++) {
         // biome-ignore lint/style/noNonNullAssertion: i < activeCount <= pool.length
         const rec = pool[i]!
         if (rec.rootEl.parentNode !== null) rec.rootEl.parentNode.removeChild(rec.rootEl)
       }
       activeCount = N
+
+      // B'-cap: bound retained-inactive rows to RETENTION_CAP_MULTIPLE x activeCount.
+      // Evaluated fresh on every shrink (no floor, no history-smoothing — ruled
+      // in-session at Gate-P; see this function's own history in git log for the
+      // rationale, since it isn't recorded elsewhere). Eviction only needs to run
+      // here, in the shrink branch — growth (whether it allocates or purely
+      // reuses retained slots) can never violate the cap. Proof: after every
+      // shrink, this line enforces pool.length <= 2*activeCount. Any later grow
+      // to N' > activeCount can only RAISE the cap (2*N' > 2*activeCount >=
+      // pool.length), so pool.length is always strictly below the new cap right
+      // after a grow — whether or not that grow allocated fresh rows. (It is NOT
+      // generally true that activeCount === pool.length after a grow — that only
+      // holds when the grow required allocation; a pure-reuse grow into already-
+      // retained slots leaves pool.length at its unchanged, larger value.)
+      const maxPoolLength = N * RETENTION_CAP_MULTIPLE
+      if (pool.length > maxPoolLength) {
+        for (let i = maxPoolLength; i < pool.length; i++) {
+          // biome-ignore lint/style/noNonNullAssertion: i < pool.length, in-bounds
+          pool[i]!.dispose()
+        }
+        pool.length = maxPoolLength
+      }
     }
-    // pool.length is the high-water-mark — it never shrinks in Phase 1 (eviction deferred).
   })
 
   onCleanup(() => {

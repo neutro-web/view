@@ -181,42 +181,44 @@ test('G1.4 no regression to the fast path: same-N mutations allocate nothing', a
   expect(result.variantFree).toBe(0)
 })
 
-test('G1.5 disposal on teardown: dispose() frees the entire retained pool, not just active slots', async ({
+test('G1.5 disposal: total node frees across a scenario are the same whether freed via cap-eviction or final teardown', async ({
   page,
 }) => {
-  // nodeFreeCount instruments reactive-core node disposal (owner scope + per-binding
-  // effects), not raw DOM node removal, so a shrunk-then-disposed pool of size N frees
-  // a fixed multiple of N reactive nodes, not literally N. Rather than hardcode that
-  // multiplier (an implementation detail of the item template's binding count), assert
-  // the invariant the gate actually cares about: disposing after a shrink frees exactly
-  // as many reactive nodes as disposing the same high-water-mark WITHOUT ever shrinking
-  // — i.e. onCleanup walks the full retained pool, not just the active slots.
+  // Cap-eviction (added in Follow-up B'-cap) disposes evicted rows immediately at
+  // shrink time, not just at teardown — so the count must span the whole scenario,
+  // not just the final dispose() call, for the two scenarios to be comparable.
   await page.goto('about:blank')
   await page.addScriptTag({ path: BUNDLE })
   const result = await page.evaluate(() => {
     const g = (window as unknown as { __nvHwm: HWMGlobal }).__nvHwm
 
-    // Scenario A: grow to 500, shrink to 100, then dispose.
+    // Scenario A: grow to 500, reset, shrink to 100 (evicts 300 immediately under
+    // the cap), then dispose (frees the remaining 200). Total counted from reset.
     const a = g.mountVariant(document.body, document)
     a.setN(500)
-    a.setN(100)
     g.__test.resetNodeCounts()
+    a.setN(100)
+    const freeDuringEviction = g.__test.nodeFreeCount
     a.dispose()
-    const freeAfterShrink = g.__test.nodeFreeCount
+    const freeAfterShrinkTotal = g.__test.nodeFreeCount
 
-    // Scenario B: grow to 500, no shrink, then dispose. Same high-water-mark (500).
+    // Scenario B: grow to 500, reset, no shrink, then dispose (frees all 500 at once).
     const b = g.mountVariant(document.body, document)
     b.setN(500)
     g.__test.resetNodeCounts()
     b.dispose()
-    const freeNoShrink = g.__test.nodeFreeCount
+    const freeNoShrinkTotal = g.__test.nodeFreeCount
 
-    return { freeAfterShrink, freeNoShrink }
+    return { freeDuringEviction, freeAfterShrinkTotal, freeNoShrinkTotal }
   })
-  expect(result.freeAfterShrink, 'shrink-then-dispose must free the full HWM-sized pool').toBe(
-    result.freeNoShrink,
-  )
-  expect(result.freeAfterShrink).toBeGreaterThan(0)
+  expect(
+    result.freeDuringEviction,
+    'eviction at shrink time frees rows immediately, not deferred',
+  ).toBeGreaterThan(0)
+  expect(
+    result.freeAfterShrinkTotal,
+    'total frees across the scenario (eviction + final teardown) must equal the never-shrunk baseline — nothing leaked, nothing double-counted',
+  ).toBe(result.freeNoShrinkTotal)
 })
 
 test('ADVERSARIAL: rapid grow/shrink/grow does not corrupt pool bookkeeping', async ({ page }) => {
@@ -341,6 +343,112 @@ test('BOUNDED MEMORY: reactive-node count stabilizes after high-water-mark is re
     'zero further reactive-node allocation once the high-water-mark is established — retained nodes are reused, not reallocated, so held cost does not grow with cycle count',
   ).toBe(0)
   expect(result.freeAfter30Cycles, 'zero disposal during resize — retention, not teardown').toBe(0)
+})
+
+test('CAP: retained pool never exceeds 2x active count after a shrink', async ({ page }) => {
+  await mountVariant(page)
+  const result = await page.evaluate(() => {
+    const h = (window as unknown as { __handles: Handles }).__handles
+    h.variant.setN(1000) // establish a large high-water-mark
+    h.variant.setN(50) // shrink hard — retained-inactive would be 950 uncapped
+    const poolLengthAfterShrink = h.variant.pool.length
+    h.variant.setN(200) // grow past the shrunk pool — forces fresh allocation, pool.length
+    // becomes exactly 200 (not a cap-eviction event; the cap only fires on shrink)
+    h.variant.setN(30) // shrink again — THIS is where the cap re-evaluates, to 2*30=60
+    const poolLengthAfterSecondShrink = h.variant.pool.length
+    return { poolLengthAfterShrink, poolLengthAfterSecondShrink }
+  })
+  // Cap = 2 * activeCount. After shrinking 1000 -> 50, activeCount = 50, so
+  // pool.length must not exceed 2*50 = 100 (not the uncapped 1000).
+  expect(
+    result.poolLengthAfterShrink,
+    'pool length must be bounded by 2x the post-shrink active count, not the historical high-water-mark',
+  ).toBeLessThanOrEqual(100)
+  // After the second shrink (to 30), cap = 2*30 = 60.
+  expect(
+    result.poolLengthAfterSecondShrink,
+    'cap re-evaluates fresh on every shrink',
+  ).toBeLessThanOrEqual(60)
+})
+
+test('CAP: evicted rows are genuinely disposed (reactive nodes freed, not just array-truncated)', async ({
+  page,
+}) => {
+  await mountVariant(page)
+  const result = await page.evaluate(() => {
+    const g = (window as unknown as { __nvHwm: HWMGlobal }).__nvHwm
+    const h = (window as unknown as { __handles: Handles }).__handles
+    h.variant.setN(500)
+    g.__test.resetNodeCounts()
+    h.variant.setN(10) // shrink hard — cap = 20, so ~480 rows must be evicted+disposed
+    return { freeCount: g.__test.nodeFreeCount, poolLength: h.variant.pool.length }
+  })
+  expect(result.poolLength, 'pool truncated to the cap (2*10=20)').toBeLessThanOrEqual(20)
+  expect(
+    result.freeCount,
+    'evicted rows must be disposed (nodeFreeCount > 0), not merely dropped from the array',
+  ).toBeGreaterThan(0)
+})
+
+test('CAP: regrow after eviction still produces correct, unique rows', async ({ page }) => {
+  await mountVariant(page)
+  const result = await page.evaluate(() => {
+    const h = (window as unknown as { __handles: Handles }).__handles
+    h.variant.setN(500)
+    h.variant.setN(10) // evicts most of the pool (cap=20)
+    h.variant.setN(500) // regrow past the evicted range — must allocate fresh, not read stale/disposed rows
+    const ids = Array.from(h.variant.root.querySelectorAll('[data-id]'))
+      .map((el) => el.getAttribute('data-id'))
+      .sort((a, b) => Number(a) - Number(b))
+    return { count: ids.length, uniqueCount: new Set(ids).size }
+  })
+  expect(result.count, 'regrow past an evicted range still produces the full requested count').toBe(
+    500,
+  )
+  expect(result.uniqueCount, 'no duplicate or corrupted ids after eviction + regrow').toBe(500)
+})
+
+test('CAP: N=0 evicts the entire retained pool (deliberate "no floor" consequence)', async ({
+  page,
+}) => {
+  await mountVariant(page)
+  const result = await page.evaluate(() => {
+    const h = (window as unknown as { __handles: Handles }).__handles
+    h.variant.setN(200)
+    h.variant.setN(0) // cap = 0 * 2 = 0 — the entire retained pool must be evicted, not just detached
+    return { poolLengthAtZero: h.variant.pool.length }
+  })
+  // This is the intended behavior of "no floor," not an accidental edge case: a
+  // transient empty state (e.g. clear/filter-to-no-results) gets zero retention
+  // benefit on the next regrow. Documented explicitly here so it's a recorded
+  // decision, not a silent side effect nobody noticed.
+  expect(result.poolLengthAtZero, 'shrinking to N=0 evicts the entire pool (cap=0)').toBe(0)
+})
+
+test('CAP: pure-reuse regrow (no allocation) never exceeds the new cap', async ({ page }) => {
+  await mountVariant(page)
+  const result = await page.evaluate(() => {
+    const h = (window as unknown as { __handles: Handles }).__handles
+    h.variant.setN(100) // pool.length = 100, activeCount = 100
+    h.variant.setN(50) // shrink: cap = 2*50 = 100. pool.length(100) is NOT > 100, so no eviction fires — pool.length stays 100
+    const poolLengthAfterShrink = h.variant.pool.length
+    // Regrow to 80 — this is activeCount(50) < N(80) <= P(100), a PURE REUSE grow
+    // (no allocation, since P already covers it). pool.length must stay unchanged
+    // at 100 and must not exceed the new cap (2*80=160) — proving growth alone,
+    // without passing through the shrink branch's eviction logic, can never
+    // violate the cap (see the plan's Global Constraints for the proof).
+    h.variant.setN(80)
+    const poolLengthAfterPureReuseRegrow = h.variant.pool.length
+    return { poolLengthAfterShrink, poolLengthAfterPureReuseRegrow }
+  })
+  expect(
+    result.poolLengthAfterShrink,
+    'exact-boundary shrink (pool.length === cap) does not evict',
+  ).toBe(100)
+  expect(
+    result.poolLengthAfterPureReuseRegrow,
+    'pure-reuse regrow (no allocation) leaves pool.length unchanged and within the new cap',
+  ).toBe(100)
 })
 
 test('FAULT TOLERANCE: partial grow failure keeps activeCount/pool bookkeeping consistent (self-heals on next resize)', async ({
