@@ -27,6 +27,8 @@
  *   verdict (ACCEPT/PLAIN): compared where relevant (FE-10)
  */
 
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { JSDOM } from 'jsdom'
 import * as ts from 'typescript'
 import { describe, expect, it, test } from 'vitest'
@@ -40,6 +42,7 @@ import type {
   ClassListBinding,
   ComponentBinding,
   ConditionalBinding,
+  DeferredSwapBinding,
   EventBinding,
   ListBinding,
   PropBinding,
@@ -1476,6 +1479,75 @@ describe('<switch>/<match> parse path', () => {
     expect(() => parseNvFile(src, 'switch-stray-child.nv', document)).toThrow(
       /<switch> children must all be <match> elements/,
     )
+  })
+
+  it('<switch pending=> parses into a DeferredSwapBinding with matching branches/fallback', () => {
+    const src = `
+      const C = $component(() => {
+        $script(() => { const state = signal(0); const p = signal(false) })
+        $render(() => html\`<div><switch pending="\${p}">
+          <match when="\${state === 0}"><span class="zero">0</span></match>
+          <match when="\${state === 1}"><span class="one">1</span></match>
+          <match><span class="fb">fb</span></match>
+        </switch></div>\`)
+      })
+    `
+    const results = parseNvFile(src, 'switch-pending.nv', document)
+    const ir = results[0]!.ir
+    const binding = ir.bindings[0]
+    expect(binding?.kind).toBe('deferred-swap')
+    const dsb = binding as DeferredSwapBinding
+    expect(dsb.branches.length).toBe(2)
+    expect(dsb.fallback).not.toBeNull()
+    expect(typeof dsb.pending).toBe('function')
+    expect((dsb as unknown as { kind: string }).kind).not.toBe('switch')
+  })
+
+  it('<switch pending=> with zero <match> children throws the SAME error as plain <switch>', () => {
+    const src = `
+      const C = $component(() => {
+        $script(() => { const p = signal(false) })
+        $render(() => html\`<div><switch pending="\${p}"></switch></div>\`)
+      })
+    `
+    expect(() => parseNvFile(src, 'switch-pending-empty.nv', document)).toThrow(
+      /<switch> requires at least one <match> child/,
+    )
+  })
+
+  it('plain <switch> (no pending=) parses to a byte-identical SwitchBinding as before this change', () => {
+    const src = `
+      const C = $component(() => {
+        $script(() => { const state = signal(0) })
+        $render(() => html\`<div><switch>
+          <match when="\${state === 0}"><span class="zero">0</span></match>
+          <match when="\${state === 1}"><span class="one">1</span></match>
+          <match><span class="fb">fb</span></match>
+        </switch></div>\`)
+      })
+    `
+    const results = parseNvFile(src, 'switch-unchanged.nv', document)
+    const ir = results[0]!.ir
+    const binding = ir.bindings[0]
+    expect(binding?.kind).toBe('switch')
+    const sb = binding as SwitchBinding
+    expect(sb.branches.length).toBe(2)
+    expect(sb.fallback).not.toBeNull()
+    expect('pending' in sb).toBe(false)
+  })
+
+  it('the deferred-swap-parser fixture (real .nv authoring surface) parses to a DeferredSwapBinding', () => {
+    const fixturePath = fileURLToPath(
+      new URL('../browser/fixtures/deferred-swap-parser/app-switch-pending.nv', import.meta.url),
+    )
+    const src = readFileSync(fixturePath, 'utf-8')
+    const results = parseNvFile(src, 'app-switch-pending.nv', document)
+    const ir = results[0]!.ir
+    const dsBinding = ir.bindings.find((b) => b.kind === 'deferred-swap')
+    expect(dsBinding).toBeDefined()
+    const dsb = dsBinding as DeferredSwapBinding
+    expect(dsb.branches.length).toBe(2)
+    expect(dsb.fallback).not.toBeNull()
   })
 })
 

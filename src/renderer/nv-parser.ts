@@ -57,6 +57,7 @@ import type {
   ClassListEntry,
   ComponentBinding,
   ConditionalBinding,
+  DeferredSwapBinding,
   EventBinding,
   HandlerExpr,
   ListBinding,
@@ -576,6 +577,9 @@ interface NvWalkedSwitch {
   branches: NvWalkedMatchBranch[]
   /** True if the last branch has no `when=` (is the fallback). */
   hasFallback: boolean
+  /** Hole index for the `pending=` attribute on <switch> itself, or -1 if absent
+   * (plain `<switch>`, produces a SwitchBinding — unchanged path). */
+  pendingHoleIdx: number
 }
 
 interface NvWalkResult {
@@ -823,6 +827,22 @@ function walkNvNodeList(
       // <switch> element detection — after <recycle> block, before component detection.
       if (el.tagName.toLowerCase() === 'template' && el.hasAttribute('data-nv-switch')) {
         const switchEl = el as HTMLTemplateElement
+
+        // Optional pending= attribute on <switch> itself (Gate-P Ruling 1: extend
+        // <switch>, no new tag). Same extraction mechanism as when= below, but on the
+        // <switch> element's own sentinel attrs rather than a <match> child's. Presence
+        // forks the emitted binding to DeferredSwapBinding (pushSwitchBinding); absence
+        // leaves the plain-SwitchBinding path byte-identical to before this attribute
+        // existed (Finding G: zero-<match> validation below is unchanged either way).
+        let pendingHoleIdx = -1
+        for (let k = 0; k < holeExprs.length; k++) {
+          if (switchEl.getAttribute(`data-nv-attr-${k}`) === 'pending') {
+            pendingHoleIdx = k
+            switchEl.removeAttribute(`data-nv-attr-${k}`)
+            consumed.add(k)
+          }
+        }
+
         const matchChildren = Array.from(switchEl.content.children).filter(
           (c) => c.tagName.toLowerCase() === 'template' && c.hasAttribute('data-nv-match'),
         ) as HTMLTemplateElement[]
@@ -905,7 +925,7 @@ function walkNvNodeList(
         switchEl.parentNode.replaceChild(anchor, switchEl)
         const anchorPath = computePath(anchor, root)
 
-        switches.push({ anchorPath, branches, hasFallback })
+        switches.push({ anchorPath, branches, hasFallback, pendingHoleIdx })
         return // don't recurse into <switch> body (already processed via .content)
       }
 
@@ -1185,13 +1205,33 @@ function pushSwitchBinding(ws: NvWalkedSwitch, allPaths: NodePath[], bindings: B
   allPaths.push(ws.anchorPath)
   const stubExpr = (() => false) as ReactiveExpr<boolean>
   const branchCount = ws.hasFallback ? ws.branches.length - 1 : ws.branches.length
+  const branches = ws.branches
+    .slice(0, branchCount)
+    .map((b) => ({ when: stubExpr, body: b.bodyIR }))
+  const fallback = ws.hasFallback
+    ? (ws.branches[ws.branches.length - 1] as NvWalkedMatchBranch).bodyIR
+    : null
+
+  if (ws.pendingHoleIdx !== -1) {
+    // Gate-P Ruling 1: pending= present on <switch> forks the emitted binding to
+    // DeferredSwapBinding. `pending` thunk is stubbed the same way `when` is above —
+    // this walk builds structural IR only; real reactive thunks come from
+    // parseNvFileForEmit (see pushSwitchBinding's own PARSE-PATH ONLY note).
+    bindings.push({
+      kind: 'deferred-swap',
+      pathIndex,
+      pending: stubExpr,
+      branches,
+      fallback,
+    } satisfies DeferredSwapBinding)
+    return
+  }
+
   bindings.push({
     kind: 'switch',
     pathIndex,
-    branches: ws.branches.slice(0, branchCount).map((b) => ({ when: stubExpr, body: b.bodyIR })),
-    fallback: ws.hasFallback
-      ? (ws.branches[ws.branches.length - 1] as NvWalkedMatchBranch).bodyIR
-      : null,
+    branches,
+    fallback,
   } satisfies SwitchBinding)
 }
 
