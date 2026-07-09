@@ -54,4 +54,5 @@ Async primitives, a store, context, and SSR are planned for v0.5.0 and are not a
 - [Authoring .nv](/guides/authoring-nv) — file format, erasure rules, template syntax, limitations
 - [Reactivity](/guides/reactivity) — signal, derived, effect, and all scheduling primitives
 - [Rendering](/guides/rendering) — lists, conditionals, events, class bindings, scoped styles
+- [Stale-while-revalidate](/guides/stale-while-revalidate) — the tier-1 SWR recipe over `resource()`
 - [Architecture](/guides/architecture) — the three-layer package structure and build pipeline

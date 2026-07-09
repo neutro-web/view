@@ -10,6 +10,8 @@ import { effect, getOwner, onCleanup, signal, untrack } from '../core/core.js'
  *
  * Note: `T | undefined` means "not yet resolved OR resolved to undefined".
  * Check `r.loading()` to distinguish the two.
+ *
+ * For the tier-1 stale-while-revalidate consumer recipe, see docs/guides/stale-while-revalidate.md.
  */
 export interface Resource<T> {
   (): T | undefined
