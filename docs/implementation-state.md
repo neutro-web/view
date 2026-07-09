@@ -135,6 +135,22 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
   that depends on both, instead of one consistent one. General core-scheduler property
   (reproduced with two plain signals, no `resource()`/`wireDeferredSwap` involved) — a real
   fix needs a `batch()`-style API in `src/core/`. Not built; no commission currently owns it.
+- **Core scheduler: a mid-effect disposal-triggered write can be silently dropped for
+  re-scheduling purposes (plausible, unverified, noted).** Found during PT-1b-i's post-
+  landing adversarial review (2026-07-09): `propagate()` only re-enqueues an observer when
+  `obs.state !== DIRTY`, and a currently-recomputing effect's `state` stays `DIRTY` for the
+  whole duration of its own `compute()` call — including any synchronous disposal work it
+  triggers (e.g. a branch's own `onCleanup` running as part of that effect disposing an old
+  subtree). If that disposal writes a signal the SAME effect already read earlier in the
+  same run, the write doesn't get a fresh recompute scheduled. General scheduler
+  characteristic, not introduced by any one construct — `wireConditional`/`wireSwitch` share
+  the identical exposure (they too dispose branches mid-effect via arbitrary user
+  `onCleanup`) and have had it since they were built. Requires a fairly exotic self-
+  referential authoring pattern (a branch's teardown writing back to the signal controlling
+  its own visibility) to trigger; no concrete repro exists yet, no test proves or disproves
+  it. Candidate for the same future `batch()`/scheduler-hardening commission as the item
+  above. See `docs/gates/pt1b-i-deferred-swap.md`, "Post-landing adversarial review",
+  Finding P.
 - **CP-2a — CLOSED 2026-06-26 (`ef86bd7` + `4ef0205`).** Benchmark keyed app proven in pure `.nv`,
   10 gates green both engines, 8 ops real-browser, keyed-move confirmed. 4 `src/` bugs surfaced +
   fixed (emitter thunk-slot, parser `propsAccessors` ×2, interpreter whitespace-root). CP-2b/2c

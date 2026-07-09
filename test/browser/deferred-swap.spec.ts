@@ -413,7 +413,7 @@ test('4. Dispose mid-pending — old subtree fully torn down, no staged-fragment
     })
 
     nv.flushSync()
-    pend[0]!.resolve('x')
+    pend[0]!.resolve(0)
     await Promise.resolve()
     nv.flushSync()
 
@@ -743,7 +743,7 @@ test('7a. An independent when()-driving signal changed WHILE pending is correctl
     })
 
     nv.flushSync()
-    pend[0]!.resolve('x') // initial settle: toggle=false → branch 'a'
+    pend[0]!.resolve(0) // initial settle: toggle=false → branch 'a'
     await Promise.resolve()
     nv.flushSync()
     const spanA = container.querySelector('.a')
@@ -858,7 +858,7 @@ test("7b. pending()'s boolean value unchanged across a settle (loading DID flip)
 
     // Let the underlying resource fully settle — loading() flips true→false —
     // while customPending stays true throughout (its own, unrelated signal).
-    pend[0]!.resolve('x')
+    pend[0]!.resolve(0)
     await Promise.resolve()
     nv.flushSync()
     if (r.loading()) findings.push('expected loading() false after settling the fetch')
@@ -884,6 +884,143 @@ test("7b. pending()'s boolean value unchanged across a settle (loading DID flip)
     nv.flushSync()
     if (container.querySelector('.b') === null)
       findings.push("expected branch 'b' after branch signal change")
+
+    dispose()
+    container.remove()
+    return { ok: findings.length === 0, findings }
+  })
+
+  expect(result.ok, result.findings.join('\n')).toBe(true)
+})
+
+// ── Item: nested structural binding inside a deferred-swap branch ───────────
+//
+// Adversarial-review finding (2026-07-09, post-landing): every branch body in
+// this suite up to this point was a static <span> — no test exercised a
+// NESTED structural construct (each/recycle/switch/component) inside a
+// deferred-swap branch. This is exactly the class of ownership subtlety that
+// produced Finding N (the revealed subtree being a child of its own
+// triggering effect, torn down by preRunCleanup on any re-run) — a nested
+// <each>'s own reconcile effect and its per-row roots are owned relative to
+// the deferred-swap branch's root, and if THAT ownership were wrong in some
+// other way, this is the test that would catch it. Confirms the
+// capturedOwner/runWithOwner fix is sound for nested reconciliation, not just
+// for a single flat subtree.
+
+test('8. Nested structural binding (each) inside a deferred-swap branch survives a pending transition and reconciles correctly after', async ({
+  page,
+}) => {
+  await loadNv(page)
+
+  const result = await page.evaluate(async () => {
+    const nv = window.__nv
+    const findings: string[] = []
+    const html = nv.createHtmlTag(document)
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+
+    function mkCtl(sourceFn: () => unknown) {
+      const pend: { resolve: (v: unknown) => void; reject: (e: unknown) => void }[] = []
+      const r = nv.resource(
+        sourceFn,
+        () => new Promise((resolve, reject) => pend.push({ resolve, reject })),
+      )
+      return { r, pend }
+    }
+
+    type Item = { id: number; label: string }
+    const src = nv.signal(0)
+    const items = nv.signal<Item[]>([
+      { id: 1, label: 'a1' },
+      { id: 2, label: 'a2' },
+    ])
+    let r!: ReturnType<typeof mkCtl>['r']
+    let pend!: ReturnType<typeof mkCtl>['pend']
+    const dispose = nv.createRoot((d) => {
+      const ctl = mkCtl(() => src())
+      r = ctl.r
+      pend = ctl.pend
+      const ir = html`<div>${nv.match(
+        [
+          {
+            when: () => r() === 0,
+            body: () =>
+              html`<ul>${nv.each(
+                () => items() as readonly unknown[],
+                (item) => (item as Item).id,
+                ({ item }) => html`<li>${() => (item!() as Item).label}</li>`,
+              )}</ul>`,
+          },
+          { when: () => r() === 1, body: () => html`<span class="b">B</span>` },
+        ],
+        null,
+        () => r.loading(),
+      )}</div>`
+      nv.mount(ir, container, document)
+      return d
+    })
+    const region = container.querySelector('div') as HTMLElement
+    nv.flushSync() // triggers resource's initial effect run — populates pend[0]
+
+    pend[0]!.resolve(0)
+    await Promise.resolve()
+    nv.flushSync()
+
+    let lis = region.querySelectorAll('li')
+    if (lis.length !== 2) findings.push(`expected 2 <li> after first settle, got ${lis.length}`)
+    const firstLi = lis[0]
+
+    // Mutating `items` does NOT go through `src`, so no new fetch/pending window
+    // is triggered by this alone — but the nested each list IS reactive to
+    // `items()` independent of the outer deferred-swap effect. This proves the
+    // nested reconcile effect is genuinely independently live (owned correctly,
+    // not torn down / not silently frozen) even while sitting inside a
+    // deferred-swap-revealed branch that itself is NOT re-running.
+    items.set([
+      { id: 1, label: 'a1-updated' },
+      { id: 2, label: 'a2' },
+      { id: 3, label: 'a3' },
+    ])
+    nv.flushSync()
+
+    lis = region.querySelectorAll('li')
+    if (lis.length !== 3)
+      findings.push(
+        `expected 3 <li> after items() reconcile (no pending involved), got ${lis.length}`,
+      )
+    if (lis[0]?.textContent !== 'a1-updated')
+      findings.push(`expected first <li> text updated in place, got '${lis[0]?.textContent}'`)
+    if (region.querySelectorAll('li')[0] !== firstLi)
+      findings.push(
+        'each row 1 (key=1) lost DOM identity across an in-place reconcile — ownership regression',
+      )
+
+    // Now actually trigger a real pending window via source change, and confirm
+    // the each list (old, revealed branch) stays live and mounted throughout.
+    src.set(1)
+    nv.flushSync()
+    if (!r.loading()) findings.push('expected loading() true after src change')
+    if (region.querySelector('ul') === null)
+      findings.push('each-list branch disappeared merely by entering the pending window')
+    items.set([{ id: 1, label: 'a1-during-pending' }])
+    nv.flushSync()
+    lis = region.querySelectorAll('li')
+    if (lis.length !== 1 || lis[0]?.textContent !== 'a1-during-pending')
+      findings.push(
+        'nested each list failed to reconcile while the outer deferred-swap was pending',
+      )
+
+    // Settle: swap to branch 'b'. The each list's owner tree (reconcile effect +
+    // per-row roots) must be FULLY disposed — no leaked rows, no orphaned <li>.
+    pend[1]!.resolve(1)
+    await Promise.resolve()
+    nv.flushSync()
+    if (region.querySelector('.b') === null)
+      findings.push("expected branch 'b' revealed after settle")
+    if (region.querySelector('ul') !== null || region.querySelector('li') !== null)
+      findings.push(
+        'nested each list (old branch) was not fully disposed after the swap — leaked <ul>/<li>',
+      )
 
     dispose()
     container.remove()

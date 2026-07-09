@@ -366,11 +366,11 @@ _Active frontier: v0.5.0 API-parity. Control-flow completion (PT-3) DONE. Perfor
   (which swap atomically in one run); reuses leaf mount/dispose mechanics. Single-valued,
   closure-clean, in-stream. GAP 1 fully shaped — commissionable as PT-1b-i (SWR),
   independently of GAP 2 (Suspense) if split. Ruling 3 (Suspense vs errorBoundary
-  §5.4.4) still open. **PT-1b SPLIT [2026-07-03]** into **PT-1b-i (SWR, GAP 1)** —
-  fully shaped, commissionable now — and **PT-1b-ii (Suspense coordination, GAP 2)** —
-  blocked on ruling 3, which must also determine whether PT-1b-ii is the roadmap's
-  "Suspense / Transitions" v1.0.0 concurrency item or a narrower non-concurrency
-  v0.5.0 construct.
+  §5.4.4) still open. **PT-1b-i (SWR/deferred-swap) LANDED [2026-07-08] `717ce43`** —
+  see decision-log entry below. **PT-1b-ii (Suspense coordination, GAP 2) remains
+  open**, blocked on ruling 3 (vs errorBoundary §5.4.4 owner-scope, and whether it's
+  the roadmap's v1.0.0 concurrency item or a narrower non-concurrency v0.5.0
+  construct).
 - **Async transitions — SPLIT [2026-06-27].** Stale-while-revalidate is IN (PT-1b
   behavior, above). **Multi-version reactivity is REFUSED by construction** (entry C
   — dissolves single-current-value §5 → breaks `derived` purity + compiler
@@ -1427,3 +1427,46 @@ owner-scope) IS that roadmap item — in which case it defers to v1.0.0 — or a
 non-concurrency construct belonging in v0.5.0. The refused multi-version/time-slicing
 family is likely what the roadmap line means; PT-1b-ii as scoped has no concurrency
 semantics. Do not assume; ruling 3 settles it.
+
+### [2026-07-08] PT-1b-i (`wireDeferredSwap`, tier-2 deferred swap) LANDED `717ce43`
+
+**Commission:** `pt1b-i-swr`, workstream (3). Gate-P doc
+(`docs/gates/pt1b-i-deferred-swap.md`) ruled 4 items (`.nv` surface, IR shape,
+swap/epoch discipline, off-anchor container), 12 CC adversarial passes,
+Architect Gate-P review found and required a fix for a dependency-collection
+bug none of the 12 passes caught (gating `pending()` before reading `when()`
+silently unsubscribed from branch conditions during a pending run -- fixed by
+reading all reactive state before any early return). Architect approved the
+revised design.
+
+**Landed:** `DeferredSwapBinding` (`SwitchBinding` + `pending: ReactiveExpr
+<boolean>`) -- Template-IR bump to **v0.4.5** (new binding kind, additive
+union member, same class of bump as `SwitchBinding`'s own landing). Both
+authoring front-ends (interpreter `wireDeferredSwap`, tagged-template
+`match(branches, fallback, pending)`) landed together in one commit
+(`a1cd742`), `.nv` surface (`<switch pending="...">`) in a follow-up commit
+(`26b9832`, additive-only parse fork). Tier-1 SWR documented as a consumer
+recipe, no engine work (`docs/guides/stale-while-revalidate.md`).
+
+**Two further bugs found post-approval, during real-browser test authoring
+(Task 5), fixed before this landing:** (1) an ownership bug -- the revealed
+subtree was mounted as a child of its own triggering effect, so
+`preRunCleanup` disposed it on any re-run before the pending-gate ever ran,
+defeating the construct; fixed via `capturedOwner`/`runWithOwner`, the
+pattern already used 3x elsewhere in `interpreter.ts`. (2) a swap-ordering
+gap -- dispose-before-insert created a real `MutationObserver`-visible
+"neither attached" window; fixed by reordering to insert-then-dispose.
+Neither bug was caught by Gate-P review or CC's adversarial passes; both were
+caught by real-browser tests actually exercising the construct.
+
+**Also found, correctly left unfixed:** a general nv-scheduler property
+(independent signal writes across a sync-write + later-promise-write pair
+are not auto-batched, producing two transiently-inconsistent recomputes
+instead of one) -- reproduced independent of `resource()`/`wireDeferredSwap`,
+would need a `batch()` API in `src/core/` (G0-protected). Noted in
+`docs/implementation-state.md`'s known-gaps for a future commission; not
+blocking here.
+
+**Contract impact:** none (v0.4.3 reactive-core contract unchanged; renderer-
+layer only). **Result:** PT-1b-i CLOSED. `src/core/` diff empty across the
+whole arc. Full regression: 844/844 unit, 405/405 real-browser (x3).

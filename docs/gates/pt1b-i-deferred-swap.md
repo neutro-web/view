@@ -518,3 +518,60 @@ Task 5's item 7b test was restructured to test its actual intent (`pending`
 need not correlate with `loading()`'s own transitions) without depending on
 this separate, deeper scheduling question. Worth a future roadmap item; not
 blocking here.
+
+---
+
+## Post-landing adversarial review (2026-07-09)
+
+An independent review (fresh eyes, not involved in building this) was run
+against the landed code at `31525d9`, specifically instructed to trust
+nothing already reviewed, given two bugs had already survived four rounds of
+review plus Architect's own approval before being caught by execution. Traced
+`capturedOwner`/`getOwner()` timing, `runWithOwner` restoration, throw-safety
+of the `capturedDispose` capture under the new owner wrapping, multi-
+transition-while-pending handling, the zero-branch first-run path, and
+`revealed`-vs-DOM sync directly against `core.ts` — all held up; no new
+confirmed bug in the core algorithm.
+
+### Finding P — plausible, general core hazard (not fixed, documented)
+
+If a branch template's own `onCleanup` callback (registered inside the OLD,
+about-to-be-disposed subtree) synchronously writes a signal that
+`wireDeferredSwap`'s own effect ALSO reads (e.g. a `pending()`/`when()`
+dependency), the write can be silently dropped for the purpose of triggering
+a re-run: `core.ts`'s `propagate()` only re-enqueues an observer when
+`obs.state !== DIRTY`, and the currently-running effect's `state` stays
+`DIRTY` for the full duration of its own compute (including any synchronous
+disposal work it triggers) — only flipping to `CLEAN` after `compute()`
+returns. A write that happens *during* that window, to a signal the effect
+already read *earlier in the same run*, doesn't get a fresh recompute
+scheduled for it.
+
+This is a **general core-scheduler characteristic**, not introduced by or
+specific to `wireDeferredSwap` — `wireConditional`/`wireSwitch` share the
+identical exposure (they also dispose old branches, mid-effect, via arbitrary
+user `onCleanup` code) and have had it since they were built. It requires a
+fairly exotic, self-referential authoring pattern to trigger (a branch's own
+teardown writing back to the very signal that controls its own visibility) —
+plausible but unverified with a concrete repro; no test proves or disproves
+it either way for this construct specifically. Not fixed: a correct fix
+belongs in `src/core/`'s scheduler (G0-protected, out of scope), and the
+narrow trigger condition doesn't clearly justify a workaround at the wire-
+function layer that every other structural binding lacks too. Recorded here
+and in `docs/implementation-state.md`'s known-gaps alongside the unbatched-
+writes finding above, for the same eventual `batch()`/scheduler-hardening
+commission.
+
+### Finding Q — confirmed test-coverage gap, fixed
+
+No test in `deferred-swap.spec.ts` exercised a nested structural binding
+(`<each>`, `<recycle>`, nested `<switch>`, `<component>`) inside a deferred-
+swap branch — every branch body tested was a static leaf element. This is
+exactly the class of ownership subtlety that produced Finding N. **Fixed:**
+added item 8, a nested `<each>` inside one branch, asserting the nested
+reconcile effect stays genuinely live and independently reactive while the
+outer deferred-swap is NOT re-running, continues reconciling correctly
+*during* a pending window, and is fully disposed (no leaked rows) on swap.
+Passes on all 3 browsers; verified non-vacuous (a bug in the test itself —
+wrong resolve values — was caught by the test failing loudly before the fix,
+not by it passing silently).

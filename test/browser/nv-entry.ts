@@ -12,7 +12,7 @@ export {
   errorBoundary,
 } from '../../src/core/core.js'
 export { mount } from '../../src/renderer/interpreter.js'
-export { createHtmlTag, match } from '../../src/renderer/html-tag.js'
+export { createHtmlTag, match, each } from '../../src/renderer/html-tag.js'
 export { resource } from '../../src/renderer/resource.js'
 export { structurallyEqual } from '../../src/renderer/comparator.js'
 export { emitMount } from '../../src/compiler/emitted-mount.js'
