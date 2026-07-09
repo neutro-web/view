@@ -355,7 +355,22 @@ _Active frontier: v0.5.0 API-parity. Control-flow completion (PT-3) DONE. Perfor
   fallback during pending refetch — the conforming half of "transitions",
   single-valued + deferred DOM swap). **Renderer-gating cost (withhold-mount of
   pending subtrees, `<each>` interaction) must be read at source before ruling.**
-  Do not fold into PT-1a.
+  Do not fold into PT-1a. GAP 1 (SWR) shape ruled [2026-07-03]: tier-1 same-template
+  SWR already expressible as a consumer pattern (no engine work, document as recipe);
+  tier-2 deferred-swap for structurally-different pending subtrees is net-new renderer
+  (defer `wireConditional`'s eager swap). Both single-valued, not multi-version,
+  closure-clean. Rulings 2 (tier-2 wire path) + 3 (Suspense vs errorBoundary) remain
+  before commission. GAP 1 tier-2 wire path ruled [2026-07-03]: distinct
+  `wireDeferredSwap` (two-propagation swap, off-anchor pending mount, epoch-guarded
+  reveal, dual-disposal bridge), not a generalization of wireConditional/wireSwitch
+  (which swap atomically in one run); reuses leaf mount/dispose mechanics. Single-valued,
+  closure-clean, in-stream. GAP 1 fully shaped — commissionable as PT-1b-i (SWR),
+  independently of GAP 2 (Suspense) if split. Ruling 3 (Suspense vs errorBoundary
+  §5.4.4) still open. **PT-1b SPLIT [2026-07-03]** into **PT-1b-i (SWR, GAP 1)** —
+  fully shaped, commissionable now — and **PT-1b-ii (Suspense coordination, GAP 2)** —
+  blocked on ruling 3, which must also determine whether PT-1b-ii is the roadmap's
+  "Suspense / Transitions" v1.0.0 concurrency item or a narrower non-concurrency
+  v0.5.0 construct.
 - **Async transitions — SPLIT [2026-06-27].** Stale-while-revalidate is IN (PT-1b
   behavior, above). **Multi-version reactivity is REFUSED by construction** (entry C
   — dissolves single-current-value §5 → breaks `derived` purity + compiler
@@ -1360,3 +1375,55 @@ architect error, not a CC miss.
 
 **Contract impact:** none. **Result:** B′ reversed. `<recycle>` returns to dispose-on-
 shrink. HWM → v1.0.0 probe-first. B′ and B′-cap both CLOSED (reversed).
+
+### [2026-07-03] PT-1b GAP 1 (SWR) shape RULED -- tier-1 pattern (no engine work) + tier-2 deferred-swap (net-new renderer); not multi-version
+
+**Workstream (3)/(4).** Read the withhold-mount seam (`wireConditional`:853-893, the
+eager-swap analog; `resource.ts`:102 stale-data retention; `<each>` reconcile model;
+confirmed no existing withhold mechanism). **Finding:** SWR splits -- **tier 1**
+(same-template stale-while-revalidate) is already expressible as a consumer pattern over
+`resource`'s existing `data()`/`loading()` (stale subtree is never unmounted because the
+reactive read that would unmount it doesn't fire during refetch -- demand-driven
+quiescence; no withhold needed, no engine work -- document as a recipe). **Tier 2**
+(deferred-swap for structurally-different pending subtrees: off-anchor mount + keep-old-
+live + atomic reveal) is net-new renderer surface -- the real GAP 1 build, a deferral of
+`wireConditional`'s eager dispose-old-before-mount-new. **Both single-valued -- do NOT
+touch §5 single-current-value; not the refused multi-version case.** Both renderer-layer,
+closure-clean, no graph primitive, no contract change (v0.4.3). **Consequence:** GAP 1 is
+smaller than the gap analysis assumed (doc + small build, not one build). **Open:** ruling
+2 (tier-2 swap: generalize `SwitchBinding`/`wireConditional` or distinct path) and ruling
+3 (Suspense/GAP 2 vs `errorBoundary` §5.4.4). Do not fold into PT-1a.
+
+### [2026-07-03] PT-1b GAP 1 tier-2 wire path RULED -- distinct `wireDeferredSwap`, not a generalization of wireConditional/wireSwitch
+
+**Workstream (3)/(4).** Read `wireSwitch`/`wireConditional` swap discipline (identical:
+single-effect, single-`branchDisposer`, dispose-old-then-mount-new **synchronously in one
+run**) + `resource` settle timing (`.then` continuation = separate propagation,
+resource.ts:102) + `mountFragment` (mounts at any parent incl. detached, 1067).
+**Ruling: tier-2 is a distinct wire path.** The existing discipline is atomic-within-one-
+effect-run; tier-2's swap spans two propagations (source-change -> later async settle ->
+reveal) with two subtrees coexisting during the swap window (old live, new building
+off-anchor) -- state the single-`branchDisposer` shape cannot hold. **Not a
+collapse-don't-fork violation** (distinct semantics, not a degraded copy -- `<each>`-vs-
+`<recycle>` precedent); reuses leaf mechanics (`mountFragment`/`createRoot`/`onCleanup`),
+only the swap orchestration is new. **Single-valued -- two subtrees observe two settled
+values, no concurrent version of one signal; §5 untouched, not multi-version. In-stream,
+no escalation** (mount-timing, not mid-propagation observation). No contract change
+(v0.4.3). **GAP 1 now fully shaped/commissionable.** Only ruling 3 (Suspense/GAP 2 vs
+errorBoundary §5.4.4) remains; tier-2 (SWR) could be split into PT-1b-i and commissioned
+independently of GAP 2.
+
+### [2026-07-03] PT-1b SPLIT into PT-1b-i (SWR) and PT-1b-ii (Suspense coordination)
+
+GAP 1 is fully shaped after rulings 1+2 (tier-1 recipe, tier-2 `wireDeferredSwap` distinct
+path) and has no dependency on GAP 2. GAP 2 (multi-resource Suspense coordination) still
+needs ruling 3 (vs `errorBoundary` §5.4.4 owner-scope). Splitting lets PT-1b-i commission
+now rather than blocking on a further read.
+
+**Note:** the roadmap (line 65) lists "Suspense / Transitions" as "concurrency
+primitives. Likely v1.0.0 territory (depends on async signals landing first)." Ruling 3
+must determine whether PT-1b-ii (multi-resource coordination over `errorBoundary`
+owner-scope) IS that roadmap item — in which case it defers to v1.0.0 — or a narrower
+non-concurrency construct belonging in v0.5.0. The refused multi-version/time-slicing
+family is likely what the roadmap line means; PT-1b-ii as scoped has no concurrency
+semantics. Do not assume; ruling 3 settles it.
