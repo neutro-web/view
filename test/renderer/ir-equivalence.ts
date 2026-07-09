@@ -14,6 +14,7 @@ import type {
   ClassListBinding,
   ComponentBinding,
   ConditionalBinding,
+  DeferredSwapBinding,
   EventBinding,
   ListBinding,
   PropBinding,
@@ -242,6 +243,33 @@ function bindingEqual(
         const fbRes = irStructurallyEqual(undefined, a.fallback, bs.fallback)
         if (!fbRes.equal) return { equal: false, reason: `${p}.fallback → ${fbRes.reason}` }
       }
+      break
+    }
+    case 'deferred-swap': {
+      // Mirrors the 'switch' case (same branches/fallback shape, Gate-P Ruling 2)
+      // plus a presence-only check on `pending` — both FEs must supply a `pending`
+      // thunk (required field, Gate-P Ruling 2 pass 3), but its *behavior* can't be
+      // compared structurally (it's an opaque closure), only that both sides have one.
+      const bds = b as DeferredSwapBinding
+      if (a.branches.length !== bds.branches.length)
+        return { equal: false, reason: `${p}.branches length mismatch` }
+      for (let j = 0; j < a.branches.length; j++) {
+        const bodyRes = irStructurallyEqual(
+          undefined,
+          (a.branches[j] as DeferredSwapBinding['branches'][number]).body,
+          (bds.branches[j] as DeferredSwapBinding['branches'][number]).body,
+        )
+        if (!bodyRes.equal)
+          return { equal: false, reason: `${p}.branches[${j}].body → ${bodyRes.reason}` }
+      }
+      if ((a.fallback === null) !== (bds.fallback === null))
+        return { equal: false, reason: `${p}.fallback nullity mismatch` }
+      if (a.fallback !== null && bds.fallback !== null) {
+        const fbRes = irStructurallyEqual(undefined, a.fallback, bds.fallback)
+        if (!fbRes.equal) return { equal: false, reason: `${p}.fallback → ${fbRes.reason}` }
+      }
+      if (typeof a.pending !== 'function' || typeof bds.pending !== 'function')
+        return { equal: false, reason: `${p}.pending: expected function on both sides` }
       break
     }
     case 'style-var': {

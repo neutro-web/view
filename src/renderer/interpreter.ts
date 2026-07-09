@@ -966,6 +966,23 @@ function wireDeferredSwap(binding: DeferredSwapBinding, anchorNode: Node, doc: D
     throw new Error('[nv/interpreter] DeferredSwapBinding: anchor has no parent')
   }
 
+  // Capture the owner BEFORE the effect() call — this is the owner the revealed
+  // subtree must live under, NOT currentOwner-during-the-effect's-own-compute.
+  // §6: preRunCleanup disposes ALL children of a node at the START of every one
+  // of ITS OWN recomputes, before the compute body runs. If the revealed
+  // subtree's createRoot were called from inside this effect's own compute (as
+  // an earlier version of this function did), the subtree would be a CHILD of
+  // this effect node — and would be torn down by preRunCleanup on every re-run,
+  // including a run that only flips `pending` true, before the isPending check
+  // ever gets a chance to decide to hold it. That defeats deferred-swap
+  // entirely (found via real-browser testing after the read-ordering fix,
+  // Gate-P Ruling 3 pass 6 — a structurally different bug from the dependency-
+  // collection one). Mounting under capturedOwner instead (same pattern as
+  // wireSlotOutlet/wireComponent's capturedParentOwner) makes the revealed
+  // subtree a SIBLING of this effect, not a child — its lifecycle is then
+  // governed solely by revealedDisposer, immune to this effect's own re-runs.
+  const capturedOwner = getOwner()
+
   let revealedDisposer: (() => void) | null = null
   let revealed: number | 'fallback' | 'none' = 'none'
 
@@ -1022,26 +1039,33 @@ function wireDeferredSwap(binding: DeferredSwapBinding, anchorNode: Node, doc: D
     let capturedDispose: (() => void) | null = null
     let newRoots: Node[] = []
     try {
-      createRoot((dispose) => {
-        capturedDispose = dispose
-        const { roots } = mountFragment(template as TemplateIR, staging, doc, null)
-        newRoots = roots
-        onCleanup(() => {
-          for (const n of newRoots) if (n.parentNode !== null) n.parentNode.removeChild(n)
+      runWithOwner(capturedOwner, () => {
+        createRoot((dispose) => {
+          capturedDispose = dispose
+          const { roots } = mountFragment(template as TemplateIR, staging, doc, null)
+          newRoots = roots
+          onCleanup(() => {
+            for (const n of newRoots) if (n.parentNode !== null) n.parentNode.removeChild(n)
+          })
+          return dispose
         })
-        return dispose
       })
     } catch (e) {
       if (capturedDispose !== null) (capturedDispose as () => void)()
       throw e // old subtree (revealedDisposer) untouched — SWR-safe on construction failure
     }
 
-    // Construction succeeded — atomic swap: dispose old, move new roots to anchor.
+    // Construction succeeded — atomic swap. Insert new BEFORE disposing old, so
+    // both are simultaneously attached for one synchronous instant rather than
+    // neither (dispose-then-insert would create a genuine, MutationObserver-
+    // visible gap where the anchor briefly has no revealed content — found via
+    // real-browser testing; the G1 "no frame where neither is attached"
+    // requirement needs insert-first ordering, not just disposal at all).
+    for (const n of newRoots) parent.insertBefore(n, anchorNode)
     if (revealedDisposer !== null) {
       revealedDisposer()
       revealedDisposer = null
     }
-    for (const n of newRoots) parent.insertBefore(n, anchorNode)
     revealedDisposer = capturedDispose
     revealed = winner
   })

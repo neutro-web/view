@@ -7,7 +7,9 @@ import type { EmitResult } from '../../src/compiler/emitted-mount.js'
 import type { DerivedAccessor, SignalAccessor } from '../../src/core/core.js'
 import type { Owner } from '../../src/core/core.js'
 import type { CompareResult } from '../../src/renderer/comparator.js'
+import type { MatchSentinel } from '../../src/renderer/html-tag.js'
 import type { TemplateIR } from '../../src/renderer/ir.js'
+import type { Resource } from '../../src/renderer/resource.js'
 
 interface NvBundle {
   signal: <T>(init: T) => SignalAccessor<T>
@@ -20,6 +22,15 @@ interface NvBundle {
   createHtmlTag: (
     doc: Document,
   ) => (strings: TemplateStringsArray, ...exprs: unknown[]) => TemplateIR
+  match: (
+    branches: readonly { when: () => boolean; body: () => TemplateIR }[],
+    fallback?: (() => TemplateIR) | null,
+    pending?: () => boolean,
+  ) => MatchSentinel
+  resource: <S, T>(
+    source: () => S,
+    fetcher: (s: S, info: { signal: AbortSignal }) => Promise<T>,
+  ) => Resource<T>
   structurallyEqual: (a: Node, b: Node) => CompareResult
   emitMount: (ir: TemplateIR) => EmitResult
   injectComponentStyle: (doc: Document, identityHash: string, cssText: string) => void
