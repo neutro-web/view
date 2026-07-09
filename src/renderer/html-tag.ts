@@ -33,6 +33,7 @@ import type {
   ClassListBinding,
   ComponentBinding,
   ConditionalBinding,
+  DeferredSwapBinding,
   EventBinding,
   HandlerExpr,
   ListBinding,
@@ -309,6 +310,12 @@ export interface MatchSentinel {
   readonly __nvMatch: true
   readonly branches: readonly { when: () => boolean; body: () => TemplateIR }[]
   readonly fallback: (() => TemplateIR) | null
+  /**
+   * Optional deferred-swap gate (Gate-P Ruling 1). Present ⇒ this sentinel
+   * produces a DeferredSwapBinding instead of a SwitchBinding; absent ⇒
+   * unchanged SwitchBinding path.
+   */
+  readonly pending?: () => boolean
 }
 
 function isMatchSentinel(v: unknown): v is MatchSentinel {
@@ -320,7 +327,10 @@ function isMatchSentinel(v: unknown): v is MatchSentinel {
     (v as MatchSentinel).branches.every(
       (b) => typeof b.when === 'function' && typeof b.body === 'function',
     ) &&
-    ((v as MatchSentinel).fallback === null || typeof (v as MatchSentinel).fallback === 'function')
+    ((v as MatchSentinel).fallback === null ||
+      typeof (v as MatchSentinel).fallback === 'function') &&
+    ((v as MatchSentinel).pending === undefined ||
+      typeof (v as MatchSentinel).pending === 'function')
   )
 }
 
@@ -330,18 +340,20 @@ function isMatchSentinel(v: unknown): v is MatchSentinel {
  * for reactive N-branch first-match-wins control flow. Both `when` and `body` MUST be
  * thunks — a raw value is evaluated before `html()` ever sees it and can't be detected
  * as reactive, same reason `iff()`'s branches are thunks. Mirrors `.nv`'s `<switch>`/
- * `<match>` element form; both produce `SwitchBinding`.
+ * `<match>` element form; both produce `SwitchBinding` — unless `pending` is supplied
+ * (Gate-P Ruling 1), in which case both produce `DeferredSwapBinding` instead.
  */
 export function match(
   branches: readonly { when: () => boolean; body: () => TemplateIR }[],
   fallback?: (() => TemplateIR) | null,
+  pending?: () => boolean,
 ): MatchSentinel {
   // `branches: []` is accepted here (degenerate but valid — reduces to always-fallback,
   // or to always-nothing if fallback is also absent). This is intentionally asymmetric
   // with .nv's <switch> element, which throws '<switch> requires at least one <match>
   // child' (src/renderer/nv-parser.ts) — different front-ends, different authoring
   // affordances; not an oversight.
-  return { __nvMatch: true, branches, fallback: fallback ?? null }
+  return { __nvMatch: true, branches, fallback: fallback ?? null, pending }
 }
 
 // ── Class name builder ────────────────────────────────────────────────────────
@@ -424,6 +436,7 @@ function assertAllBindingKindsHandled(kind: Binding['kind']): void {
     case 'conditional': // iff() sentinel — walkNodeList detection, wired in html()/buildSlotContentIR
     case 'recycled-list': // recycle() sentinel — buildRecycledListBinding, wired in html()/buildSlotContentIR
     case 'switch': // match() sentinel — walkNodeList detection, wired in html()/buildSlotContentIR
+    case 'deferred-swap': // match() sentinel with `pending` option — see buildSwitchBinding
     case 'component': // data-nv-component element — makeUnresolvedComponentBinding
       break
     case 'child':
@@ -471,6 +484,7 @@ type HandledBindingKinds =
   | 'conditional'
   | 'recycled-list'
   | 'switch'
+  | 'deferred-swap'
   | 'component'
   | 'child'
   | 'style-var'
@@ -1118,20 +1132,44 @@ function buildRecycledListBinding(
 }
 
 /**
- * Build one SwitchBinding from a walked match() sentinel. Shared by both the
- * top-level html() dispatch and the slot-content builder (mirrors the
- * conditional/recycled-list wiring pattern above). Resolves `when`/`body`
- * thunks HERE, eagerly — same convention buildConditionalBinding uses for
- * ConditionalBinding.consequent/alternate. SwitchBinding.branches[].body and
+ * Build one SwitchBinding OR DeferredSwapBinding from a walked match() sentinel.
+ * Shared by both the top-level html() dispatch and the slot-content builder
+ * (mirrors the conditional/recycled-list wiring pattern above). Resolves
+ * `when`/`body` thunks HERE, eagerly — same convention buildConditionalBinding
+ * uses for ConditionalBinding.consequent/alternate. branches[].body and
  * .fallback are already-resolved TemplateIR, not thunks.
+ *
+ * Forks only on `sentinel.pending` presence (Gate-P Ruling 1): absent ⇒
+ * SwitchBinding (today's path, unchanged); present ⇒ DeferredSwapBinding.
+ * Branch/fallback extraction is shared — this file is not G0-protected (only
+ * wireConditional/wireSwitch in interpreter.ts are), so DRYing this part is a
+ * legitimate cleanup, not a forbidden mutation.
  */
-function buildSwitchBinding(pathIndex: number, sentinel: MatchSentinel): SwitchBinding {
-  const { branches, fallback } = sentinel
+function buildSwitchBinding(
+  pathIndex: number,
+  sentinel: MatchSentinel,
+): SwitchBinding | DeferredSwapBinding {
+  const { branches, fallback, pending } = sentinel
+  const resolvedBranches = branches.map((b) => ({ when: b.when, body: b.body() }))
+  const resolvedFallback = fallback !== null ? fallback() : null
+
+  if (pending !== undefined) {
+    const binding = {
+      kind: 'deferred-swap',
+      pathIndex,
+      pending,
+      branches: resolvedBranches,
+      fallback: resolvedFallback,
+    } satisfies DeferredSwapBinding
+    assertAllBindingKindsHandled(binding.kind)
+    return binding
+  }
+
   const binding = {
     kind: 'switch',
     pathIndex,
-    branches: branches.map((b) => ({ when: b.when, body: b.body() })),
-    fallback: fallback !== null ? fallback() : null,
+    branches: resolvedBranches,
+    fallback: resolvedFallback,
   } satisfies SwitchBinding
   assertAllBindingKindsHandled(binding.kind)
   return binding

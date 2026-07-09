@@ -59,6 +59,7 @@ import type {
   ClassListEntry,
   ComponentBinding,
   ConditionalBinding,
+  DeferredSwapBinding,
   EventBinding,
   ListBinding,
   NodePath,
@@ -146,6 +147,10 @@ function wireBinding(
     }
     case 'switch': {
       wireSwitch(binding, targetNode, doc)
+      break
+    }
+    case 'deferred-swap': {
+      wireDeferredSwap(binding, targetNode, doc)
       break
     }
     case 'list': {
@@ -938,6 +943,114 @@ function wireSwitch(binding: SwitchBinding, anchorNode: Node, doc: Document): vo
         branchDisposer = null
       }
     })
+  })
+}
+
+// ── DeferredSwapBinding ───────────────────────────────────────────────────────
+
+/**
+ * Structural switch/match form, deferred: identical branch-selection semantics
+ * to wireSwitch (first-match-wins, ordered), but the swap to a newly-winning
+ * branch is held while `binding.pending()` is true — the currently revealed
+ * branch stays mounted and live. See docs/gates/pt1b-i-deferred-swap.md
+ * (Ruling 3) for the full design rationale.
+ *
+ * Intentionally NOT sharing code with wireSwitch/wireConditional — the
+ * winner-selection loop below is independently duplicated, matching
+ * wireSwitch's shape but sharing no implementation with it (G0 constraint;
+ * see Gate-P Ruling 2's correction note).
+ */
+function wireDeferredSwap(binding: DeferredSwapBinding, anchorNode: Node, doc: Document): void {
+  const parent = anchorNode.parentNode
+  if (parent === null) {
+    throw new Error('[nv/interpreter] DeferredSwapBinding: anchor has no parent')
+  }
+
+  let revealedDisposer: (() => void) | null = null
+  let revealed: number | 'fallback' | 'none' = 'none'
+
+  effect(() => {
+    // INVARIANT: every reactive read (pending() AND all when()s up to the
+    // winner) happens before any early return, so the dependency set is
+    // IDENTICAL whether this run is pending or not. nv does dynamic per-run
+    // dependency collection (§5.2, core.ts:510-534 — old sources reset,
+    // reconciled against what was actually read this run); a signal not read
+    // during a run is unsubscribed. Gating on pending() BEFORE reading when()
+    // (the original draft) would unsubscribe from every when() on a pending
+    // run, and the only thing left to trigger a re-run would be pending()
+    // itself flipping back — silently dropping any when() change that
+    // happens while pending, and making correctness depend on `loading()`
+    // always being the thing driving `pending` and always toggling on every
+    // settle. Read everything first; gate the SWAP, not the subscription.
+    const isPending = binding.pending()
+
+    let winner: number | 'fallback' | 'none' = 'none'
+    let template: TemplateIR | null = null
+    for (let i = 0; i < binding.branches.length; i++) {
+      // biome-ignore lint/style/noNonNullAssertion: loop bound
+      const b = binding.branches[i]!
+      if (b.when()) {
+        winner = i
+        template = b.body
+        break
+      }
+    }
+    if (template === null && binding.fallback !== null) {
+      winner = 'fallback'
+      template = binding.fallback
+    }
+
+    if (isPending) return // hold the swap — deps are already collected above
+
+    if (winner === revealed) return // already showing this branch — no-op
+
+    if (template === null) {
+      // Winner is 'none' (no branch, no fallback): drop whatever's revealed, show nothing.
+      if (revealedDisposer !== null) {
+        revealedDisposer()
+        revealedDisposer = null
+      }
+      revealed = winner
+      return
+    }
+
+    // Build off-anchor. Capture `dispose` BEFORE the throwable work (mountFragment),
+    // so a throw mid-construction still lets us tear down the partial root — it is
+    // already a child of the current owner (createRoot attaches before `fn` runs)
+    // and would otherwise leak until this whole binding's owner tears down.
+    const staging = doc.createDocumentFragment()
+    let capturedDispose: (() => void) | null = null
+    let newRoots: Node[] = []
+    try {
+      createRoot((dispose) => {
+        capturedDispose = dispose
+        const { roots } = mountFragment(template as TemplateIR, staging, doc, null)
+        newRoots = roots
+        onCleanup(() => {
+          for (const n of newRoots) if (n.parentNode !== null) n.parentNode.removeChild(n)
+        })
+        return dispose
+      })
+    } catch (e) {
+      if (capturedDispose !== null) (capturedDispose as () => void)()
+      throw e // old subtree (revealedDisposer) untouched — SWR-safe on construction failure
+    }
+
+    // Construction succeeded — atomic swap: dispose old, move new roots to anchor.
+    if (revealedDisposer !== null) {
+      revealedDisposer()
+      revealedDisposer = null
+    }
+    for (const n of newRoots) parent.insertBefore(n, anchorNode)
+    revealedDisposer = capturedDispose
+    revealed = winner
+  })
+
+  onCleanup(() => {
+    if (revealedDisposer !== null) {
+      revealedDisposer()
+      revealedDisposer = null
+    }
   })
 }
 

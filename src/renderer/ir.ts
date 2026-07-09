@@ -173,6 +173,21 @@ export type SwitchBinding = BaseBinding & {
   fallback: TemplateIR | null
 }
 
+/**
+ * Structural switch/match form, deferred: branch selection identical to
+ * SwitchBinding (first-match-wins, ordered), but the swap to a new branch is
+ * held while `pending()` is true — the currently revealed branch stays
+ * mounted and live. See wireDeferredSwap (interpreter.ts) for the wire-time
+ * discipline this shape exists to support.
+ */
+export type DeferredSwapBinding = BaseBinding & {
+  kind: 'deferred-swap'
+  pending: ReactiveExpr<boolean>
+  /** Ordered branches — first truthy `when()` wins. Same semantics as SwitchBinding. */
+  branches: readonly { when: ReactiveExpr<boolean>; body: TemplateIR }[]
+  fallback: TemplateIR | null
+}
+
 // ── Designed, now in scope ────────────────────────────────────────────────────
 
 /**
@@ -332,6 +347,7 @@ export type Binding =
   | ListBinding
   | RecycledListBinding
   | SwitchBinding
+  | DeferredSwapBinding
   | SyncBinding
   | ComponentBinding
   | SlotOutletBinding

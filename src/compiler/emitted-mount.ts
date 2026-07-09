@@ -811,6 +811,12 @@ function emitSetup(
         )
       }
 
+      case 'deferred-swap': {
+        throw new Error(
+          '[nv/emitted-mount] DeferredSwapBinding not yet implemented in compiler back-end',
+        )
+      }
+
       default: {
         const kind = (binding as Binding).kind
         throw new Error(`[nv/emit] Binding kind '${kind}' is not implemented.`)
