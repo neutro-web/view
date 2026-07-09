@@ -403,6 +403,48 @@ any effect with an early-return gate.
 
 ---
 
+## Execution record — Tasks 1-6 landed
+
+- Task 1+2 (IR, exhaustiveness gate, interpreter wire path, tagged-template FE)
+  — landed `a1cd742`, both front-ends in one commit as required.
+- Task 3 (`.nv` `<switch pending=>` parser surface) — landed `26b9832`.
+- Task 4 (tier-1 SWR recipe doc + test) — landed `1e88f32`. Found and fixed a
+  real error in the plan's own illustrative code: `r.loading() && r() ===
+  undefined` does NOT give free node-identity preservation, because
+  `wireConditional` has no same-winner no-op check (unlike `wireDeferredSwap`)
+  — reading `r.loading()` inside the condition makes it a tracked dependency
+  and rebuilds the view on every refetch. Corrected the recipe to gate on
+  `r()` alone; verified with a failing-then-passing anti-pattern regression
+  test, not asserted from theory.
+- Task 5 (real-browser gates) — landed `717ce43`. Surfaced two genuine,
+  previously-undetected bugs in the already-landed `wireDeferredSwap` (see
+  Gate-P doc's "Post-approval implementation findings", Findings N and O):
+  an ownership bug where the revealed subtree was a child of its own
+  triggering effect (torn down by `preRunCleanup` on any re-run, defeating
+  the construct entirely — fixed via `capturedOwner`/`runWithOwner`, the
+  same pattern already used 3x elsewhere in `interpreter.ts`), and a swap-
+  ordering gap (dispose-before-insert created a real, `MutationObserver`-
+  visible "neither attached" window — fixed by reordering to insert-then-
+  dispose). Also found and corrected an over-strict G1 requirement ("no frame
+  has both") that is structurally unachievable for multi-root swaps without
+  a wrapper element this codebase deliberately doesn't use, and is invisible
+  to any paint regardless. Also found a general nv-scheduler property
+  (unbatched independent signal writes can produce transiently-inconsistent
+  recomputes) — correctly identified as out-of-scope (would need a
+  `src/core/` `batch()` API, G0-protected) rather than worked around inside
+  `wireDeferredSwap`.
+
+**Pattern worth naming:** this is the third distinct correctness bug this
+specific algorithm survived past a review layer that should have caught it —
+CC's own four adversarial passes missed the dependency-collection bug;
+Architect's Gate-P review (which DID catch that one) didn't check the
+ownership question, since it was verifying a different property
+(`createRoot` attaches before `fn` — true, but orthogonal to "does the
+revealed subtree survive the effect's OWN re-run"). All three bugs were only
+caught by a layer that actually *ran* the code under the specific condition
+that exposed them (fault-injection test, then real-browser test). Static
+review — however many passes — did not substitute for execution here.
+
 ## Definition of done (unchanged from commission, restated for tracking)
 
 Tier-1 recipe documented + gated; tier-2 `wireDeferredSwap` landed in both

@@ -425,4 +425,96 @@ pass 4 finding); Ruling 3's incorrect "quiescence" justification for the early
 return was retracted and replaced. Architect approved Rulings 1, 2, 4, and
 Ruling 3's throw-safety/rethrow disposition as originally ruled; Ruling 3's
 dependency-collection mechanism required the fix above before approval.
-Status: **fix applied, re-submitted for Architect confirmation.**
+Status: **Architect re-reviewed and approved** (verified the fix at
+`interpreter.ts` line-by-line, independently confirmed the `when()`
+short-circuit-on-`break` is benign by the same reasoning `wireSwitch` already
+relies on, and confirmed `createRoot` attaches before `fn` runs). Landed at
+`a1cd742` (Task 1+2).
+
+---
+
+## Post-approval implementation findings (Task 5, real-browser testing)
+
+Two further load-bearing bugs surfaced during Task 5's real-browser test
+authoring — after Gate-P approval, after landing, caught by tests actually
+exercising the construct rather than by review. Documented here because they
+change what Ruling 3's algorithm actually does; anyone reading this gate doc
+to understand `wireDeferredSwap` needs the corrected version, not just the
+approved-then-superseded one.
+
+### Finding N — ownership bug: revealed subtree was a child of its own triggering effect
+
+**Not caught by:** Gate-P's twelve passes, Architect's dependency-collection
+review (which verified `createRoot` attaches before `fn` runs — true, but
+answers a different question), or Task 1's own implementer/verifier.
+**Caught by:** Task 5's item-1 real-browser test failing deterministically
+across all three browsers, then independently re-verified against
+`core.ts:502-503,609-612` directly before accepting the test's diagnosis.
+
+The revealed subtree's `createRoot(...)` call ran from inside
+`wireDeferredSwap`'s own effect compute — `currentOwner` at that point *is*
+the effect node, so the revealed subtree becomes a **child** of it.
+`preRunCleanup(node)` (`core.ts:609-612`, called at the START of every
+recompute, before the compute body runs at all) disposes **all children** of
+the recomputing node unconditionally. So the moment the effect reran for
+*any* reason — including a run that only flips `pending` to `true` — the
+currently-revealed subtree was torn down by `preRunCleanup` before the
+`isPending` check ever got a chance to decide to hold it. This defeated
+deferred-swap's entire purpose: the held subtree never actually survived a
+pending transition.
+
+`wireConditional`/`wireSwitch` have the identical structural shape (`createRoot`
+called from inside their own effect) but are unaffected, because they *always*
+intend to dispose-and-rebuild on every re-run anyway — `preRunCleanup`'s
+automatic disposal coincides with their intended behavior rather than
+fighting it. `wireDeferredSwap` is the first construct in this file whose
+correctness depends on a revealed subtree surviving its *own* effect's re-run,
+which is exactly the case this owner shape cannot support.
+
+**Fix:** capture the owner *before* the `effect(() => {...})` call
+(`const capturedOwner = getOwner()`), and mount the revealed subtree via
+`runWithOwner(capturedOwner, () => createRoot(...))` — the same
+`capturedParentOwner`/`runWithOwner` pattern already used three times
+elsewhere in `interpreter.ts` (`wireList`, `wireRecycledList`,
+`wireSlotOutlet`) for exactly this class of problem: mounting something that
+must outlive the effect that triggers its (re)creation. The revealed subtree
+is now a *sibling* of the effect, not a child — immune to `preRunCleanup`,
+governed solely by `revealedDisposer`.
+
+### Finding O — swap ordering: dispose-then-insert created a real "neither attached" window
+
+**Caught by:** Task 5's item-2 `MutationObserver` test.
+
+The "atomic swap" step disposed the old subtree *then* inserted the new
+roots. For a synchronous script this is invisible to the user (nothing paints
+mid-script) — but it is a real, `MutationObserver`-visible gap: no branch is
+attached to the anchor between the dispose call and the first insert call.
+**Fixed:** reordered to insert-new-then-dispose-old, so both are briefly
+attached simultaneously (harmless — never painted, never observable to a
+user) rather than neither being attached (the one gap that actually matters).
+
+**Correction to the original G1 requirement:** "no frame has both or neither"
+(the commission's literal G1 wording) is not achievable for multi-root swaps
+without adding a wrapper element around every branch — which this codebase
+deliberately does not do (`mountFragment`'s multi-root support is a first-
+class feature, not a limitation to work around). The achievable and actually
+meaningful guarantee is **no frame with neither** (a real visible-gap risk);
+transient "both" is fine because it is structurally invisible to any paint.
+Task 5's test was corrected to assert only the achievable, meaningful
+invariant.
+
+### Non-finding — a general scheduler property, correctly left unfixed
+
+While debugging Finding O's test, a **third**, unrelated behavior surfaced:
+two independently-scheduled signal writes — one synchronous, one from a later
+promise continuation — are not auto-batched by nv's scheduler into a single
+consistent recompute; an effect depending on both can see two separate,
+transiently-inconsistent recomputes instead of one. Verified with a minimal
+repro using two plain signals and a raw promise, no `resource()` or
+`wireDeferredSwap` involved — **this is a general core-scheduler property**,
+not specific to this construct. A real fix would need a `batch()`-style API
+in `src/core/`, which is G0-protected and out of scope for this commission.
+Task 5's item 7b test was restructured to test its actual intent (`pending`
+need not correlate with `loading()`'s own transitions) without depending on
+this separate, deeper scheduling question. Worth a future roadmap item; not
+blocking here.
