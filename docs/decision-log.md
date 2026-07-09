@@ -1470,3 +1470,43 @@ blocking here.
 **Contract impact:** none (v0.4.3 reactive-core contract unchanged; renderer-
 layer only). **Result:** PT-1b-i CLOSED. `src/core/` diff empty across the
 whole arc. Full regression: 844/844 unit, 405/405 real-browser (x3).
+
+### [2026-07-09] Disposal-triggered write-back is not re-scheduled -- ESCALATED as a §6/§8 contract question (design-open); repro commissioned
+
+**Surfaced by:** PT-1b-i post-landing adversarial review (`43e0e4a`), filed in
+`implementation-state.md` as a `batch()`/scheduler-hardening candidate. **Re-classified on
+architect read: this is contract-level, not an implementation TODO.**
+
+**Mechanism (verified at source, `43e0e4a`):** `propagate()` re-enqueues an observer only
+when `obs.state !== DIRTY` (core.ts:364). A recomputing effect's state is reset to CLEAN
+only after `compute()` returns (core.ts:542/550), so it is DIRTY throughout its own compute
+-- including synchronous disposal it triggers (a branch's `onCleanup` firing as the effect
+disposes an old subtree). A write from that disposal to a signal **the same effect already
+read this run** finds the observer DIRTY, is not enqueued, and gets **no fresh recompute**.
+The write is dropped for scheduling; the effect's view stays stale.
+
+**Why escalated:** per the escalation rule, a question is contract-level if it *determines
+what a computation observes mid-propagation*, even when it presents as a scheduler detail.
+It also bears on locked semantics: `derived` purity forbids writes from `compute`; effect
+writes are permitted as a capped last resort; `sync` is the one sanctioned reactive→signal
+write. This is a **silent-drop hole in the sanctioned path** when the writer sits inside the
+reader's own compute.
+
+**Not a `batch()` item.** `batch()` (core.ts:1236, contracted) coalesces writes *before* a
+flush; it cannot help a write issued *inside* a compute whose observer is already DIRTY. The
+original filing pointed the fix at the wrong subsystem. (The companion "writes not
+auto-batched" hazard is separately **WITHDRAWN** -- `batch()` exists, and cross-turn flushes
+are specified behavior.)
+
+**Not new, blocks nothing.** `wireConditional`/`wireSwitch` have carried the identical
+exposure since inception (they dispose branches mid-effect via arbitrary user `onCleanup`);
+`wireDeferredSwap` inherits it. No regression. PT-1b-i stands as landed.
+
+**The question to rule (design-open, do NOT decide in-stream):** is a disposal-triggered
+write-back to a signal the disposing effect already read (a) **supported** -- the scheduler
+must re-run the effect; (b) **forbidden** -- explicitly barred, with a loud error, as
+`derived`-purity is; or (c) **undefined** -- documented as unsupported authoring, no engine
+change? Rule only against a confirmed repro (below), not from reasoning.
+
+**Status:** OPEN, design. Contract unchanged (v0.4.3) pending the ruling. Reachability
+unproven -- repro commissioned.

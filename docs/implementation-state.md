@@ -128,29 +128,22 @@ Differential conformance corpus TC-01..TC-10 (both back-ends), real-browser Play
   at codegen time. PT-1b-i (2026-07-08) scoped this out deliberately, same precedent as
   `RecycledListBinding`'s own bring-up lag; not a silent gap. See
   `docs/gates/pt1b-i-deferred-swap.md`.
-- **Core scheduler: independent signal writes are not auto-batched (noted, not a bug to
-  fix here).** Found during PT-1b-i Task 5 (2026-07-08): a synchronous `.set()` plus a
-  later promise-continuation `.set()` to a DIFFERENT signal can each independently schedule
-  their own flush, producing two separate, transiently-inconsistent recomputes of an effect
-  that depends on both, instead of one consistent one. General core-scheduler property
-  (reproduced with two plain signals, no `resource()`/`wireDeferredSwap` involved) — a real
-  fix needs a `batch()`-style API in `src/core/`. Not built; no commission currently owns it.
-- **Core scheduler: a mid-effect disposal-triggered write can be silently dropped for
-  re-scheduling purposes (plausible, unverified, noted).** Found during PT-1b-i's post-
-  landing adversarial review (2026-07-09): `propagate()` only re-enqueues an observer when
-  `obs.state !== DIRTY`, and a currently-recomputing effect's `state` stays `DIRTY` for the
-  whole duration of its own `compute()` call — including any synchronous disposal work it
-  triggers (e.g. a branch's own `onCleanup` running as part of that effect disposing an old
-  subtree). If that disposal writes a signal the SAME effect already read earlier in the
-  same run, the write doesn't get a fresh recompute scheduled. General scheduler
-  characteristic, not introduced by any one construct — `wireConditional`/`wireSwitch` share
-  the identical exposure (they too dispose branches mid-effect via arbitrary user
-  `onCleanup`) and have had it since they were built. Requires a fairly exotic self-
-  referential authoring pattern (a branch's teardown writing back to the signal controlling
-  its own visibility) to trigger; no concrete repro exists yet, no test proves or disproves
-  it. Candidate for the same future `batch()`/scheduler-hardening commission as the item
-  above. See `docs/gates/pt1b-i-deferred-swap.md`, "Post-landing adversarial review",
-  Finding P.
+- **Core scheduler: cross-turn writes flush separately (NOT a hazard — withdrawn
+  2026-07-09).** A synchronous `.set()` and a promise-continuation `.set()` schedule two
+  flushes. This is specified behavior, not a gap: effects flush at the end of the *current
+  synchronous turn* (contract §"Reads/writes"), and a `.then` continuation is a different
+  turn. `batch(fn)` exists (`core.ts:1236`) and is contracted, but is scoped to a
+  synchronous body and cannot span an await/.then boundary — it is not the remedy and was
+  never missing. Each flush is individually glitch-free. Consumers needing atomicity issue
+  both writes in one continuation (as `resource` does: `data.set` then `loading.set`, one
+  turn, one flush). Original filing (2026-07-08) asserted "`batch()` … not built" — false.
+- **Disposal-triggered write-back to a signal the disposing effect already read — silently
+  not re-scheduled.** `propagate()` skips re-enqueue when the observer is already DIRTY
+  (`core.ts:364`), and a recomputing effect stays DIRTY for its whole `compute()` (state
+  reset at `core.ts:542/550`). Shared by `wireConditional`/`wireSwitch`/`wireDeferredSwap`
+  since inception; not introduced by PT-1b-i. **Escalated as a contract question
+  [2026-07-09]** — see decision log. NOT a `batch()` item (batch coalesces before a flush;
+  this write occurs inside a compute). Repro commissioned.
 - **CP-2a — CLOSED 2026-06-26 (`ef86bd7` + `4ef0205`).** Benchmark keyed app proven in pure `.nv`,
   10 gates green both engines, 8 ops real-browser, keyed-move confirmed. 4 `src/` bugs surfaced +
   fixed (emitter thunk-slot, parser `propsAccessors` ×2, interpreter whitespace-root). CP-2b/2c
